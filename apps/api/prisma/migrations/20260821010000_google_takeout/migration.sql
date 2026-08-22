@@ -1,0 +1,6 @@
+-- Phase 4: Takeout is opt-in per source; generic JSON remains opaque.
+CREATE TYPE "PhotoSourceType" AS ENUM ('GENERIC','GOOGLE_TAKEOUT');
+CREATE TYPE "TakeoutMatchStatus" AS ENUM ('NOT_APPLICABLE','TAKEOUT_MATCHED','TAKEOUT_NOT_FOUND','TAKEOUT_AMBIGUOUS');
+ALTER TYPE "SyncIssueCode" ADD VALUE 'AMBIGUOUS_TAKEOUT_MATCH';
+ALTER TABLE "PhotoSource" ADD COLUMN "type" "PhotoSourceType" NOT NULL DEFAULT 'GENERIC';
+ALTER TABLE "Photo" ADD COLUMN "takeoutMatchStatus" "TakeoutMatchStatus" NOT NULL DEFAULT 'NOT_APPLICABLE', ADD COLUMN "takeoutMatchReason" TEXT, ADD COLUMN "gpsLatitude" DOUBLE PRECISION, ADD COLUMN "gpsLongitude" DOUBLE PRECISION;
