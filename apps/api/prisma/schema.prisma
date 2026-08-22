@@ -1,0 +1,205 @@
+generator client {
+  provider = "prisma-client-js"
+}
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+enum OAuthConnectionStatus {
+ ACTIVE
+ REVOKED
+ REVOCATION_PENDING
+ ERROR
+}
+enum PhotoSourceStatus {
+ ACTIVE
+ PAUSED
+ DISCONNECTED
+}
+enum PhotoSourceType {
+  GENERIC
+  GOOGLE_TAKEOUT
+}
+enum TakeoutMatchStatus {
+  NOT_APPLICABLE
+  TAKEOUT_MATCHED
+  TAKEOUT_NOT_FOUND
+  TAKEOUT_AMBIGUOUS
+}
+enum SyncRunStatus {
+ QUEUED
+ RUNNING
+ SUCCEEDED
+ PARTIAL
+ FAILED
+ CANCELLED
+}
+enum SyncPhase {
+  SCANNING
+  PROCESSING
+}
+enum SyncMode {
+ INITIAL
+ INCREMENTAL
+ MANUAL
+}
+enum PhotoStatus {
+ ACTIVE
+ MISSING
+ UNSUPPORTED
+ ACCESS_DENIED
+}
+enum DatePrecision {
+ DAY
+ MONTH
+ YEAR
+ UNKNOWN
+}
+enum DateSource {
+ EXIF
+ DRIVE_IMAGE_METADATA
+ TAKEOUT
+ FOLDER
+ NONE
+}
+enum SyncIssueCode {
+ RATE_LIMITED
+ DRIVE_UNAVAILABLE
+ ACCESS_DENIED
+  INVALID_TAKEOUT_JSON
+  AMBIGUOUS_TAKEOUT_MATCH
+ UNREADABLE_METADATA
+ UNSUPPORTED_MEDIA
+ LIMIT_REACHED
+ UNKNOWN
+}
+enum SyncIssueSeverity {
+ INFO
+ WARNING
+ ERROR
+}
+model User {
+ id String @id @default(cuid())
+ googleSubject String? @unique
+ email String @unique
+ displayName String
+ createdAt DateTime @default(now())
+ updatedAt DateTime @updatedAt
+ connections OAuthConnection[]
+ sources PhotoSource[]
+ photos Photo[]
+}
+model OAuthConnection {
+ id String @id @default(cuid())
+ userId String
+ provider String
+ googleAccountId String
+ grantedScopes String[]
+ refreshTokenCiphertext String?
+ status OAuthConnectionStatus @default(ACTIVE)
+ createdAt DateTime @default(now())
+ updatedAt DateTime @updatedAt
+ user User @relation(fields:[userId],references:[id],onDelete:Cascade)
+ sources PhotoSource[]
+ @@unique([userId,provider,googleAccountId])
+}
+model OAuthState {
+ id String @id
+ purpose String
+ userId String?
+ codeVerifier String
+ expiresAt DateTime
+ createdAt DateTime @default(now())
+ @@index([expiresAt])
+}
+model PhotoSource {
+ id String @id @default(cuid())
+ userId String
+ oauthConnectionId String
+ driveFolderId String
+  name String
+  type PhotoSourceType @default(GENERIC)
+ status PhotoSourceStatus @default(ACTIVE)
+ lastCursor String?
+ createdAt DateTime @default(now())
+ updatedAt DateTime @updatedAt
+ user User @relation(fields:[userId],references:[id],onDelete:Cascade)
+ connection OAuthConnection @relation(fields:[oauthConnectionId],references:[id])
+ runs SyncRun[]
+ photos Photo[]
+ @@unique([userId,driveFolderId])
+ @@index([userId,status])
+}
+model SyncRun {
+ id String @id @default(cuid())
+ photoSourceId String
+ status SyncRunStatus @default(QUEUED)
+ mode SyncMode @default(MANUAL)
+ cursorStartedAt String?
+  cursorCompletedAt String?
+  checkpoint Json?
+  phase SyncPhase @default(SCANNING)
+  foundCount Int @default(0)
+  processedCount Int @default(0)
+  scannedCount Int @default(0)
+ indexedCount Int @default(0)
+ issueCount Int @default(0)
+ createdAt DateTime @default(now())
+ updatedAt DateTime @updatedAt
+ source PhotoSource @relation(fields:[photoSourceId],references:[id],onDelete:Cascade)
+ issues SyncIssue[]
+ @@index([photoSourceId,createdAt(sort:Desc)])
+ @@index([status,createdAt])
+}
+model SyncIssue {
+ id String @id @default(cuid())
+ syncRunId String
+ driveFileId String?
+ code SyncIssueCode
+ severity SyncIssueSeverity
+ details String
+ createdAt DateTime @default(now())
+ run SyncRun @relation(fields:[syncRunId],references:[id],onDelete:Cascade)
+ @@index([syncRunId,severity])
+ @@index([driveFileId])
+}
+model Photo {
+ id String @id @default(cuid())
+ userId String
+ driveFileId String
+ sourceId String
+ fileName String
+ mimeType String
+  status PhotoStatus @default(ACTIVE)
+  lastSeenSyncRunId String?
+  imageMetadata Json?
+  takeoutMatchStatus TakeoutMatchStatus @default(NOT_APPLICABLE)
+  takeoutMatchReason String?
+  gpsLatitude Float?
+  gpsLongitude Float?
+ detectedDate DateTime? @db.Date
+ detectedPrecision DatePrecision @default(UNKNOWN)
+ detectedSource DateSource @default(NONE)
+ effectiveDateValue DateTime? @db.Date
+ effectiveDatePrecision DatePrecision @default(UNKNOWN)
+ createdAt DateTime @default(now())
+ updatedAt DateTime @updatedAt
+ user User @relation(fields:[userId],references:[id],onDelete:Cascade)
+ source PhotoSource @relation(fields:[sourceId],references:[id])
+ override ManualDateOverride?
+ @@unique([userId,driveFileId])
+ @@index([userId,status])
+  @@index([sourceId,status])
+  @@index([sourceId,lastSeenSyncRunId])
+ @@index([userId,effectiveDateValue,effectiveDatePrecision])
+}
+model ManualDateOverride {
+ id String @id @default(cuid())
+ photoId String @unique
+ dateValue DateTime @db.Date
+ precision DatePrecision
+ reason String?
+ createdAt DateTime @default(now())
+ updatedAt DateTime @updatedAt
+ photo Photo @relation(fields:[photoId],references:[id],onDelete:Cascade)
+}

@@ -1,0 +1,21 @@
+{
+  "name": "linea-de-vida",
+  "private": true,
+  "packageManager": "pnpm@9.15.4",
+  "scripts": {
+    "dev": "node scripts/with-local-env.cjs pnpm --parallel --filter @linea-de-vida/web --filter @linea-de-vida/api dev",
+    "dev:services": "pnpm --parallel --filter @linea-de-vida/web --filter @linea-de-vida/api dev",
+    "dev:worker": "node scripts/with-local-env.cjs pnpm --filter @linea-de-vida/api worker",
+    "dev:worker:service": "pnpm --filter @linea-de-vida/api worker",
+    "build": "pnpm -r build",
+    "lint": "pnpm -r lint",
+    "typecheck": "pnpm -r typecheck",
+    "test": "pnpm -r test",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
+  },
+  "devDependencies": {
+    "prettier": "^3.5.3",
+    "typescript": "^5.7.3"
+  }
+}
