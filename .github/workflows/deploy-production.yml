@@ -88,6 +88,38 @@ jobs:
           cd "$deploy_path"
 
           previous_ref=$(git rev-parse HEAD)
+          collect_health_diagnostics() {
+            local container_ids container_id service name state health
+            declare -A logged_services=()
+
+            echo 'Health verification diagnostics: Compose service and container status.' >&2
+            docker compose -f "$compose_file" ps --all --format '{{.Service}}\t{{.Name}}\t{{.State}}\t{{.Health}}' >&2 || true
+
+            container_ids=$(docker compose -f "$compose_file" ps --all --quiet 2>/dev/null) || container_ids=''
+            for container_id in $container_ids; do
+              read -r service name state health < <(
+                docker inspect --format '{{index .Config.Labels "com.docker.compose.service"}} {{.Name}} {{.State.Status}} {{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$container_id" 2>/dev/null || true
+              )
+              [[ -n "$name" ]] || name="$container_id"
+              [[ -n "$state" ]] || state='unknown'
+              [[ -n "$health" ]] || health='unknown'
+              echo "Container name=$name state=$state health=$health service=${service:-unknown}" >&2
+              if [[ "$health" == unhealthy || "$health" == none || "$state" != running ]]; then
+                [[ -n "$service" ]] && logged_services["$service"]=1
+              fi
+            done
+
+            for service in "${!logged_services[@]}"; do
+              echo "Bounded logs for unhealthy or failed service: $service" >&2
+              docker compose -f "$compose_file" logs --no-color --tail 100 "$service" >&2 || true
+            done
+            return 0
+          }
+          fail_health_verification() {
+            echo "$1" >&2
+            collect_health_diagnostics || true
+            return 1
+          }
           rollback() {
             status=$?
             echo "Deployment failed; restoring $previous_ref." >&2
@@ -107,8 +139,7 @@ jobs:
 
           container_ids=$(docker compose -f "$compose_file" ps --quiet)
           if [[ -z "$container_ids" ]]; then
-            echo 'Compose started no services.' >&2
-            false
+            fail_health_verification 'Compose started no services.'
           fi
 
           deadline=$((SECONDS + 180))
@@ -117,15 +148,13 @@ jobs:
             for container_id in $container_ids; do
               health=$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$container_id")
               if [[ "$health" == unhealthy || "$health" == none ]]; then
-                echo "Container $container_id is not healthy (status: $health)." >&2
-                false
+                fail_health_verification "Container $container_id is not healthy (status: $health)."
               fi
               [[ "$health" == healthy ]] || all_healthy=false
             done
             $all_healthy && break
             if (( SECONDS >= deadline )); then
-              echo 'Timed out waiting for Compose service health checks.' >&2
-              false
+              fail_health_verification 'Timed out waiting for Compose service health checks.'
             fi
             sleep 5
           done
