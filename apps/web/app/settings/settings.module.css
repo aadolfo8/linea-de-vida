@@ -1,0 +1,211 @@
+.settings {
+  --ink: #0b0e0b;
+  --lime: #d9ff3f;
+  --line: #354035;
+  width: min(1180px, 100%);
+  min-height: calc(100vh - 72px);
+  margin: 0 auto;
+  padding: clamp(40px, 7vw, 100px) clamp(18px, 5vw, 64px) 100px;
+  background: var(--ink);
+  color: #d9ddd2;
+}
+.settings .intro {
+  position: relative;
+  max-width: 58ch;
+  margin-bottom: 64px;
+  padding-left: clamp(22px, 4vw, 54px);
+  border-left: 1px solid var(--lime);
+}
+.routeLabel {
+  color: var(--lime);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+}
+.settings h1 {
+  margin: 0 0 16px;
+  font-size: clamp(2.5rem, 6vw, 5rem);
+  line-height: 0.95;
+  letter-spacing: -0.05em;
+}
+.settings h2 {
+  margin: 0 0 10px;
+  font-size: 1.45rem;
+  letter-spacing: -0.02em;
+}
+.settings p {
+  line-height: 1.55;
+}
+.notice {
+  min-height: 1.5em;
+  margin: -30px 0 32px;
+  color: #aab1a5;
+}
+.settings section {
+  display: grid;
+  gap: 18px;
+  padding: 36px 0;
+  border-top: 1px solid var(--line);
+}
+.settings section > div {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 24px;
+}
+.settings strong + span,
+.settings li span {
+  display: block;
+  margin-top: 5px;
+  color: #aab1a5;
+  font-size: 0.9rem;
+}
+.connected,
+.disconnected {
+  padding: 5px 9px;
+  border: 1px solid currentColor;
+  font-size: 0.8rem;
+}
+.connected {
+  color: var(--lime);
+}
+.disconnected {
+  color: #ff9487;
+}
+.settings button {
+  min-height: 44px;
+  border: 1px solid var(--lime);
+  padding: 10px 15px;
+  background: var(--lime);
+  color: var(--ink);
+  font: inherit;
+  font-weight: 650;
+}
+.settings button:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 16px rgb(0 0 0/0.22);
+}
+.settings button:active:not(:disabled) {
+  transform: translateY(0);
+}
+.settings button:disabled {
+  opacity: 0.5;
+}
+.settings .danger {
+  background: #9f3f35;
+  border-color: #ff9487;
+  color: #fff4f1;
+}
+.confirm {
+  background: #251311;
+  border-color: #9f3f35 !important;
+  padding-inline: 22px !important;
+}
+.settings form {
+  display: grid;
+  gap: 8px;
+  max-width: 680px;
+}
+.settings label {
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+.settings form > div {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 10px;
+}
+.settings input {
+  min-height: 44px;
+  border: 1px solid #758272;
+  padding: 0 12px;
+  background: #151a14;
+  color: #d9ddd2;
+  font: inherit;
+}
+.folderList {
+  display: grid !important;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 8px;
+}
+.folderList button {
+  display: grid;
+  background: transparent;
+  border-color: #526050;
+  background: transparent;
+  color: #d9ddd2;
+  text-align: left;
+}
+.folderList small {
+  margin-top: 5px;
+  color: #aab1a5;
+}
+.sources,
+.issues {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.sources li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--line);
+}
+.issues li {
+  padding: 12px;
+  background: #1a2118;
+  line-height: 1.45;
+}
+.syncState {
+  font-weight: 700;
+}
+.settings dl {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 1px;
+  margin: 0;
+  background: var(--line);
+}
+.settings dl div {
+  display: grid !important;
+  gap: 4px;
+  padding: 14px;
+  background: #121611;
+}
+.settings dt {
+  font-size: 0.8rem;
+  color: #aab1a5;
+}
+@media (prefers-reduced-motion: reduce) {
+  .settings button {
+    transition: none;
+  }
+  .settings button:hover:not(:disabled),
+  .settings button:active:not(:disabled) {
+    transform: none;
+  }
+}
+.settings dd {
+  margin: 0;
+  font-size: 1.4rem;
+  font-weight: 700;
+}
+@media (max-width: 640px) {
+  .settings section > div,
+  .sources li {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .settings form > div {
+    grid-template-columns: 1fr;
+  }
+  .settings dl {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
