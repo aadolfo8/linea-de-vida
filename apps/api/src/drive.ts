@@ -112,13 +112,21 @@ export class GoogleDriveProvider implements DriveAdapter {
     };
   }
   async getFolder(connection: { refreshTokenCiphertext: string | null }, folderId: string) {
-    const response = await this.client(connection).files.get({
-      fileId: folderId,
-      fields: 'id,name,mimeType,parents',
-    });
-    const file = response.data;
-    if (!file.id || !file.name || !file.mimeType) return null;
-    return { id: file.id, name: file.name, mimeType: file.mimeType, parents: file.parents ?? [] };
+    try {
+      const response = await this.client(connection).files.get({
+        fileId: folderId,
+        fields: 'id,name,mimeType,parents',
+      });
+      const file = response.data;
+      if (!file.id || !file.name || !file.mimeType) return null;
+      return { id: file.id, name: file.name, mimeType: file.mimeType, parents: file.parents ?? [] };
+    } catch (error) {
+      const underlying = error as { response?: { status?: number }; code?: number };
+      throw new DriveRequestError(
+        underlying.response?.status ?? underlying.code ?? 503,
+        'Drive folder request failed.',
+      );
+    }
   }
   async getThumbnailStream(
     connection: { refreshTokenCiphertext: string | null },
