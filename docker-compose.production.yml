@@ -58,7 +58,7 @@ services:
       target: runtime
     restart: unless-stopped
     env_file: .env
-    command: ['node', 'apps/api/dist/main.js']
+    command: ['node', 'apps/api/dist/src/main.js']
     depends_on:
       postgres:
         condition: service_healthy
@@ -86,7 +86,7 @@ services:
       target: runtime
     restart: unless-stopped
     env_file: .env
-    command: ['node', 'apps/api/dist/worker.js']
+    command: ['node', 'apps/api/dist/src/worker.js']
     depends_on:
       postgres:
         condition: service_healthy
