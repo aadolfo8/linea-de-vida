@@ -38,7 +38,7 @@ export const syncJobId = (sourceId: string, runId: string) => {
   return `sync-s${source.length}-${source}r${run.length}-${run}`;
 };
 
-type FolderWork = { id: string; path: string[]; cursor?: string };
+type FolderWork = { id: string; path: string[]; parentDriveFolderId?: string; cursor?: string };
 type Checkpoint = { pendingFolders: FolderWork[]; seenFolders: string[] };
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -137,11 +137,63 @@ export class SyncService {
       include: { source: { include: { connection: true } } },
     });
     if (!run || run.status === SyncRunStatus.SUCCEEDED) return;
+    await this.prisma.syncRun.update({ where: { id: run.id }, data: { status: 'RUNNING' } });
     const saved = run.checkpoint as Checkpoint | null;
-    const checkpoint: Checkpoint = saved ?? {
-      pendingFolders: [{ id: run.source.driveFolderId, path: [] }],
-      seenFolders: [],
-    };
+    let checkpoint: Checkpoint;
+    if (saved) checkpoint = saved;
+    else {
+      let root: DriveItem | null;
+      try {
+        root = await this.retry(() =>
+          this.drive.getFolder(run.source.connection, run.source.driveFolderId),
+        );
+      } catch (error) {
+        if (error instanceof DriveRequestError && error.status === 404)
+          await this.prisma.indexedFolder.updateMany({
+            where: { sourceId: run.source.id },
+            data: { status: 'MISSING' },
+          });
+        const transient =
+          error instanceof DriveRequestError && [429, 500, 502, 503, 504].includes(error.status);
+        if (transient) throw error;
+        await this.prisma.syncIssue.create({
+          data: {
+            syncRunId: run.id,
+            code: SyncIssueCode.ACCESS_DENIED,
+            severity: SyncIssueSeverity.ERROR,
+            details: 'The configured root folder is unavailable.',
+          },
+        });
+        await this.prisma.syncRun.update({
+          where: { id: run.id },
+          data: { status: 'FAILED', issueCount: run.issueCount + 1 },
+        });
+        return;
+      }
+      if (!root || !isFolder(root)) {
+        await this.prisma.indexedFolder.updateMany({
+          where: { sourceId: run.source.id },
+          data: { status: 'MISSING' },
+        });
+        await this.prisma.syncIssue.create({
+          data: {
+            syncRunId: run.id,
+            code: SyncIssueCode.ACCESS_DENIED,
+            severity: SyncIssueSeverity.ERROR,
+            details: 'The configured root folder is unavailable.',
+          },
+        });
+        await this.prisma.syncRun.update({
+          where: { id: run.id },
+          data: { status: 'FAILED', issueCount: run.issueCount + 1 },
+        });
+        return;
+      }
+      checkpoint = {
+        pendingFolders: [{ id: root.id, path: [root.name] }],
+        seenFolders: [],
+      };
+    }
     const maxFolders = Math.max(100, Number(process.env.SYNC_MAX_PENDING_FOLDERS ?? 10_000));
     const counts = {
       found: run.foundCount,
@@ -150,7 +202,6 @@ export class SyncService {
       issues: run.issueCount,
     };
     let partial = false;
-    await this.prisma.syncRun.update({ where: { id: run.id }, data: { status: 'RUNNING' } });
     const issue = async (
       code: SyncIssueCode,
       severity: SyncIssueSeverity,
@@ -166,8 +217,13 @@ export class SyncService {
     const index = async (
       item: DriveItem,
       folder: FolderWork,
+      indexedFolderId: string,
       candidates: Array<{ fileName: string; metadata: TakeoutMetadata }>,
     ) => {
+      const excluded = await this.prisma.photoExclusion.findUnique({
+        where: { userId_driveFileId: { userId: run.source.userId, driveFileId: item.id } },
+      });
+      if (excluded) return false;
       const match =
         run.source.type === 'GOOGLE_TAKEOUT'
           ? this.takeoutMatcher.match(item.name, candidates)
@@ -193,6 +249,7 @@ export class SyncService {
         });
         const data = {
           sourceId: run.source.id,
+          folderId: indexedFolderId,
           fileName: item.name,
           mimeType: item.mimeType,
           status: PhotoStatus.ACTIVE,
@@ -230,6 +287,7 @@ export class SyncService {
           });
       });
       counts.indexed++;
+      return true;
     };
     try {
       while (checkpoint.pendingFolders.length) {
@@ -239,6 +297,39 @@ export class SyncService {
           continue;
         }
         if (!folder.cursor) checkpoint.seenFolders.push(folder.id);
+        const parent = folder.parentDriveFolderId
+          ? await this.prisma.indexedFolder.findUnique({
+              where: {
+                userId_driveFolderId: {
+                  userId: run.source.userId,
+                  driveFolderId: folder.parentDriveFolderId,
+                },
+              },
+            })
+          : null;
+        const indexedFolder = await this.prisma.indexedFolder.upsert({
+          where: {
+            userId_driveFolderId: { userId: run.source.userId, driveFolderId: folder.id },
+          },
+          create: {
+            userId: run.source.userId,
+            sourceId: run.source.id,
+            driveFolderId: folder.id,
+            parentId: parent?.id ?? null,
+            name: folder.path.at(-1)!,
+            path: folder.path,
+            status: 'ACTIVE',
+            lastSeenSyncRunId: run.id,
+          },
+          update: {
+            sourceId: run.source.id,
+            parentId: parent?.id ?? null,
+            name: folder.path.at(-1)!,
+            path: folder.path,
+            status: 'ACTIVE',
+            lastSeenSyncRunId: run.id,
+          },
+        });
         const page = await this.retry(() =>
           this.drive.listChildren(run.source.connection, folder.id, folder.cursor),
         );
@@ -246,7 +337,11 @@ export class SyncService {
         counts.found += images.length;
         for (const child of page.items.filter(isFolder)) {
           if (!checkpoint.seenFolders.includes(child.id))
-            checkpoint.pendingFolders.push({ id: child.id, path: [...folder.path, child.name] });
+            checkpoint.pendingFolders.push({
+              id: child.id,
+              path: [...folder.path, child.name],
+              parentDriveFolderId: folder.id,
+            });
         }
         if (checkpoint.pendingFolders.length > maxFolders) {
           await issue(
@@ -296,7 +391,7 @@ export class SyncService {
           await Promise.all(
             images.slice(offset, offset + concurrency).map(async (item) => {
               try {
-                await index(item, folder, candidates);
+                await index(item, folder, indexedFolder.id, candidates);
                 counts.processed++;
               } catch {
                 counts.processed++;
@@ -319,10 +414,16 @@ export class SyncService {
           ? SyncRunStatus.PARTIAL
           : SyncRunStatus.SUCCEEDED;
       if (status === SyncRunStatus.SUCCEEDED) {
-        await this.prisma.photo.updateMany({
-          where: { sourceId: run.source.id, lastSeenSyncRunId: { not: run.id } },
-          data: { status: PhotoStatus.MISSING },
-        });
+        await this.prisma.$transaction([
+          this.prisma.photo.updateMany({
+            where: { sourceId: run.source.id, lastSeenSyncRunId: { not: run.id } },
+            data: { status: PhotoStatus.MISSING },
+          }),
+          this.prisma.indexedFolder.updateMany({
+            where: { sourceId: run.source.id, lastSeenSyncRunId: { not: run.id } },
+            data: { status: 'MISSING' },
+          }),
+        ]);
       }
       await this.prisma.syncRun.update({
         where: { id: run.id },

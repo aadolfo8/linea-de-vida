@@ -49,6 +49,10 @@ enum PhotoStatus {
  UNSUPPORTED
  ACCESS_DENIED
 }
+enum IndexedFolderStatus {
+ ACTIVE
+ MISSING
+}
 enum DatePrecision {
  DAY
  MONTH
@@ -88,6 +92,8 @@ model User {
  connections OAuthConnection[]
  sources PhotoSource[]
  photos Photo[]
+ indexedFolders IndexedFolder[]
+ photoExclusions PhotoExclusion[]
 }
 model OAuthConnection {
  id String @id @default(cuid())
@@ -127,6 +133,7 @@ model PhotoSource {
  connection OAuthConnection @relation(fields:[oauthConnectionId],references:[id])
  runs SyncRun[]
  photos Photo[]
+ indexedFolders IndexedFolder[]
  @@unique([userId,driveFolderId])
  @@index([userId,status])
 }
@@ -168,6 +175,7 @@ model Photo {
  userId String
  driveFileId String
  sourceId String
+ folderId String?
  fileName String
  mimeType String
   status PhotoStatus @default(ACTIVE)
@@ -186,12 +194,45 @@ model Photo {
  updatedAt DateTime @updatedAt
  user User @relation(fields:[userId],references:[id],onDelete:Cascade)
  source PhotoSource @relation(fields:[sourceId],references:[id])
+ folder IndexedFolder? @relation(fields:[folderId],references:[id],onDelete:SetNull)
  override ManualDateOverride?
  @@unique([userId,driveFileId])
  @@index([userId,status])
   @@index([sourceId,status])
   @@index([sourceId,lastSeenSyncRunId])
+  @@index([folderId,status])
  @@index([userId,effectiveDateValue,effectiveDatePrecision])
+}
+model IndexedFolder {
+ id String @id @default(cuid())
+ userId String
+ sourceId String
+ driveFolderId String
+ parentId String?
+ name String
+ path String[]
+ status IndexedFolderStatus @default(ACTIVE)
+ lastSeenSyncRunId String?
+ createdAt DateTime @default(now())
+ updatedAt DateTime @updatedAt
+ user User @relation(fields:[userId],references:[id],onDelete:Cascade)
+ source PhotoSource @relation(fields:[sourceId],references:[id],onDelete:Cascade)
+ parent IndexedFolder? @relation("FolderTree",fields:[parentId],references:[id],onDelete:SetNull)
+ children IndexedFolder[] @relation("FolderTree")
+ photos Photo[]
+ @@unique([userId,driveFolderId])
+ @@index([sourceId,status])
+ @@index([parentId,status])
+ @@index([sourceId,lastSeenSyncRunId])
+}
+model PhotoExclusion {
+ id String @id @default(cuid())
+ userId String
+ driveFileId String
+ createdAt DateTime @default(now())
+ user User @relation(fields:[userId],references:[id],onDelete:Cascade)
+ @@unique([userId,driveFileId])
+ @@index([userId,createdAt])
 }
 model ManualDateOverride {
  id String @id @default(cuid())

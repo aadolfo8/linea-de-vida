@@ -20,7 +20,12 @@ describe('Takeout sync integration', () => {
         };
       }
       async getFolder() {
-        return null;
+        return {
+          id: 'root',
+          name: 'Takeout root',
+          mimeType: 'application/vnd.google-apps.folder',
+          parents: [],
+        };
       }
       async getThumbnailStream() {
         return { stream: Readable.from(''), contentType: 'image/jpeg' };
@@ -44,16 +49,28 @@ describe('Takeout sync integration', () => {
             type: 'GOOGLE_TAKEOUT',
             connection: { refreshTokenCiphertext: null },
           },
+          foundCount: 0,
+          processedCount: 0,
+          indexedCount: 0,
+          issueCount: 0,
+          checkpoint: null,
         }),
         update: async () => undefined,
       },
       syncIssue: { create: async ({ data }: any) => issues.push(data) },
+      photoExclusion: { findUnique: async () => null },
+      indexedFolder: {
+        findUnique: async () => null,
+        upsert: async () => ({ id: 'indexed-root' }),
+        updateMany: async () => ({ count: 0 }),
+      },
       photo: {
         findUnique: async () => null,
         create: async ({ data }: any) => created.push(data),
         updateMany: async () => ({ count: 0 }),
       },
-      $transaction: async (operation: any) => operation(prisma),
+      $transaction: async (operation: any) =>
+        Array.isArray(operation) ? Promise.all(operation) : operation(prisma),
     };
     await new SyncService(prisma, new TakeoutDrive(), new PhotoDateResolver()).execute('run');
     expect(created).toHaveLength(2);
