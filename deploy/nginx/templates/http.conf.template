@@ -5,9 +5,14 @@ map $http_upgrade $connection_upgrade {
 
 server {
     listen 80;
-    server_name _;
+    server_name ${PUBLIC_DOMAIN};
 
     client_max_body_size 32k;
+
+    location ^~ /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+        try_files $uri =404;
+    }
 
     location /v1/ {
         proxy_pass http://api:3001;

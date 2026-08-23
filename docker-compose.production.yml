@@ -130,20 +130,55 @@ services:
     restart: unless-stopped
     ports:
       - '80:80'
+      - '443:443'
+    environment:
+      PUBLIC_DOMAIN: ${PUBLIC_DOMAIN:?PUBLIC_DOMAIN is required}
+      HSTS_MAX_AGE: ${HSTS_MAX_AGE:-0}
     volumes:
-      - ./deploy/nginx/linea-de-vida.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./deploy/nginx/start.sh:/usr/local/bin/start-nginx:ro
+      - ./deploy/nginx/templates:/etc/nginx/templates:ro
+      - certbot-webroot:/var/www/certbot:ro
+      - letsencrypt:/etc/letsencrypt:ro
+    entrypoint: ['/bin/sh', '/usr/local/bin/start-nginx']
     depends_on:
       api:
         condition: service_healthy
       web:
         condition: service_healthy
     healthcheck:
-      test: ['CMD-SHELL', 'wget -q --spider http://127.0.0.1/ || exit 1']
+      test: ['CMD-SHELL', 'nginx -t']
       interval: 10s
       timeout: 5s
       retries: 10
       start_period: 5s
     networks: [app]
+
+  certbot:
+    image: certbot/certbot:latest
+    profiles: ['certbot']
+    environment:
+      PUBLIC_DOMAIN: ${PUBLIC_DOMAIN:?PUBLIC_DOMAIN is required}
+      LETSENCRYPT_EMAIL: ${LETSENCRYPT_EMAIL:?LETSENCRYPT_EMAIL is required}
+    volumes:
+      - certbot-webroot:/var/www/certbot
+      - letsencrypt:/etc/letsencrypt
+    command:
+      [
+        'certonly',
+        '--webroot',
+        '--webroot-path',
+        '/var/www/certbot',
+        '--email',
+        '${LETSENCRYPT_EMAIL:?LETSENCRYPT_EMAIL is required}',
+        '--agree-tos',
+        '--no-eff-email',
+        '--non-interactive',
+        '--keep-until-expiring',
+        '--cert-name',
+        '${PUBLIC_DOMAIN:?PUBLIC_DOMAIN is required}',
+        '--domain',
+        '${PUBLIC_DOMAIN:?PUBLIC_DOMAIN is required}',
+      ]
 
 networks:
   app:
@@ -151,3 +186,5 @@ networks:
 volumes:
   postgres-data:
   redis-data:
+  certbot-webroot:
+  letsencrypt:
