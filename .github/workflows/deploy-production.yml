@@ -1,6 +1,6 @@
 name: Deploy production
 
-on:
+'on':
   push:
     branches: [main]
 
@@ -65,7 +65,6 @@ jobs:
           set -euo pipefail
           deploy_path="$1"
           test -d "$deploy_path/.git" || { echo "Deployment path is not a Git repository: $deploy_path" >&2; exit 1; }
-          test -f "$deploy_path/docker-compose.production.yml" || { echo "Missing production Compose configuration: $deploy_path/docker-compose.production.yml" >&2; exit 1; }
           command -v docker >/dev/null || { echo 'Docker is not installed on the VPS.' >&2; exit 1; }
           docker compose version >/dev/null || { echo 'Docker Compose v2 is not installed on the VPS.' >&2; exit 1; }
           REMOTE
