@@ -5,12 +5,14 @@ import { ArchiveNav } from '../components/ArchiveNav';
 import { ProtectedSurface } from '../components/ProtectedSurface';
 import {
   activeDriveConnection,
+  api,
   ApiError,
   apiJson,
   settingsEndpoint,
   type Connection,
   type Source,
 } from '../../lib/api';
+import { mediaUrl } from '../../lib/media';
 import styles from './settings.module.css';
 
 type DriveFolder = { id: string; name: string; parents: string[] };
@@ -20,6 +22,12 @@ type IndexedFolder = {
   path: string[];
   status: 'ACTIVE' | 'MISSING';
   photoCount: number;
+};
+type IndexedPhoto = {
+  id: string;
+  fileName: string;
+  thumbnailUrl: string;
+  effectiveDate: { precision: string };
 };
 type SyncRun = {
   id: string;
@@ -61,6 +69,8 @@ function Settings({ sessionConnection }: { sessionConnection: Connection | null 
   const [driveFolders, setDriveFolders] = useState<DriveFolder[]>([]);
   const [folders, setFolders] = useState<IndexedFolder[]>([]);
   const [selectedFolderId, setSelectedFolderId] = useState<string | null>(null);
+  const [photos, setPhotos] = useState<IndexedPhoto[]>([]);
+  const [photoCursor, setPhotoCursor] = useState<string | null>(null);
   const [notice, setNotice] = useState('');
   const [busy, setBusy] = useState(false);
   const [run, setRun] = useState<SyncRun | null>(null);
@@ -86,6 +96,13 @@ function Settings({ sessionConnection }: { sessionConnection: Connection | null 
     setHistory((await apiJson<{ items: SyncRun[] }>(settingsEndpoint.history(sourceId))).items);
     if (!selectedFolderId && all.length) setSelectedFolderId(all[0].id);
   };
+  const loadPhotos = async (folderIdValue: string, cursor?: string, append = false) => {
+    const page = await apiJson<{ items: IndexedPhoto[]; nextCursor: string | null }>(
+      settingsEndpoint.folderPhotos(folderIdValue, cursor),
+    );
+    setPhotos((current) => (append ? [...current, ...page.items] : page.items));
+    setPhotoCursor(page.nextCursor);
+  };
   useEffect(() => {
     void loadSources().catch((error) =>
       setNotice(errorCopy(error, 'No se pudieron cargar las fuentes configuradas.')),
@@ -101,6 +118,15 @@ function Settings({ sessionConnection }: { sessionConnection: Connection | null 
       setNotice(errorCopy(error, 'No se pudo cargar el archivo indexado.')),
     );
   }, [activeSource?.id]);
+  useEffect(() => {
+    if (!selectedFolderId) {
+      setPhotos([]);
+      return;
+    }
+    void loadPhotos(selectedFolderId).catch((error) =>
+      setNotice(errorCopy(error, 'No se pudieron cargar las fotos de esta carpeta.')),
+    );
+  }, [selectedFolderId]);
   useEffect(() => {
     if (!run || ['SUCCEEDED', 'PARTIAL', 'FAILED', 'CANCELLED'].includes(run.status)) return;
     const timer = window.setInterval(() => {
@@ -343,7 +369,27 @@ function Settings({ sessionConnection }: { sessionConnection: Connection | null 
                         : 'Carpeta activa'}
                     </span>
                   </div>
-                  <p>{selectedFolder.photoCount} fotos activas registradas.</p>
+                  {!photos.length ? (
+                    <p>Esta carpeta no contiene fotos activas indexadas.</p>
+                  ) : (
+                    <div className={styles.photoGrid}>
+                      {photos.map((photo) => (
+                        <article key={photo.id}>
+                          <img src={mediaUrl(api, photo.thumbnailUrl)} alt="" loading="lazy" />
+                          <span>{photo.fileName}</span>
+                          <small>Precisión: {photo.effectiveDate.precision}</small>
+                        </article>
+                      ))}
+                    </div>
+                  )}
+                  {photoCursor && selectedFolderId && (
+                    <button
+                      onClick={() => void loadPhotos(selectedFolderId, photoCursor, true)}
+                      disabled={busy}
+                    >
+                      Cargar más fotos
+                    </button>
+                  )}
                 </>
               )}
             </div>
