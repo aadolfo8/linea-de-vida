@@ -134,9 +134,10 @@ services:
     environment:
       PUBLIC_DOMAIN: ${PUBLIC_DOMAIN:?PUBLIC_DOMAIN is required}
       HSTS_MAX_AGE: ${HSTS_MAX_AGE:-0}
+      ENABLE_HTTPS: ${ENABLE_HTTPS:-false}
     volumes:
       - ./deploy/nginx/start.sh:/usr/local/bin/start-nginx:ro
-      - ./deploy/nginx/templates:/etc/nginx/templates:ro
+      - ./deploy/nginx/templates:/etc/nginx/config-templates:ro
       - certbot-webroot:/var/www/certbot:ro
       - letsencrypt:/etc/letsencrypt:ro
     entrypoint: ['/bin/sh', '/usr/local/bin/start-nginx']
