@@ -1,0 +1,130 @@
+name: Deploy production
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-deployment
+  cancel-in-progress: false
+
+jobs:
+  validate-deployment-assets:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Require production Docker Compose configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          compose_file=docker-compose.production.yml
+          if [[ ! -f "$compose_file" ]]; then
+            echo "::error title=Production deployment is not configured::Missing $compose_file. Add a production Compose configuration that defines every long-running application service, its image or build configuration, persistent storage, and a healthcheck for each service before enabling deployment. The current docker-compose.yml only starts local PostgreSQL and Redis dependencies."
+            exit 1
+          fi
+
+  deploy:
+    needs: validate-deployment-assets
+    runs-on: ubuntu-latest
+    environment: production
+    env:
+      VPS_HOST: ${{ secrets.VPS_HOST }}
+      VPS_USER: ${{ secrets.VPS_USER }}
+      VPS_PORT: ${{ secrets.VPS_PORT }}
+      VPS_DEPLOY_PATH: ${{ secrets.VPS_DEPLOY_PATH }}
+      VPS_SSH_PRIVATE_KEY: ${{ secrets.VPS_SSH_PRIVATE_KEY }}
+      VPS_KNOWN_HOSTS: ${{ secrets.VPS_KNOWN_HOSTS }}
+      VPS_ENV_FILE: ${{ secrets.VPS_ENV_FILE }}
+    steps:
+      - name: Configure SSH
+        shell: bash
+        run: |
+          set -euo pipefail
+          required=(VPS_HOST VPS_USER VPS_PORT VPS_DEPLOY_PATH VPS_SSH_PRIVATE_KEY VPS_KNOWN_HOSTS VPS_ENV_FILE)
+          for name in "${required[@]}"; do
+            if [[ -z "${!name}" ]]; then
+              echo "::error title=Missing GitHub secret::$name must be configured for production deployment."
+              exit 1
+            fi
+          done
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$VPS_SSH_PRIVATE_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          printf '%s\n' "$VPS_KNOWN_HOSTS" > ~/.ssh/known_hosts
+
+      - name: Verify VPS deployment directory
+        shell: bash
+        run: |
+          set -euo pipefail
+          deploy_path=$(printf '%q' "$VPS_DEPLOY_PATH")
+          ssh -i ~/.ssh/id_ed25519 -p "$VPS_PORT" -o BatchMode=yes -o StrictHostKeyChecking=yes "$VPS_USER@$VPS_HOST" "bash -s -- $deploy_path" <<'REMOTE'
+          set -euo pipefail
+          deploy_path="$1"
+          test -d "$deploy_path/.git" || { echo "Deployment path is not a Git repository: $deploy_path" >&2; exit 1; }
+          test -f "$deploy_path/docker-compose.production.yml" || { echo "Missing production Compose configuration: $deploy_path/docker-compose.production.yml" >&2; exit 1; }
+          command -v docker >/dev/null || { echo 'Docker is not installed on the VPS.' >&2; exit 1; }
+          docker compose version >/dev/null || { echo 'Docker Compose v2 is not installed on the VPS.' >&2; exit 1; }
+          REMOTE
+
+      - name: Update production environment file
+        shell: bash
+        run: |
+          set -euo pipefail
+          env_path=$(printf '%q' "$VPS_DEPLOY_PATH/.env")
+          printf '%s' "$VPS_ENV_FILE" | base64 | ssh -i ~/.ssh/id_ed25519 -p "$VPS_PORT" -o BatchMode=yes -o StrictHostKeyChecking=yes "$VPS_USER@$VPS_HOST" "umask 077; base64 -d > $env_path"
+
+      - name: Pull, restart, and verify services
+        shell: bash
+        run: |
+          set -euo pipefail
+          deploy_path=$(printf '%q' "$VPS_DEPLOY_PATH")
+          ssh -i ~/.ssh/id_ed25519 -p "$VPS_PORT" -o BatchMode=yes -o StrictHostKeyChecking=yes "$VPS_USER@$VPS_HOST" "bash -s -- $deploy_path" <<'REMOTE'
+          set -Eeuo pipefail
+          deploy_path="$1"
+          compose_file=docker-compose.production.yml
+          cd "$deploy_path"
+
+          previous_ref=$(git rev-parse HEAD)
+          rollback() {
+            status=$?
+            echo "Deployment failed; restoring $previous_ref." >&2
+            git checkout --detach "$previous_ref"
+            docker compose -f "$compose_file" up --build --detach --remove-orphans || true
+            exit "$status"
+          }
+          trap rollback ERR
+
+          git fetch --prune origin main
+          git checkout --detach origin/main
+          docker compose -f "$compose_file" up --build --detach --remove-orphans
+
+          container_ids=$(docker compose -f "$compose_file" ps --quiet)
+          if [[ -z "$container_ids" ]]; then
+            echo 'Compose started no services.' >&2
+            false
+          fi
+
+          deadline=$((SECONDS + 180))
+          while true; do
+            all_healthy=true
+            for container_id in $container_ids; do
+              health=$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$container_id")
+              if [[ "$health" == unhealthy || "$health" == none ]]; then
+                echo "Container $container_id is not healthy (status: $health)." >&2
+                false
+              fi
+              [[ "$health" == healthy ]] || all_healthy=false
+            done
+            $all_healthy && break
+            if (( SECONDS >= deadline )); then
+              echo 'Timed out waiting for Compose service health checks.' >&2
+              false
+            fi
+            sleep 5
+          done
+          trap - ERR
+          REMOTE

@@ -1,4 +1,4 @@
-const { readFileSync } = require('node:fs');
+const { existsSync, readFileSync } = require('node:fs');
 const { resolve } = require('node:path');
 const { spawn } = require('node:child_process');
 
@@ -22,7 +22,8 @@ if (!command) {
 }
 
 const root = resolve(__dirname, '..');
-const localEnvironment = loadLocalEnvironment(resolve(root, '.env'));
+const environmentFile = resolve(root, '.env');
+const localEnvironment = existsSync(environmentFile) ? loadLocalEnvironment(environmentFile) : {};
 const child = spawn(command, args, {
   cwd: process.cwd(),
   env: { ...process.env, ...localEnvironment },
