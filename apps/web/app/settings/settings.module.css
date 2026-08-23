@@ -254,6 +254,33 @@
   justify-content: initial !important;
   gap: 4px !important;
 }
+.photoGrid {
+  display: grid !important;
+  grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+  align-items: stretch !important;
+  gap: 12px !important;
+}
+.photoGrid article {
+  display: grid;
+  min-width: 0;
+  gap: 6px;
+  padding: 8px;
+  border: 1px solid #526050;
+}
+.photoGrid img {
+  width: 100%;
+  aspect-ratio: 1;
+  object-fit: cover;
+  background: #283027;
+}
+.photoGrid span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.photoGrid small {
+  color: #aab1a5;
+}
 .history {
   display: grid;
   gap: 1px;
