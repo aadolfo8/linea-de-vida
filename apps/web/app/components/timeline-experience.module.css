@@ -121,6 +121,19 @@
   font: inherit;
   font-weight: 700;
 }
+.paginationError {
+  width: min(720px, calc(100% - 36px));
+  min-height: 0;
+  margin: 0 auto 8vw;
+  padding: 22px;
+  border: 1px solid #6f774f;
+}
+.paginationError p {
+  margin: 0;
+}
+.paginationError button {
+  width: max-content;
+}
 .navigator {
   position: sticky;
   z-index: 10;
