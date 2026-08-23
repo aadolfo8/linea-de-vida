@@ -92,6 +92,10 @@ jobs:
             status=$?
             echo "Deployment failed; restoring $previous_ref." >&2
             git checkout --detach "$previous_ref"
+            if [[ ! -f "$compose_file" ]]; then
+              echo 'Previous revision predates production Compose; no production stack can be restored.' >&2
+              exit "$status"
+            fi
             docker compose -f "$compose_file" up --build --detach --remove-orphans || true
             exit "$status"
           }
