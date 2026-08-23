@@ -41,6 +41,8 @@ La API falla al arrancar en producción si faltan secretos, si son débiles o de
 
 `ALLOWED_WEB_ORIGINS` es una lista separada por comas. CORS acepta exclusivamente esos orígenes con credenciales; las mutaciones autenticadas vuelven a comprobar `Origin`. Los callbacks OAuth son GET de redirección y se protegen con cookie `httpOnly` temporal, `state` criptográfico de un solo uso y PKCE; no dependen de `Origin`, que los navegadores no envían de forma fiable durante la redirección.
 
+El límite de solicitudes usa Redis como contador compartido y separa OAuth de autorización, callbacks OAuth, sesión, timeline, medios, mutaciones y otras respuestas JSON. La identidad es la sesión firmada o, para tráfico anónimo, la IP. Si Redis no está disponible, la API mantiene un límite local acotado por proceso y vuelve a usar Redis automáticamente cuando se recupera; el fallback preserva disponibilidad, pero no coordina contadores entre réplicas durante la incidencia.
+
 ## Retención, logs y backup
 
 | Dato                                           | Retención                                          | Limpieza                           |
@@ -117,5 +119,5 @@ pnpm build
 - El selector navega desde un ID de carpeta introducido explícitamente; nunca puede abrir ni enumerar `root`/todo Drive. La navegación y el callback reales requieren credenciales Google válidas, URI registradas y una cuenta que conceda el permiso.
 - No usa Drive Changes API: cada ejecución recorre la fuente explícita y descendientes. El checkpoint no es un delta de Drive y una cola de carpetas excesiva se detiene de forma segura sin marcar `MISSING`. La edición masiva de fechas sigue limitada a 50 fotos por petición y no incluye motivo por foto.
 - Sin conversión HEIC ni procesamiento/copia permanente de imágenes; HEIC/HEIF se conservan indexados y descargables, con fallback de navegador.
-- La verificación OAuth real sigue pendiente: las pruebas automatizadas no pueden demostrar la configuración de Google Cloud, consentimiento, refresh, streaming ni revocación remota. El rate limit en este despliegue es en memoria por proceso; para múltiples réplicas debe sustituirse por un almacén compartido antes de escalar.
+- La verificación OAuth real sigue pendiente: las pruebas automatizadas no pueden demostrar la configuración de Google Cloud, consentimiento, refresh, streaming ni revocación remota. El rate limit usa Redis entre réplicas y un fallback local acotado durante indisponibilidad; todavía requiere una prueba operativa de caída y recuperación con Redis real.
 - La interfaz usa solo contratos de la API: no mezcla contenido demostrativo con datos indexados.
