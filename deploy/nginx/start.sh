@@ -16,11 +16,24 @@ case "${HSTS_MAX_AGE:-0}" in
 esac
 
 certificate_directory="/etc/letsencrypt/live/${PUBLIC_DOMAIN}"
-template='/etc/nginx/templates/http.conf.template'
+template='/etc/nginx/config-templates/http.conf.template'
 
-if [ -r "${certificate_directory}/fullchain.pem" ] && [ -r "${certificate_directory}/privkey.pem" ]; then
-  template='/etc/nginx/templates/https.conf.template'
-fi
+case "${ENABLE_HTTPS:-false}" in
+  false)
+    ;;
+  true)
+    if [ -r "${certificate_directory}/fullchain.pem" ] && [ -r "${certificate_directory}/privkey.pem" ]; then
+      template='/etc/nginx/config-templates/https.conf.template'
+    else
+      echo 'ENABLE_HTTPS is true but no readable certificate and key are available; using HTTP bootstrap.' >&2
+    fi
+    ;;
+  *)
+    echo 'ENABLE_HTTPS must be true or false.' >&2
+    exit 1
+    ;;
+esac
 
 envsubst '${PUBLIC_DOMAIN} ${HSTS_MAX_AGE}' < "$template" > /etc/nginx/conf.d/default.conf
-exec /docker-entrypoint.sh nginx -g 'daemon off;'
+nginx -t
+exec nginx -g 'daemon off;'
