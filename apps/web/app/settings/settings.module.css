@@ -192,6 +192,68 @@
   gap: 4px;
   overflow-wrap: anywhere;
 }
+.archiveLayout {
+  display: grid !important;
+  grid-template-columns: minmax(210px, 0.32fr) minmax(0, 1fr);
+  align-items: start !important;
+  border-top: 1px solid var(--line);
+}
+.tree {
+  display: grid;
+  max-height: 640px;
+  overflow-y: auto;
+  border-right: 1px solid var(--line);
+}
+.tree button {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  background: transparent;
+  color: #d9ddd2;
+  text-align: left;
+}
+.tree button span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tree button small {
+  flex: 0 0 auto;
+  color: #aab1a5;
+}
+.tree .currentFolder {
+  background: var(--lime);
+  color: var(--ink);
+}
+.tree .currentFolder small {
+  color: #27300b;
+}
+.folderContents {
+  display: grid !important;
+  min-width: 0;
+  gap: 24px !important;
+  padding: 20px;
+}
+.breadcrumb {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  color: #aab1a5;
+  font-size: 0.82rem;
+}
+.breadcrumb span:not(:last-child)::after {
+  content: '/';
+  margin-inline-start: 5px;
+}
+.folderSummary {
+  display: grid !important;
+  justify-content: initial !important;
+  gap: 4px !important;
+}
 .history {
   display: grid;
   gap: 1px;
@@ -249,5 +311,16 @@
   }
   .settings dl {
     grid-template-columns: repeat(2, 1fr);
+  }
+  .archiveLayout {
+    grid-template-columns: 1fr;
+  }
+  .tree {
+    max-height: 300px;
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+  .folderContents {
+    padding-inline: 0;
   }
 }

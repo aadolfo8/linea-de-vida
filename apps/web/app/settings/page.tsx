@@ -14,6 +14,13 @@ import {
 import styles from './settings.module.css';
 
 type DriveFolder = { id: string; name: string; parents: string[] };
+type IndexedFolder = {
+  id: string;
+  name: string;
+  path: string[];
+  status: 'ACTIVE' | 'MISSING';
+  photoCount: number;
+};
 type SyncRun = {
   id: string;
   status: string;
@@ -52,6 +59,8 @@ function Settings({ sessionConnection }: { sessionConnection: Connection | null 
   const [sources, setSources] = useState<Source[]>([]);
   const [folderId, setFolderId] = useState('');
   const [driveFolders, setDriveFolders] = useState<DriveFolder[]>([]);
+  const [folders, setFolders] = useState<IndexedFolder[]>([]);
+  const [selectedFolderId, setSelectedFolderId] = useState<string | null>(null);
   const [notice, setNotice] = useState('');
   const [busy, setBusy] = useState(false);
   const [run, setRun] = useState<SyncRun | null>(null);
@@ -59,11 +68,23 @@ function Settings({ sessionConnection }: { sessionConnection: Connection | null 
   const [issues, setIssues] = useState<SyncIssue[]>([]);
   const [confirmDisconnect, setConfirmDisconnect] = useState(false);
   const activeSource = sources.find((source) => source.status === 'ACTIVE') ?? null;
+  const selectedFolder = folders.find((folder) => folder.id === selectedFolderId) ?? null;
 
   const loadSources = async () =>
     setSources((await apiJson<{ items: Source[] }>('/photo-sources')).items);
-  const loadHistory = async (sourceId: string) => {
+  const loadArchive = async (sourceId: string) => {
+    const all: IndexedFolder[] = [];
+    let cursor: string | null = null;
+    do {
+      const page: { items: IndexedFolder[]; nextCursor: string | null } = await apiJson(
+        settingsEndpoint.indexedFolders(sourceId, cursor ?? undefined),
+      );
+      all.push(...page.items);
+      cursor = page.nextCursor;
+    } while (cursor);
+    setFolders(all);
     setHistory((await apiJson<{ items: SyncRun[] }>(settingsEndpoint.history(sourceId))).items);
+    if (!selectedFolderId && all.length) setSelectedFolderId(all[0].id);
   };
   useEffect(() => {
     void loadSources().catch((error) =>
@@ -72,11 +93,12 @@ function Settings({ sessionConnection }: { sessionConnection: Connection | null 
   }, []);
   useEffect(() => {
     if (!activeSource) {
+      setFolders([]);
       setHistory([]);
       return;
     }
-    void loadHistory(activeSource.id).catch((error) =>
-      setNotice(errorCopy(error, 'No se pudo cargar el historial del archivo.')),
+    void loadArchive(activeSource.id).catch((error) =>
+      setNotice(errorCopy(error, 'No se pudo cargar el archivo indexado.')),
     );
   }, [activeSource?.id]);
   useEffect(() => {
@@ -96,7 +118,7 @@ function Settings({ sessionConnection }: { sessionConnection: Connection | null 
       .then((page) => setIssues(page.items))
       .catch(() => setIssues([]));
     if (['SUCCEEDED', 'PARTIAL'].includes(run.status) && activeSource)
-      void loadHistory(activeSource.id);
+      void loadArchive(activeSource.id);
   }, [run?.id, run?.status]);
 
   const browse = async (event: FormEvent) => {
@@ -281,10 +303,51 @@ function Settings({ sessionConnection }: { sessionConnection: Connection | null 
             </span>
           </p>
         )}
-        {activeSource && (
+        {activeSource && !folders.length && (
           <p>
-            La navegación de la jerarquía indexada se incorpora en el siguiente PR de la cadena.
+            Aún no hay carpetas indexadas. Ejecuta un escaneo correcto para construir la jerarquía.
           </p>
+        )}
+        {!!folders.length && (
+          <div className={styles.archiveLayout}>
+            <nav className={styles.tree} aria-label="Jerarquía de carpetas indexadas">
+              {folders.map((folder) => (
+                <button
+                  key={folder.id}
+                  className={folder.id === selectedFolderId ? styles.currentFolder : ''}
+                  onClick={() => setSelectedFolderId(folder.id)}
+                  style={{
+                    paddingInlineStart: `${12 + Math.max(0, folder.path.length - 1) * 16}px`,
+                  }}
+                >
+                  <span>{folder.name}</span>
+                  <small>
+                    {folder.status === 'MISSING' ? 'No encontrada' : `${folder.photoCount} fotos`}
+                  </small>
+                </button>
+              ))}
+            </nav>
+            <div className={styles.folderContents}>
+              {selectedFolder && (
+                <>
+                  <nav className={styles.breadcrumb} aria-label="Ruta de la carpeta">
+                    {selectedFolder.path.map((segment, index) => (
+                      <span key={`${segment}-${index}`}>{segment}</span>
+                    ))}
+                  </nav>
+                  <div className={styles.folderSummary}>
+                    <h3>{selectedFolder.name}</h3>
+                    <span>
+                      {selectedFolder.status === 'MISSING'
+                        ? 'Carpeta no encontrada en el último escaneo correcto'
+                        : 'Carpeta activa'}
+                    </span>
+                  </div>
+                  <p>{selectedFolder.photoCount} fotos activas registradas.</p>
+                </>
+              )}
+            </div>
+          </div>
         )}
       </section>
 

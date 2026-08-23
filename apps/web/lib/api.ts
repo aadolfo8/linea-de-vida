@@ -71,5 +71,7 @@ export const settingsEndpoint = {
   issues: (runId: string) => `/sync-runs/${runId}/issues?limit=30`,
   history: (sourceId: string, cursor?: string) =>
     `/photo-sources/${sourceId}/sync-runs?limit=20${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`,
+  indexedFolders: (sourceId: string, cursor?: string) =>
+    `/photo-sources/${sourceId}/indexed-folders?limit=100${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`,
   disconnect: (connectionId: string) => `/oauth-connections/${connectionId}`,
 };
