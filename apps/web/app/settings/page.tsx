@@ -1,6 +1,6 @@
 'use client';
 
-import { FormEvent, useEffect, useState } from 'react';
+import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { ArchiveNav } from '../components/ArchiveNav';
 import { ProtectedSurface } from '../components/ProtectedSurface';
 import {
@@ -71,14 +71,29 @@ function Settings({ sessionConnection }: { sessionConnection: Connection | null 
   const [selectedFolderId, setSelectedFolderId] = useState<string | null>(null);
   const [photos, setPhotos] = useState<IndexedPhoto[]>([]);
   const [photoCursor, setPhotoCursor] = useState<string | null>(null);
+  const [selectedPhotos, setSelectedPhotos] = useState<Set<string>>(new Set());
   const [notice, setNotice] = useState('');
   const [busy, setBusy] = useState(false);
   const [run, setRun] = useState<SyncRun | null>(null);
   const [history, setHistory] = useState<SyncRun[]>([]);
   const [issues, setIssues] = useState<SyncIssue[]>([]);
   const [confirmDisconnect, setConfirmDisconnect] = useState(false);
+  const [dateYear, setDateYear] = useState('');
+  const [dateMonth, setDateMonth] = useState('');
+  const [confirmDate, setConfirmDate] = useState(false);
   const activeSource = sources.find((source) => source.status === 'ACTIVE') ?? null;
   const selectedFolder = folders.find((folder) => folder.id === selectedFolderId) ?? null;
+  const descendantCount = useMemo(
+    () =>
+      selectedFolder
+        ? folders.filter(
+            (folder) =>
+              folder.path.length >= selectedFolder.path.length &&
+              selectedFolder.path.every((segment, index) => folder.path[index] === segment),
+          ).length
+        : 0,
+    [folders, selectedFolder],
+  );
 
   const loadSources = async () =>
     setSources((await apiJson<{ items: Source[] }>('/photo-sources')).items);
@@ -102,7 +117,9 @@ function Settings({ sessionConnection }: { sessionConnection: Connection | null 
     );
     setPhotos((current) => (append ? [...current, ...page.items] : page.items));
     setPhotoCursor(page.nextCursor);
+    if (!append) setSelectedPhotos(new Set());
   };
+
   useEffect(() => {
     void loadSources().catch((error) =>
       setNotice(errorCopy(error, 'No se pudieron cargar las fuentes configuradas.')),
@@ -194,6 +211,56 @@ function Settings({ sessionConnection }: { sessionConnection: Connection | null 
       setNotice('Escaneo encolado. El progreso se actualizará aquí.');
     } catch (error) {
       setNotice(errorCopy(error, 'No se pudo solicitar el escaneo. Inténtalo de nuevo.'));
+    } finally {
+      setBusy(false);
+    }
+  };
+  const removeSelected = async () => {
+    if (
+      !selectedPhotos.size ||
+      !window.confirm(
+        `¿Quitar ${selectedPhotos.size} fotos de este archivo? No se eliminarán de Drive.`,
+      )
+    )
+      return;
+    setBusy(true);
+    try {
+      for (const photoId of selectedPhotos)
+        await apiJson<void>(settingsEndpoint.photo(photoId), { method: 'DELETE' });
+      if (selectedFolderId) await loadPhotos(selectedFolderId);
+      if (activeSource) await loadArchive(activeSource.id);
+      setNotice(`${selectedPhotos.size} fotos se quitaron de este archivo. Drive no se modificó.`);
+      setSelectedPhotos(new Set());
+    } catch (error) {
+      setNotice(errorCopy(error, 'No se pudieron quitar todas las fotos seleccionadas.'));
+    } finally {
+      setBusy(false);
+    }
+  };
+  const applyFolderDate = async () => {
+    if (!selectedFolder) return;
+    const precision = dateMonth ? 'MONTH' : 'YEAR';
+    setBusy(true);
+    try {
+      const result = await apiJson<{ affectedCount: number }>(
+        settingsEndpoint.folderDate(selectedFolder.id),
+        {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            year: Number(dateYear),
+            ...(dateMonth ? { month: Number(dateMonth) } : {}),
+            precision,
+            recursive: true,
+            reason: 'Edición recursiva desde la carpeta indexada',
+          }),
+        },
+      );
+      setConfirmDate(false);
+      setNotice(`Fecha aplicada a ${result.affectedCount} fotos de la carpeta y sus subcarpetas.`);
+      await loadPhotos(selectedFolder.id);
+    } catch (error) {
+      setNotice(errorCopy(error, 'No se pudo aplicar la fecha. Revisa el año y el mes.'));
     } finally {
       setBusy(false);
     }
@@ -369,28 +436,113 @@ function Settings({ sessionConnection }: { sessionConnection: Connection | null 
                         : 'Carpeta activa'}
                     </span>
                   </div>
-                  {!photos.length ? (
-                    <p>Esta carpeta no contiene fotos activas indexadas.</p>
-                  ) : (
-                    <div className={styles.photoGrid}>
-                      {photos.map((photo) => (
-                        <article key={photo.id}>
-                          <img src={mediaUrl(api, photo.thumbnailUrl)} alt="" loading="lazy" />
-                          <span>{photo.fileName}</span>
-                          <small>Precisión: {photo.effectiveDate.precision}</small>
-                        </article>
-                      ))}
-                    </div>
-                  )}
-                  {photoCursor && selectedFolderId && (
-                    <button
-                      onClick={() => void loadPhotos(selectedFolderId, photoCursor, true)}
-                      disabled={busy}
-                    >
-                      Cargar más fotos
-                    </button>
-                  )}
                 </>
+              )}
+              {!photos.length ? (
+                <p>Esta carpeta no contiene fotos activas indexadas.</p>
+              ) : (
+                <div className={styles.photoGrid}>
+                  {photos.map((photo) => (
+                    <label
+                      key={photo.id}
+                      className={selectedPhotos.has(photo.id) ? styles.selectedPhoto : ''}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={selectedPhotos.has(photo.id)}
+                        onChange={() =>
+                          setSelectedPhotos((current) => {
+                            const next = new Set(current);
+                            if (next.has(photo.id)) next.delete(photo.id);
+                            else next.add(photo.id);
+                            return next;
+                          })
+                        }
+                      />
+                      <img src={mediaUrl(api, photo.thumbnailUrl)} alt="" loading="lazy" />
+                      <span>{photo.fileName}</span>
+                      <small>{photo.effectiveDate.precision}</small>
+                    </label>
+                  ))}
+                </div>
+              )}
+              <div className={styles.photoActions}>
+                <button
+                  className={styles.danger}
+                  onClick={() => void removeSelected()}
+                  disabled={busy || !selectedPhotos.size}
+                >
+                  Quitar seleccionadas del archivo
+                </button>
+                {photoCursor && selectedFolderId && (
+                  <button
+                    onClick={() => void loadPhotos(selectedFolderId, photoCursor, true)}
+                    disabled={busy}
+                  >
+                    Cargar más fotos
+                  </button>
+                )}
+              </div>
+              {selectedFolder && (
+                <div className={styles.dateEditor}>
+                  <h3>Fecha para carpeta y subcarpetas</h3>
+                  <p>
+                    La decisión afecta esta carpeta y sus {Math.max(0, descendantCount - 1)}{' '}
+                    subcarpetas activas. Los valores se guardan como ajustes manuales y se conservan
+                    en futuros escaneos.
+                  </p>
+                  <div>
+                    <label>
+                      Año
+                      <input
+                        inputMode="numeric"
+                        value={dateYear}
+                        onChange={(event) => setDateYear(event.target.value)}
+                        placeholder="2024"
+                      />
+                    </label>
+                    <label>
+                      Mes opcional
+                      <select
+                        value={dateMonth}
+                        onChange={(event) => setDateMonth(event.target.value)}
+                      >
+                        <option value="">Solo año</option>
+                        {Array.from({ length: 12 }, (_, index) => (
+                          <option key={index + 1} value={index + 1}>
+                            {index + 1}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <button onClick={() => setConfirmDate(true)} disabled={busy || !dateYear}>
+                      Revisar cambio
+                    </button>
+                  </div>
+                </div>
+              )}
+              {confirmDate && selectedFolder && (
+                <div
+                  className={styles.inlineConfirm}
+                  role="alertdialog"
+                  aria-modal="true"
+                  aria-labelledby="date-confirm-title"
+                >
+                  <h3 id="date-confirm-title">Confirmar edición recursiva</h3>
+                  <p>
+                    Se aplicará {dateMonth ? `el mes ${dateMonth} de ` : 'el año '}
+                    {dateYear} a todas las fotos activas de “{selectedFolder.name}” y todas sus
+                    subcarpetas.
+                  </p>
+                  <div>
+                    <button onClick={() => void applyFolderDate()} disabled={busy}>
+                      Confirmar y aplicar
+                    </button>
+                    <button onClick={() => setConfirmDate(false)} disabled={busy}>
+                      Cancelar
+                    </button>
+                  </div>
+                </div>
               )}
             </div>
           </div>
