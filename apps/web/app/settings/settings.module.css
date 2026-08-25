@@ -34,6 +34,10 @@
   font-size: 1.45rem;
   letter-spacing: -0.02em;
 }
+.settings h3 {
+  margin: 0;
+  font-size: 1.05rem;
+}
 .settings p {
   line-height: 1.55;
 }
@@ -124,6 +128,20 @@
   color: #d9ddd2;
   font: inherit;
 }
+.settings select {
+  min-height: 44px;
+  border: 1px solid #758272;
+  padding: 0 12px;
+  background: #151a14;
+  color: #d9ddd2;
+  font: inherit;
+}
+.settings button:focus-visible,
+.settings input:focus-visible,
+.settings select:focus-visible {
+  outline: 3px solid var(--lime);
+  outline-offset: 3px;
+}
 .folderList {
   display: grid !important;
   grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
@@ -164,6 +182,160 @@
 }
 .syncState {
   font-weight: 700;
+}
+.sectionHeading {
+  display: flex !important;
+  align-items: start !important;
+}
+.sourceIdentity {
+  display: grid;
+  gap: 4px;
+  overflow-wrap: anywhere;
+}
+.archiveLayout {
+  display: grid !important;
+  grid-template-columns: minmax(210px, 0.32fr) minmax(0, 1fr);
+  align-items: start !important;
+  border-top: 1px solid var(--line);
+}
+.tree {
+  display: grid;
+  max-height: 640px;
+  overflow-y: auto;
+  border-right: 1px solid var(--line);
+}
+.tree button {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  background: transparent;
+  color: #d9ddd2;
+  text-align: left;
+}
+.tree button span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tree button small {
+  flex: 0 0 auto;
+  color: #aab1a5;
+}
+.tree .currentFolder {
+  background: var(--lime);
+  color: var(--ink);
+}
+.tree .currentFolder small {
+  color: #27300b;
+}
+.folderContents {
+  display: grid !important;
+  min-width: 0;
+  gap: 24px !important;
+  padding: 20px;
+}
+.breadcrumb {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  color: #aab1a5;
+  font-size: 0.82rem;
+}
+.breadcrumb span:not(:last-child)::after {
+  content: '/';
+  margin-inline-start: 5px;
+}
+.folderSummary {
+  display: grid !important;
+  justify-content: initial !important;
+  gap: 4px !important;
+}
+.photoGrid {
+  display: grid !important;
+  grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+  align-items: stretch !important;
+  gap: 12px !important;
+}
+.photoGrid label {
+  position: relative;
+  display: grid;
+  min-width: 0;
+  gap: 6px;
+  padding: 8px;
+  border: 1px solid #526050;
+  cursor: pointer;
+}
+.photoGrid label:focus-within,
+.selectedPhoto {
+  border-color: var(--lime) !important;
+  background: #1c2417;
+}
+.photoGrid input {
+  position: absolute;
+  z-index: 1;
+  top: 14px;
+  left: 14px;
+  min-height: 18px;
+  width: 18px;
+}
+.photoGrid img {
+  width: 100%;
+  aspect-ratio: 1;
+  object-fit: cover;
+  background: #283027;
+}
+.photoGrid span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.photoGrid small {
+  color: #aab1a5;
+}
+.photoActions {
+  justify-content: flex-start !important;
+}
+.dateEditor,
+.inlineConfirm {
+  display: grid !important;
+  justify-content: initial !important;
+  gap: 14px !important;
+  padding-block: 22px;
+  border-top: 1px solid var(--line);
+}
+.dateEditor > div,
+.inlineConfirm > div {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-start !important;
+  gap: 12px !important;
+}
+.dateEditor label {
+  display: grid;
+  gap: 6px;
+}
+.inlineConfirm {
+  padding: 20px;
+  background: #1a2118;
+}
+.history {
+  display: grid;
+  gap: 1px;
+  margin: 0;
+  padding: 0;
+  background: var(--line);
+  list-style: none;
+}
+.history li {
+  display: flex;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 12px;
+  background: #121611;
 }
 .settings dl {
   display: grid;
@@ -207,5 +379,16 @@
   }
   .settings dl {
     grid-template-columns: repeat(2, 1fr);
+  }
+  .archiveLayout {
+    grid-template-columns: 1fr;
+  }
+  .tree {
+    max-height: 300px;
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+  .folderContents {
+    padding-inline: 0;
   }
 }
