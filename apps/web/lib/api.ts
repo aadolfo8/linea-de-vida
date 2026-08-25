@@ -75,5 +75,7 @@ export const settingsEndpoint = {
     `/photo-sources/${sourceId}/indexed-folders?limit=100${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`,
   folderPhotos: (folderId: string, cursor?: string) =>
     `/indexed-folders/${folderId}/photos?limit=30${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`,
+  folderDate: (folderId: string) => `/indexed-folders/${folderId}/date-override`,
+  photo: (photoId: string) => `/photos/${photoId}`,
   disconnect: (connectionId: string) => `/oauth-connections/${connectionId}`,
 };
