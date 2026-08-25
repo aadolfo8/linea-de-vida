@@ -1,10 +1,12 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   createRateLimitMiddleware,
+  createResilientRateLimitStore,
   isAllowedOrigin,
   loadRuntimeConfig,
   requestIdMiddleware,
   securityHeadersMiddleware,
+  type RateLimitStore,
 } from '../src/production';
 import { CsrfGuard } from '../src/auth';
 
@@ -46,7 +48,7 @@ describe('production controls', () => {
     expect(() => new CsrfGuard().canActivate(context)).toThrow('origin is not allowed');
   });
 
-  it('rate limits mutations per signed user', () => {
+  it('rate limits mutations per signed user and returns Retry-After', async () => {
     const middleware = createRateLimitMiddleware(
       loadRuntimeConfig({ RATE_LIMIT_MUTATION_MAX: '1' }),
     );
@@ -58,14 +60,127 @@ describe('production controls', () => {
     };
     const request: any = {
       method: 'POST',
+      originalUrl: '/v1/photo-sources',
       signedCookies: { lv_session: 'user-1' },
       ip: '127.0.0.1',
     };
     const next = vi.fn();
-    middleware(request, response, next);
-    middleware(request, response, next);
+    await middleware(request, response, next);
+    await middleware(request, response, next);
     expect(next).toHaveBeenCalledTimes(1);
     expect(response.status).toHaveBeenCalledWith(429);
+    expect(response.setHeader).toHaveBeenCalledWith('Retry-After', expect.any(String));
+  });
+
+  it('isolates timeline exhaustion from session and unauthenticated OAuth capacity', async () => {
+    const middleware = createRateLimitMiddleware(loadRuntimeConfig({ RATE_LIMIT_MAX: '1' }));
+    const response: any = {
+      locals: { requestId: 'request-id' },
+      setHeader: vi.fn(),
+      status: vi.fn().mockReturnThis(),
+      json: vi.fn(),
+    };
+    const next = vi.fn();
+    const base = { method: 'GET', signedCookies: { lv_session: 'user-1' }, ip: '127.0.0.1' };
+    await middleware({ ...base, originalUrl: '/v1/timeline/feed' } as any, response, next);
+    await middleware({ ...base, originalUrl: '/v1/timeline/feed' } as any, response, next);
+    await middleware({ ...base, originalUrl: '/v1/me' } as any, response, next);
+    await middleware(
+      {
+        method: 'GET',
+        originalUrl: '/v1/auth/google/callback',
+        signedCookies: {},
+        ip: '127.0.0.2',
+      } as any,
+      response,
+      next,
+    );
+    expect(response.status).toHaveBeenCalledTimes(1);
+    expect(next).toHaveBeenCalledTimes(3);
+  });
+
+  it('gives OAuth callbacks protected capacity independent from authorization traffic', async () => {
+    const middleware = createRateLimitMiddleware(
+      loadRuntimeConfig({ RATE_LIMIT_MUTATION_MAX: '20' }),
+    );
+    const response: any = {
+      locals: { requestId: 'oauth-request-id' },
+      setHeader: vi.fn(),
+      status: vi.fn().mockReturnThis(),
+      json: vi.fn(),
+    };
+    const next = vi.fn();
+    const request = { method: 'POST', signedCookies: {}, ip: '127.0.0.3' };
+
+    for (let attempt = 0; attempt < 20; attempt += 1)
+      await middleware(
+        { ...request, originalUrl: '/v1/auth/google/authorize' } as any,
+        response,
+        next,
+      );
+    await middleware(
+      { ...request, method: 'GET', originalUrl: '/v1/auth/google/callback' } as any,
+      response,
+      next,
+    );
+
+    expect(next).toHaveBeenCalledTimes(21);
+    expect(response.status).not.toHaveBeenCalled();
+
+    for (let attempt = 0; attempt < 20; attempt += 1)
+      await middleware(
+        { ...request, method: 'GET', originalUrl: '/v1/auth/google/callback' } as any,
+        response,
+        next,
+      );
+
+    expect(response.status).toHaveBeenCalledWith(429);
+    expect(response.setHeader).toHaveBeenCalledWith('Retry-After', expect.any(String));
+    expect(response.json).toHaveBeenCalledWith(
+      expect.objectContaining({ code: 'RATE_LIMITED', requestId: 'oauth-request-id' }),
+    );
+  });
+
+  it('uses a bounded per-process fallback and returns to Redis when it recovers', async () => {
+    const redisError = new Error("Stream isn't writeable and enableOfflineQueue options is false");
+    const primary: RateLimitStore = {
+      increment: vi
+        .fn()
+        .mockRejectedValueOnce(redisError)
+        .mockRejectedValueOnce(redisError)
+        .mockResolvedValueOnce({ count: 1, retryAfterMs: 60_000 }),
+    };
+    const middleware = createRateLimitMiddleware(
+      loadRuntimeConfig({ RATE_LIMIT_MUTATION_MAX: '1' }),
+      createResilientRateLimitStore(primary),
+    );
+    const response: any = {
+      locals: { requestId: 'fallback-request-id' },
+      setHeader: vi.fn(),
+      status: vi.fn().mockReturnThis(),
+      json: vi.fn(),
+    };
+    const request: any = {
+      method: 'POST',
+      originalUrl: '/v1/photo-sources',
+      signedCookies: { lv_session: 'user-1' },
+      ip: '127.0.0.1',
+    };
+    const next = vi.fn();
+
+    await middleware(request, response, next);
+    await middleware(request, response, next);
+    await middleware(request, response, next);
+
+    expect(primary.increment).toHaveBeenCalledTimes(3);
+    expect(primary.increment).toHaveBeenCalledWith('rate:mutation:user-1', 60_000);
+    expect(next).toHaveBeenCalledTimes(2);
+    expect(response.status).toHaveBeenCalledTimes(1);
+    expect(response.status).toHaveBeenCalledWith(429);
+    expect(response.setHeader).toHaveBeenCalledWith('Retry-After', expect.any(String));
+    expect(response.json).toHaveBeenCalledWith(
+      expect.objectContaining({ code: 'RATE_LIMITED', requestId: 'fallback-request-id' }),
+    );
   });
 
   it('adds security and request-id headers without logging private request fields', () => {
