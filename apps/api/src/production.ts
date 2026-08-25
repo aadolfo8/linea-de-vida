@@ -129,25 +129,84 @@ export const securityHeadersMiddleware = (_: Request, response: Response, next: 
 };
 
 type Bucket = { count: number; resetAt: number };
-export function createRateLimitMiddleware(config: RuntimeConfig) {
-  const buckets = new Map<string, Bucket>();
-  return (request: Request, response: Response, next: NextFunction) => {
-    const mutation = ['POST', 'PUT', 'PATCH', 'DELETE'].includes(request.method);
-    const limit = mutation ? config.mutationRateLimitMax : config.rateLimitMax;
-    const identity = request.signedCookies?.lv_session ?? request.ip ?? 'anonymous';
-    const key = `${mutation ? 'write' : 'read'}:${identity}`;
+export type RateLimitStore = {
+  increment(key: string, windowMs: number): Promise<{ count: number; retryAfterMs: number }>;
+};
+
+export type TrafficClass =
+  | 'oauthAuthorize'
+  | 'oauthCallback'
+  | 'auth'
+  | 'timeline'
+  | 'media'
+  | 'mutation'
+  | 'json';
+
+export function classifyTraffic(
+  request: Pick<Request, 'method' | 'originalUrl' | 'url'>,
+): TrafficClass {
+  const path = (request.originalUrl || request.url || '').split('?', 1)[0];
+  if (/^\/v1\/(auth\/google|oauth\/google\/drive)\/callback$/.test(path)) return 'oauthCallback';
+  if (/^\/v1\/(auth\/google|oauth\/google)/.test(path)) return 'oauthAuthorize';
+  if (path === '/v1/me' || path.startsWith('/v1/auth/')) return 'auth';
+  if (/^\/v1\/photos\/[^/]+\/(thumbnail|content)$/.test(path)) return 'media';
+  if (path.startsWith('/v1/timeline/')) return 'timeline';
+  if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(request.method)) return 'mutation';
+  return 'json';
+}
+
+class MemoryRateLimitStore implements RateLimitStore {
+  private readonly buckets = new Map<string, Bucket>();
+  async increment(key: string, windowMs: number) {
     const now = Date.now();
-    const bucket = buckets.get(key);
+    const bucket = this.buckets.get(key);
     const current =
-      !bucket || bucket.resetAt <= now
-        ? { count: 0, resetAt: now + config.rateLimitWindowMs }
-        : bucket;
+      !bucket || bucket.resetAt <= now ? { count: 0, resetAt: now + windowMs } : bucket;
     current.count += 1;
-    buckets.set(key, current);
+    this.buckets.set(key, current);
+    return { count: current.count, retryAfterMs: Math.max(1, current.resetAt - now) };
+  }
+}
+
+export function createResilientRateLimitStore(
+  primary: RateLimitStore,
+  fallback: RateLimitStore = new MemoryRateLimitStore(),
+): RateLimitStore {
+  return {
+    increment: async (key, windowMs) => {
+      try {
+        return await primary.increment(key, windowMs);
+      } catch {
+        return fallback.increment(key, windowMs);
+      }
+    },
+  };
+}
+
+export function createRateLimitMiddleware(
+  config: RuntimeConfig,
+  store: RateLimitStore = new MemoryRateLimitStore(),
+) {
+  return async (request: Request, response: Response, next: NextFunction) => {
+    const trafficClass = classifyTraffic(request);
+    const limits: Record<TrafficClass, number> = {
+      oauthAuthorize: Math.max(20, config.mutationRateLimitMax),
+      oauthCallback: Math.max(20, config.mutationRateLimitMax),
+      auth: Math.max(30, Math.ceil(config.rateLimitMax / 2)),
+      timeline: config.rateLimitMax,
+      media: Math.max(config.rateLimitMax * 4, 240),
+      mutation: config.mutationRateLimitMax,
+      json: config.rateLimitMax,
+    };
+    const limit = limits[trafficClass];
+    const sessionId = request.signedCookies?.lv_session;
+    const identity = sessionId || request.ip || 'anonymous';
+    const key = `rate:${trafficClass}:${identity}`;
+    const current = await store.increment(key, config.rateLimitWindowMs);
     response.setHeader('RateLimit-Limit', String(limit));
     response.setHeader('RateLimit-Remaining', String(Math.max(0, limit - current.count)));
     if (current.count > limit) {
-      response.setHeader('Retry-After', String(Math.ceil((current.resetAt - now) / 1000)));
+      response.setHeader('Retry-After', String(Math.ceil(current.retryAfterMs / 1000)));
       return response.status(429).json({
         code: 'RATE_LIMITED',
         message: 'Too many requests.',
