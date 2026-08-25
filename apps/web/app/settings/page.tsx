@@ -5,7 +5,7 @@ import { ArchiveNav } from '../components/ArchiveNav';
 import { ProtectedSurface } from '../components/ProtectedSurface';
 import {
   activeDriveConnection,
-  apiCall,
+  ApiError,
   apiJson,
   settingsEndpoint,
   type Connection,
@@ -24,6 +24,14 @@ type SyncRun = {
   issueCount?: number;
 };
 type SyncIssue = { id: string; message?: string; code?: string };
+
+const errorCopy = (error: unknown, fallback: string) => {
+  if (!(error instanceof ApiError)) return fallback;
+  const reference = error.requestId ? ` Referencia: ${error.requestId}.` : '';
+  if (error.status === 429)
+    return `Se alcanzó el límite temporal. Reintenta en ${error.retryAfterSeconds ?? 'unos'} segundos.${reference}`;
+  return `${fallback}${reference}`;
+};
 
 export default function SettingsPage() {
   return (
@@ -51,14 +59,18 @@ function Settings({ sessionConnection }: { sessionConnection: Connection | null 
   const loadSources = async () =>
     setSources((await apiJson<{ items: Source[] }>('/photo-sources')).items);
   useEffect(() => {
-    void loadSources().catch(() => setNotice('No se pudieron cargar las carpetas configuradas.'));
+    void loadSources().catch((error) =>
+      setNotice(errorCopy(error, 'No se pudieron cargar las carpetas configuradas.')),
+    );
   }, []);
   useEffect(() => {
-    if (!run || ['SUCCEEDED', 'FAILED', 'CANCELLED'].includes(run.status)) return;
+    if (!run || ['SUCCEEDED', 'PARTIAL', 'FAILED', 'CANCELLED'].includes(run.status)) return;
     const timer = window.setInterval(() => {
       void apiJson<SyncRun>(settingsEndpoint.run(run.id))
         .then(setRun)
-        .catch(() => setNotice('No se pudo actualizar el estado del escaneo.'));
+        .catch((error) =>
+          setNotice(errorCopy(error, 'No se pudo actualizar el estado del escaneo.')),
+        );
     }, 2500);
     return () => window.clearInterval(timer);
   }, [run]);
@@ -79,10 +91,8 @@ function Settings({ sessionConnection }: { sessionConnection: Connection | null 
       );
       setFolders(page.items);
       setNotice('Carpeta validada. Puedes elegir una hija o usar esta carpeta.');
-    } catch {
-      setNotice(
-        'No se pudo abrir esa carpeta. Comprueba que sea una carpeta de Drive disponible para esta cuenta.',
-      );
+    } catch (error) {
+      setNotice(errorCopy(error, 'No se pudo abrir esa carpeta de Drive.'));
     } finally {
       setBusy(false);
     }
@@ -103,10 +113,8 @@ function Settings({ sessionConnection }: { sessionConnection: Connection | null 
       });
       await loadSources();
       setNotice('Carpeta guardada. Ya puedes solicitar el primer escaneo.');
-    } catch {
-      setNotice(
-        'No fue posible guardar esa carpeta. Solo se admite una fuente activa en esta etapa.',
-      );
+    } catch (error) {
+      setNotice(errorCopy(error, 'No fue posible guardar esa carpeta.'));
     } finally {
       setBusy(false);
     }
@@ -114,12 +122,10 @@ function Settings({ sessionConnection }: { sessionConnection: Connection | null 
   const sync = async (source: Source) => {
     setBusy(true);
     try {
-      const response = await apiCall(settingsEndpoint.sync(source.id), { method: 'POST' });
-      if (!response.ok) throw new Error('sync');
-      setRun((await response.json()) as SyncRun);
+      setRun(await apiJson<SyncRun>(settingsEndpoint.sync(source.id), { method: 'POST' }));
       setNotice('Escaneo encolado. El progreso se actualizará aquí.');
-    } catch {
-      setNotice('No se pudo solicitar el escaneo. Inténtalo de nuevo.');
+    } catch (error) {
+      setNotice(errorCopy(error, 'No se pudo solicitar el escaneo. Inténtalo de nuevo.'));
     } finally {
       setBusy(false);
     }
@@ -128,16 +134,17 @@ function Settings({ sessionConnection }: { sessionConnection: Connection | null 
     if (!connection) return;
     setBusy(true);
     try {
-      const response = await apiCall(settingsEndpoint.disconnect(connection.id), {
+      await apiJson<void>(settingsEndpoint.disconnect(connection.id), {
         method: 'DELETE',
       });
-      if (!response.ok) throw new Error('disconnect');
       setConnection(null);
       setSources([]);
       setConfirmDisconnect(false);
       setNotice('La conexión se ha desconectado. Las fuentes han quedado inactivas.');
-    } catch {
-      setNotice('No se pudo desconectar Drive. La conexión se mantiene sin cambios.');
+    } catch (error) {
+      setNotice(
+        errorCopy(error, 'No se pudo desconectar Drive. La conexión se mantiene sin cambios.'),
+      );
     } finally {
       setBusy(false);
     }

@@ -2,7 +2,7 @@
 
 import useEmblaCarousel from 'embla-carousel-react';
 import { type KeyboardEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { api, apiCall } from '../../lib/api';
+import { api, ApiError, apiJson } from '../../lib/api';
 import { mediaUrl } from '../../lib/media';
 import styles from './timeline-experience.module.css';
 
@@ -34,6 +34,9 @@ export function TimelineExperience() {
   const [photos, setPhotos] = useState<Photo[]>([]);
   const [cursor, setCursor] = useState<string | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
+  const [paginationError, setPaginationError] = useState('');
+  const [cooldownUntil, setCooldownUntil] = useState(0);
+  const [clock, setClock] = useState(0);
   const [activePeriod, setActivePeriod] = useState<string | null>(null);
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
   const sections = useRef(new Map<string, HTMLElement>());
@@ -44,19 +47,26 @@ export function TimelineExperience() {
     loading.current = true;
     setLoadingMore(true);
     try {
-      const response = await apiCall(
+      const page = await apiJson<FeedPage>(
         `/timeline/feed?limit=30${next ? `&cursor=${encodeURIComponent(next)}` : ''}`,
       );
-      if (!response.ok) throw new Error('feed');
-      const page = (await response.json()) as FeedPage;
       setPhotos((current) => {
         const known = new Set((replace ? [] : current).map((photo) => photo.id));
         return [...(replace ? [] : current), ...page.items.filter((photo) => !known.has(photo.id))];
       });
       setCursor(page.nextCursor);
+      setPaginationError('');
       setState('ready');
-    } catch {
-      setState('error');
+    } catch (error) {
+      const rateLimited = error instanceof ApiError && error.status === 429;
+      if (rateLimited) setCooldownUntil(Date.now() + (error.retryAfterSeconds ?? 5) * 1000);
+      const message = rateLimited
+        ? `Se ha pausado la carga para no saturar el archivo. Espera ${error.retryAfterSeconds ?? 5} segundos y reintenta.`
+        : 'No se pudo cargar el siguiente tramo. Las fotos ya cargadas siguen disponibles.';
+      if (photos.length || !replace) {
+        setPaginationError(message);
+        setState('ready');
+      } else setState('error');
     } finally {
       loading.current = false;
       setLoadingMore(false);
@@ -65,6 +75,16 @@ export function TimelineExperience() {
   useEffect(() => {
     void load(null, true);
   }, []);
+  useEffect(() => {
+    if (!cooldownUntil || cooldownUntil <= Date.now()) return;
+    setClock(Date.now());
+    const timer = window.setInterval(() => {
+      const now = Date.now();
+      setClock(now);
+      if (now >= cooldownUntil) window.clearInterval(timer);
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [cooldownUntil]);
   const groups = useMemo(() => {
     const byPeriod = new Map<string, { key: string; label: string; photos: Photo[] }>();
     for (const photo of photos) {
@@ -97,13 +117,14 @@ export function TimelineExperience() {
     if (!cursor || !sentinel.current || !('IntersectionObserver' in window)) return;
     const observer = new IntersectionObserver(
       ([entry]) => {
-        if (entry.isIntersecting) void load(cursor);
+        if (entry.isIntersecting && Date.now() >= cooldownUntil && !paginationError)
+          void load(cursor);
       },
       { rootMargin: '640px 0px' },
     );
     observer.observe(sentinel.current);
     return () => observer.disconnect();
-  }, [cursor]);
+  }, [cursor, cooldownUntil, paginationError]);
   const jumpTo = (key: string) => {
     setActivePeriod(key);
     sections.current
@@ -234,6 +255,20 @@ export function TimelineExperience() {
             >
               {loadingMore ? 'Cargando el siguiente tramo…' : 'Cargar el siguiente tramo'}
             </button>
+          )}
+          {paginationError && (
+            <section className={styles.paginationError} role="alert">
+              <p>{paginationError}</p>
+              <button
+                onClick={() => {
+                  setPaginationError('');
+                  void load(cursor);
+                }}
+                disabled={loadingMore || clock < cooldownUntil}
+              >
+                Reintentar carga
+              </button>
+            </section>
           )}
         </>
       )}
@@ -387,8 +422,12 @@ function PhotoDialog({
         </header>
         <div className={styles.emblaViewport} ref={viewportRef} aria-roledescription="carrusel">
           <div className={styles.emblaContainer}>
-            {photos.map((item) => (
-              <GallerySlide key={item.id} photo={item} />
+            {photos.map((item, index) => (
+              <GallerySlide
+                key={item.id}
+                photo={item}
+                loadOriginal={galleryOriginalIndexes(selectedIndex, photos.length).has(index)}
+              />
             ))}
           </div>
         </div>
@@ -415,7 +454,7 @@ function PhotoDialog({
               aria-label={`Ver foto ${index + 1}: ${item.fileName}`}
               onClick={() => scrollTo(index)}
             >
-              <img src={mediaUrl(api, item.thumbnailUrl)} alt="" />
+              <img src={mediaUrl(api, item.thumbnailUrl)} alt="" loading="lazy" />
             </button>
           ))}
         </nav>
@@ -423,7 +462,15 @@ function PhotoDialog({
     </div>
   );
 }
-function GallerySlide({ photo }: { photo: Photo }) {
+export function galleryOriginalIndexes(selectedIndex: number, length: number) {
+  if (!length) return new Set<number>();
+  return new Set([
+    selectedIndex,
+    (selectedIndex - 1 + length) % length,
+    (selectedIndex + 1) % length,
+  ]);
+}
+function GallerySlide({ photo, loadOriginal }: { photo: Photo; loadOriginal: boolean }) {
   const [state, setState] = useState<'loading' | 'ready' | 'error'>('loading');
   const unsupported = /^image\/(heic|heif)$/i.test(photo.mimeType);
   return (
@@ -433,6 +480,8 @@ function GallerySlide({ photo }: { photo: Photo }) {
           <p>
             Este formato está indexado, pero el navegador no puede mostrarlo en tamaño completo.
           </p>
+        ) : !loadOriginal ? (
+          <img src={mediaUrl(api, photo.thumbnailUrl)} alt="" loading="lazy" />
         ) : state === 'error' ? (
           <p>
             No se pudo cargar el archivo completo. Puedes cerrar esta vista e intentarlo más tarde.
