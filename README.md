@@ -69,6 +69,10 @@ Para backup PostgreSQL, ejecuta desde un host autorizado `pg_dump --format=custo
 | `GET /v1/oauth-connections/:id/drive/folders/:folderId/children` | Lista solo las hijas de una carpeta solicitada.                         |
 | `GET/POST /v1/photo-sources`                                     | Lista/registra una carpeta concreta del usuario.                        |
 | `POST /v1/photo-sources/:id/sync-runs`                           | Devuelve `202` y encola el escaneo.                                     |
+| `GET /v1/photo-sources/:id/sync-runs`                            | Historial paginado de escaneos de la fuente propia.                     |
+| `GET /v1/photo-sources/:id/indexed-folders`                      | Jerarquía indexada paginada de la fuente propia.                        |
+| `GET /v1/indexed-folders/:id/photos`                             | Fotos activas paginadas de una carpeta propia.                          |
+| `PUT /v1/indexed-folders/:id/date-override`                      | Aplica año o año/mes a la carpeta propia y sus descendientes.           |
 | `GET /v1/sync-runs/:id`                                          | Progreso del propietario.                                               |
 | `GET /v1/sync-runs/:id/issues?cursor=&limit=`                    | Incidencias paginadas del propietario.                                  |
 | `GET /v1/timeline/years`                                         | Años disponibles desde PostgreSQL.                                      |
@@ -79,10 +83,13 @@ Para backup PostgreSQL, ejecuta desde un host autorizado `pg_dump --format=custo
 | `PUT /v1/photos/:id/manual-date`                                 | Crea o reemplaza la fecha manual de una foto propia.                    |
 | `DELETE /v1/photos/:id/manual-date`                              | Elimina el override y restaura la detección.                            |
 | `PUT /v1/photos/manual-date-overrides`                           | Aplica una fecha a un lote propio de hasta 50 fotos.                    |
+| `DELETE /v1/photos/:id`                                          | Retira una foto del archivo local y crea su exclusión de sync.          |
 | `GET /v1/photos/:id/thumbnail`                                   | Proxy privado de JPEG/PNG/WebP; HEIC/HEIF devuelve fallback `415`.      |
 | `GET /v1/photos/:id/content`                                     | Proxy streaming privado del original soportado; HEIC/HEIF se descarga.  |
 
 Todas las rutas salvo health/callback requieren sesión firmada en cookie `httpOnly`; las mutaciones validan `Origin`. Los proxies resuelven y autorizan foto, fuente y conexión activa para el `userId` antes de llamar a Drive; una foto `MISSING` devuelve `410`, una fuente desconectada `503`, y nunca se entrega una URL ni un token de Drive. Los cursores de timeline y galería son opacos y están ligados a su granularidad; no se renderizan colecciones completas. Los agregados se calculan en PostgreSQL sobre el índice efectivo, sin descargar fotografías. La desvinculación marca las fuentes desconectadas y revoca el token; si Google falla, conserva el secreto cifrado solo para reintentar la revocación y bloquea todo nuevo acceso.
+
+Las rutas de gestión verifican que fuente, carpeta y foto pertenezcan al usuario de sesión. La edición de carpeta acepta únicamente precisión `YEAR` o `MONTH`, exige `recursive: true` y actualiza la carpeta seleccionada y todos sus descendientes dentro de una transacción. Retirar una foto elimina solo el registro local y crea la exclusión correspondiente; nunca solicita una escritura o eliminación en Drive. Los filtros diarios calculan el límite superior con aritmética UTC de calendario, incluido el cambio de mes y año.
 
 ## Medios y compatibilidad
 
