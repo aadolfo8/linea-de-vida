@@ -1,20 +1,22 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { apiJson, type Session } from '../../lib/api';
+import { apiJson, isUnauthenticated, type Session } from '../../lib/api';
 
 export function useSession() {
   const [session, setSession] = useState<Session | null>(null);
   const [state, setState] = useState<'loading' | 'ready' | 'signed-out' | 'error'>('loading');
-  useEffect(() => {
+  const load = () => {
+    setState('loading');
     apiJson<Session>('/me')
       .then((data) => {
         setSession(data);
         setState('ready');
       })
-      .catch(() => setState('signed-out'));
-  }, []);
-  return { session, state };
+      .catch((error) => setState(isUnauthenticated(error) ? 'signed-out' : 'error'));
+  };
+  useEffect(load, []);
+  return { session, state, retry: load };
 }
 
 export function ProtectedSurface({
@@ -22,10 +24,17 @@ export function ProtectedSurface({
 }: {
   children: (session: Session) => React.ReactNode;
 }) {
-  const { session, state } = useSession();
+  const { session, state, retry } = useSession();
   useEffect(() => {
     if (state === 'signed-out') window.location.replace('/');
   }, [state]);
+  if (state === 'error')
+    return (
+      <main className="route-pending" aria-live="polite">
+        <p>No se pudo comprobar la sesión. Tu archivo sigue intacto.</p>
+        <button onClick={retry}>Reintentar</button>
+      </main>
+    );
   if (state !== 'ready' || !session)
     return (
       <main className="route-pending" aria-live="polite">
