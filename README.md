@@ -91,6 +91,8 @@ Todas las rutas salvo health/callback requieren sesión firmada en cookie `httpO
 
 Las rutas de gestión verifican que fuente, carpeta y foto pertenezcan al usuario de sesión. La edición de carpeta acepta únicamente precisión `YEAR` o `MONTH`, exige `recursive: true` y actualiza la carpeta seleccionada y todos sus descendientes dentro de una transacción. Retirar una foto elimina solo el registro local y crea la exclusión correspondiente; nunca solicita una escritura o eliminación en Drive. Los filtros diarios calculan el límite superior con aritmética UTC de calendario, incluido el cambio de mes y año.
 
+En Ajustes, la selección en vivo de Drive está separada del archivo indexado. El navegador muestra fuente, jerarquía, breadcrumb, conteos, estado, historial y fotos paginadas con su precisión; permite seleccionar fotos para retirarlas solo del archivo local. La edición de año o año/mes exige una confirmación explícita que identifica la carpeta seleccionada y aplica el cambio a todas sus subcarpetas.
+
 ## Medios y compatibilidad
 
 Los originales se transmiten por streaming, con cancelación al abortar el cliente y timeout acotado por `MEDIA_PROXY_TIMEOUT_MS`; no se almacenan ni se cargan completos en memoria. Los thumbnails pueden usar únicamente una caché **en memoria**, privada, temporal y deshabilitada por defecto en desarrollo (`MEDIA_THUMBNAIL_CACHE_ENABLED=false`). Sus claves son hashes, su TTL y límites de entradas/tamaño se configuran en `.env`; no guarda originales, tokens, URLs de Drive ni metadatos privados. Si la caché falla o excede límites, se omite sin bloquear la respuesta.
