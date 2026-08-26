@@ -552,14 +552,14 @@ export class AppController {
     const { limit, offset } = this.page(cursor, rawLimit, scope);
     const [records, totals, pending] = await Promise.all([
       this.prisma.indexedFolder.findMany({
-      where: { sourceId, userId },
-      orderBy: [{ path: 'asc' }, { id: 'asc' }],
-      skip: offset,
-      take: limit + 1,
-      include: {
-        dateRule: true,
-        _count: { select: { photos: { where: { status: 'ACTIVE' } } } },
-      },
+        where: { sourceId, userId },
+        orderBy: [{ path: 'asc' }, { id: 'asc' }],
+        skip: offset,
+        take: limit + 1,
+        include: {
+          dateRule: true,
+          _count: { select: { photos: { where: { status: 'ACTIVE' } } } },
+        },
       }),
       this.prisma.photo.groupBy({
         by: ['folderId'],
@@ -658,16 +658,14 @@ export class AppController {
       scope: scope as FolderDateRuleScope,
     });
   }
-  @UseGuards(SessionGuard, CsrfGuard) @Delete('indexed-folders/:id/date-override') async removeFolderDate(
-    @CurrentUserId() userId: string,
-    @Param('id') folderId: string,
-  ) {
+  @UseGuards(SessionGuard, CsrfGuard)
+  @Delete('indexed-folders/:id/date-override')
+  async removeFolderDate(@CurrentUserId() userId: string, @Param('id') folderId: string) {
     return this.folderDates.remove(userId, folderId);
   }
-  @UseGuards(SessionGuard) @Get('photo-sources/:id/classification-summary') async classificationSummary(
-    @CurrentUserId() userId: string,
-    @Param('id') sourceId: string,
-  ) {
+  @UseGuards(SessionGuard)
+  @Get('photo-sources/:id/classification-summary')
+  async classificationSummary(@CurrentUserId() userId: string, @Param('id') sourceId: string) {
     const source = await this.prisma.photoSource.findFirst({ where: { id: sourceId, userId } });
     if (!source)
       throw new NotFoundException({ code: 'SOURCE_NOT_FOUND', message: 'Photo source not found.' });
@@ -684,7 +682,9 @@ export class AppController {
       where: { sourceId, userId, status: 'ACTIVE', effectiveDateValue: null },
     });
     return {
-      total: count(['EXIF', 'DRIVE_IMAGE_METADATA', 'TAKEOUT', 'FOLDER', 'FOLDER_RULE', 'MANUAL']) + unclassified,
+      total:
+        count(['EXIF', 'DRIVE_IMAGE_METADATA', 'TAKEOUT', 'FOLDER', 'FOLDER_RULE', 'MANUAL']) +
+        unclassified,
       automatic: count(['EXIF', 'DRIVE_IMAGE_METADATA', 'TAKEOUT', 'FOLDER']),
       folder: count(['FOLDER_RULE']),
       manual: count(['MANUAL']),

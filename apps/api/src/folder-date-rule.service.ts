@@ -34,7 +34,10 @@ export class FolderDateRuleService {
   private async ownedFolder(userId: string, folderId: string) {
     const folder = await this.prisma.indexedFolder.findFirst({ where: { id: folderId, userId } });
     if (!folder)
-      throw new NotFoundException({ code: 'FOLDER_NOT_FOUND', message: 'Indexed folder not found.' });
+      throw new NotFoundException({
+        code: 'FOLDER_NOT_FOUND',
+        message: 'Indexed folder not found.',
+      });
     return folder;
   }
 
