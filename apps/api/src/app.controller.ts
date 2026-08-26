@@ -17,7 +17,7 @@ import {
   ServiceUnavailableException,
   UseGuards,
 } from '@nestjs/common';
-import { PhotoSourceStatus } from '@prisma/client';
+import { DateSource, FolderDateRuleScope, PhotoSourceStatus } from '@prisma/client';
 import { Request, Response } from 'express';
 import { decryptSecret, encryptSecret } from './crypto';
 import { CsrfGuard, CurrentUserId, SessionGuard } from './auth';
@@ -33,6 +33,7 @@ import {
   validateManualDate,
 } from './manual-date.service';
 import { loadRuntimeConfig } from './production';
+import { FolderDateRuleService } from './folder-date-rule.service';
 
 @Controller('v1')
 export class AppController {
@@ -44,6 +45,7 @@ export class AppController {
     @Inject(OAuthStateService) private readonly states: OAuthStateService,
     @Inject(ManualDateService) private readonly manualDates: ManualDateService,
     @Inject(MediaProxyService) private readonly media: MediaProxyService,
+    @Inject(FolderDateRuleService) private readonly folderDates: FolderDateRuleService,
   ) {}
   private loginRedirectUri() {
     return (
@@ -467,18 +469,12 @@ export class AppController {
         code: 'FOLDER_NOT_FOUND',
         message: 'The selected Drive folder is unavailable.',
       });
-    const existing = await this.prisma.photoSource.count({ where: { userId, status: 'ACTIVE' } });
-    if (existing)
-      throw new BadRequestException({
-        code: 'ONE_SOURCE_LIMIT',
-        message: 'Phase 1 accepts one active photo source.',
-      });
     return this.prisma.photoSource.create({
       data: {
         userId,
         oauthConnectionId: connection.id,
         driveFolderId: body.driveFolderId,
-        name: folder.name.slice(0, 200),
+        name: body.name.trim().slice(0, 200),
         type: body.type ?? 'GENERIC',
         status: PhotoSourceStatus.ACTIVE,
       },
@@ -554,17 +550,43 @@ export class AppController {
       throw new NotFoundException({ code: 'SOURCE_NOT_FOUND', message: 'Photo source not found.' });
     const scope = `indexed-folders:${sourceId}`;
     const { limit, offset } = this.page(cursor, rawLimit, scope);
-    const records = await this.prisma.indexedFolder.findMany({
+    const [records, totals, pending] = await Promise.all([
+      this.prisma.indexedFolder.findMany({
       where: { sourceId, userId },
       orderBy: [{ path: 'asc' }, { id: 'asc' }],
       skip: offset,
       take: limit + 1,
-      include: { _count: { select: { photos: { where: { status: 'ACTIVE' } } } } },
-    });
+      include: {
+        dateRule: true,
+        _count: { select: { photos: { where: { status: 'ACTIVE' } } } },
+      },
+      }),
+      this.prisma.photo.groupBy({
+        by: ['folderId'],
+        where: { sourceId, userId, status: 'ACTIVE', folderId: { not: null } },
+        _count: { _all: true },
+      }),
+      this.prisma.photo.groupBy({
+        by: ['folderId'],
+        where: {
+          sourceId,
+          userId,
+          status: 'ACTIVE',
+          folderId: { not: null },
+          effectiveDateValue: null,
+        },
+        _count: { _all: true },
+      }),
+    ]);
+    const totalsByFolder = new Map(totals.map((group) => [group.folderId!, group._count._all]));
+    const pendingByFolder = new Map(pending.map((group) => [group.folderId!, group._count._all]));
     return {
       items: records.slice(0, limit).map(({ _count, ...folder }) => ({
         ...folder,
         photoCount: _count.photos,
+        classifiedPhotoCount:
+          (totalsByFolder.get(folder.id) ?? 0) - (pendingByFolder.get(folder.id) ?? 0),
+        unclassifiedPhotoCount: pendingByFolder.get(folder.id) ?? 0,
       })),
       nextCursor: records.length > limit ? this.cursor(scope, offset + limit) : null,
     };
@@ -574,6 +596,7 @@ export class AppController {
     @Param('id') folderId: string,
     @Query('cursor') cursor?: string,
     @Query('limit') rawLimit?: string,
+    @Query('classification') classification?: string,
   ) {
     const folder = await this.prisma.indexedFolder.findFirst({ where: { id: folderId, userId } });
     if (!folder)
@@ -583,8 +606,22 @@ export class AppController {
       });
     const scope = `indexed-folder-photos:${folderId}`;
     const { limit, offset } = this.page(cursor, rawLimit, scope);
+    const classificationWhere =
+      classification === 'UNCLASSIFIED'
+        ? { effectiveDateValue: null }
+        : classification === 'MANUAL'
+          ? { effectiveDateSource: 'MANUAL' as const }
+          : classification === 'FOLDER'
+            ? { effectiveDateSource: 'FOLDER_RULE' as const }
+            : classification === 'AUTOMATIC'
+              ? {
+                  effectiveDateSource: {
+                    in: ['EXIF', 'DRIVE_IMAGE_METADATA', 'TAKEOUT', 'FOLDER'] as DateSource[],
+                  },
+                }
+              : {};
     const records = await this.prisma.photo.findMany({
-      where: { userId, folderId, status: 'ACTIVE' },
+      where: { userId, folderId, status: 'ACTIVE', ...classificationWhere },
       orderBy: [{ fileName: 'asc' }, { id: 'asc' }],
       skip: offset,
       take: limit + 1,
@@ -601,66 +638,84 @@ export class AppController {
   @UseGuards(SessionGuard, CsrfGuard) @Put('indexed-folders/:id/date-override') async setFolderDate(
     @CurrentUserId() userId: string,
     @Param('id') folderId: string,
-    @Body() body: ManualDateInput & { recursive?: unknown },
+    @Body() body: ManualDateInput & { scope?: unknown },
   ) {
-    if (body?.recursive !== true)
-      throw new BadRequestException({
-        code: 'RECURSIVE_SCOPE_REQUIRED',
-        message: 'Confirm that the selected folder and all descendants must be updated.',
-      });
     if (body.precision !== 'YEAR' && body.precision !== 'MONTH')
       throw new BadRequestException({
         code: 'INVALID_PRECISION',
-        message: 'Folder overrides support YEAR or MONTH precision.',
+        message: 'Folder rules support YEAR or MONTH precision.',
       });
     const manual = validateManualDate(body);
-    const selected = await this.prisma.indexedFolder.findFirst({ where: { id: folderId, userId } });
-    if (!selected)
-      throw new NotFoundException({
-        code: 'FOLDER_NOT_FOUND',
-        message: 'Indexed folder not found.',
-      });
-    const folders = await this.prisma.indexedFolder.findMany({
-      where: { userId, sourceId: selected.sourceId, status: 'ACTIVE' },
-      select: { id: true, parentId: true },
-    });
-    const descendantIds = [selected.id];
-    for (let offset = 0; offset < descendantIds.length; offset++)
-      for (const folder of folders)
-        if (folder.parentId === descendantIds[offset] && !descendantIds.includes(folder.id))
-          descendantIds.push(folder.id);
-    const photos = await this.prisma.photo.findMany({
-      where: { userId, folderId: { in: descendantIds }, status: 'ACTIVE' },
-      select: { id: true },
-    });
-    const maximum = Math.max(1, Number(process.env.FOLDER_DATE_OVERRIDE_MAX ?? 10_000));
-    if (photos.length > maximum)
+    const scope = body.scope ?? 'FALLBACK_DESCENDANTS';
+    if (!Object.values(FolderDateRuleScope).includes(scope as FolderDateRuleScope))
       throw new BadRequestException({
-        code: 'FOLDER_DATE_LIMIT_EXCEEDED',
-        message: `This folder contains more than the defensive limit of ${maximum} active photos.`,
+        code: 'INVALID_FOLDER_RULE_SCOPE',
+        message: 'The folder rule scope is invalid.',
       });
-    await this.prisma.$transaction(
-      async (tx) => {
-        for (let offset = 0; offset < photos.length; offset += 250) {
-          for (const photo of photos.slice(offset, offset + 250)) {
-            await tx.manualDateOverride.upsert({
-              where: { photoId: photo.id },
-              create: { photoId: photo.id, ...manual },
-              update: manual,
-            });
-            await tx.photo.update({
-              where: { id: photo.id },
-              data: {
-                effectiveDateValue: manual.dateValue,
-                effectiveDatePrecision: manual.precision,
-              },
-            });
-          }
-        }
-      },
-      { maxWait: 10_000, timeout: 60_000 },
-    );
-    return { affectedCount: photos.length };
+    return this.folderDates.set(userId, folderId, {
+      dateValue: manual.dateValue,
+      precision: manual.precision,
+      scope: scope as FolderDateRuleScope,
+    });
+  }
+  @UseGuards(SessionGuard, CsrfGuard) @Delete('indexed-folders/:id/date-override') async removeFolderDate(
+    @CurrentUserId() userId: string,
+    @Param('id') folderId: string,
+  ) {
+    return this.folderDates.remove(userId, folderId);
+  }
+  @UseGuards(SessionGuard) @Get('photo-sources/:id/classification-summary') async classificationSummary(
+    @CurrentUserId() userId: string,
+    @Param('id') sourceId: string,
+  ) {
+    const source = await this.prisma.photoSource.findFirst({ where: { id: sourceId, userId } });
+    if (!source)
+      throw new NotFoundException({ code: 'SOURCE_NOT_FOUND', message: 'Photo source not found.' });
+    const groups = await this.prisma.photo.groupBy({
+      by: ['effectiveDateSource'],
+      where: { sourceId, userId, status: 'ACTIVE' },
+      _count: { _all: true },
+    });
+    const count = (sources: string[]) =>
+      groups
+        .filter((group) => sources.includes(group.effectiveDateSource))
+        .reduce((total, group) => total + group._count._all, 0);
+    const unclassified = await this.prisma.photo.count({
+      where: { sourceId, userId, status: 'ACTIVE', effectiveDateValue: null },
+    });
+    return {
+      total: count(['EXIF', 'DRIVE_IMAGE_METADATA', 'TAKEOUT', 'FOLDER', 'FOLDER_RULE', 'MANUAL']) + unclassified,
+      automatic: count(['EXIF', 'DRIVE_IMAGE_METADATA', 'TAKEOUT', 'FOLDER']),
+      folder: count(['FOLDER_RULE']),
+      manual: count(['MANUAL']),
+      unclassified,
+    };
+  }
+  @UseGuards(SessionGuard) @Get('photo-sources/:id/pending-photos') async pendingPhotos(
+    @CurrentUserId() userId: string,
+    @Param('id') sourceId: string,
+    @Query('cursor') cursor?: string,
+    @Query('limit') rawLimit?: string,
+  ) {
+    const source = await this.prisma.photoSource.findFirst({ where: { id: sourceId, userId } });
+    if (!source)
+      throw new NotFoundException({ code: 'SOURCE_NOT_FOUND', message: 'Photo source not found.' });
+    const scope = `source-pending-photos:${sourceId}`;
+    const { limit, offset } = this.page(cursor, rawLimit, scope);
+    const records = await this.prisma.photo.findMany({
+      where: { sourceId, userId, status: 'ACTIVE', effectiveDateValue: null },
+      orderBy: [{ folderId: 'asc' }, { fileName: 'asc' }, { id: 'asc' }],
+      skip: offset,
+      take: limit + 1,
+      include: { override: true },
+    });
+    return {
+      items: records.slice(0, limit).map((photo) => ({
+        ...photoDateResponse(photo),
+        thumbnailUrl: `/v1/photos/${photo.id}/thumbnail`,
+      })),
+      nextCursor: records.length > limit ? this.cursor(scope, offset + limit) : null,
+    };
   }
   @UseGuards(SessionGuard) @Get('sync-runs/:id') async run(
     @CurrentUserId() userId: string,

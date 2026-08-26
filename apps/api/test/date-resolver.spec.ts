@@ -7,8 +7,10 @@ describe('FolderDateParser', () => {
       precision: 'MONTH',
       source: 'FOLDER',
     }));
-  it('parses deterministic full date', () =>
-    expect(parser.parse(['2024-03-14'])).toMatchObject({ precision: 'DAY' }));
+  it('uses a deterministic full date only to classify its month', () =>
+    expect(parser.parse(['2024-03-14'])).toMatchObject({ precision: 'MONTH' }));
+  it('recognizes abbreviated Spanish month folders', () =>
+    expect(parser.parse(['2008', 'Ago'])).toMatchObject({ precision: 'MONTH', source: 'FOLDER' }));
   it('rejects ambiguous folders', () =>
     expect(parser.parse(['vacaciones', '24'])).toMatchObject({
       precision: 'UNKNOWN',
@@ -22,5 +24,5 @@ describe('PhotoDateResolver', () => {
         driveImageTime: '2020-02-03T12:00:00Z',
         folderSegments: ['2024'],
       }),
-    ).toMatchObject({ source: 'DRIVE_IMAGE_METADATA', precision: 'DAY' }));
+    ).toMatchObject({ source: 'DRIVE_IMAGE_METADATA', precision: 'MONTH' }));
 });
