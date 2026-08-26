@@ -1,13 +1,13 @@
 import { NotFoundException } from '@nestjs/common';
 import { describe, expect, it, vi } from 'vitest';
 import { AppController } from '../src/app.controller';
+import { FolderDateRuleService } from '../src/folder-date-rule.service';
 
 function controllerFixture() {
   const photos = [
     { id: 'photo-1', userId: 'owner', driveFileId: 'drive-1', folderId: 'child' },
     { id: 'photo-2', userId: 'owner', driveFileId: 'drive-2', folderId: 'grandchild' },
   ];
-  const overrides: any[] = [];
   const exclusions: any[] = [];
   const updates: any[] = [];
   const prisma: any = {
@@ -37,6 +37,10 @@ function controllerFixture() {
         { id: 'sibling', parentId: 'root' },
       ]),
     },
+    folderDateRule: {
+      upsert: vi.fn(async (args: any) => args.create),
+      deleteMany: vi.fn(async () => ({ count: 1 })),
+    },
     photo: {
       findFirst: vi.fn(
         async ({ where }: any) =>
@@ -57,13 +61,11 @@ function controllerFixture() {
         if (index >= 0) photos.splice(index, 1);
       }),
     },
-    manualDateOverride: {
-      upsert: vi.fn(async (args: any) => overrides.push(args)),
-    },
     photoExclusion: {
       upsert: vi.fn(async (args: any) => exclusions.push(args)),
     },
-    $transaction: async (operation: any) => operation(prisma),
+    $transaction: async (operation: any) =>
+      Array.isArray(operation) ? Promise.all(operation) : operation(prisma),
   };
   const controller = new AppController(
     prisma,
@@ -73,31 +75,43 @@ function controllerFixture() {
     {} as any,
     {} as any,
     {} as any,
+    new FolderDateRuleService(prisma),
   );
-  return { controller, prisma, photos, overrides, exclusions, updates };
+  return { controller, prisma, photos, exclusions, updates };
 }
 
 describe('indexed archive management', () => {
-  it('applies a recursive MONTH override only to the owned folder and descendants', async () => {
+  it('stores an owned fallback folder rule without creating per-photo overrides', async () => {
     const fixture = controllerFixture();
     await expect(
       fixture.controller.setFolderDate('owner', 'child', {
         year: 2024,
         month: 2,
         precision: 'MONTH',
-        recursive: true,
       }),
-    ).resolves.toEqual({ affectedCount: 2 });
-    expect(fixture.overrides).toHaveLength(2);
-    expect(fixture.updates).toHaveLength(2);
-    expect(fixture.overrides[0].update.precision).toBe('MONTH');
+    ).resolves.toMatchObject({
+      rule: { folderId: 'child', precision: 'MONTH', scope: 'FALLBACK_DESCENDANTS' },
+      affectedCount: 0,
+    });
     await expect(
       fixture.controller.setFolderDate('other', 'child', {
         year: 2024,
         precision: 'YEAR',
-        recursive: true,
       }),
     ).rejects.toBeInstanceOf(NotFoundException);
+  });
+
+  it('removes only a rule belonging to the current user', async () => {
+    const fixture = controllerFixture();
+    await expect(fixture.controller.removeFolderDate('owner', 'child')).resolves.toEqual({
+      affectedCount: 0,
+    });
+    expect(fixture.prisma.folderDateRule.deleteMany).toHaveBeenCalledWith({
+      where: { folderId: 'child' },
+    });
+    await expect(fixture.controller.removeFolderDate('other', 'child')).rejects.toBeInstanceOf(
+      NotFoundException,
+    );
   });
 
   it('creates an owned tombstone, removes only local metadata, and hides cross-user deletion', async () => {

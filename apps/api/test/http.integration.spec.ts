@@ -12,6 +12,7 @@ import { PrismaService } from '../src/prisma.service';
 import { SyncService } from '../src/sync.service';
 import { ManualDateService, validateManualDate } from '../src/manual-date.service';
 import { MediaProxyService } from '../src/media-proxy.service';
+import { FolderDateRuleService } from '../src/folder-date-rule.service';
 
 describe('Phase 1 HTTP contracts', () => {
   let app: INestApplication;
@@ -196,6 +197,10 @@ describe('Phase 1 HTTP contracts', () => {
           { provide: PrismaService, useValue: prisma },
           { provide: SyncService, useValue: sync },
           { provide: ManualDateService, useValue: manualDates },
+          {
+            provide: FolderDateRuleService,
+            useValue: { set: async () => ({}), remove: async () => ({}) },
+          },
           MediaProxyService,
           {
             provide: DriveAdapter,

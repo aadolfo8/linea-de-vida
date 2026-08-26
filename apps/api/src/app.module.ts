@@ -9,6 +9,7 @@ import { ManualDateService } from './manual-date.service';
 import { MediaProxyService } from './media-proxy.service';
 import { RetentionService } from './retention.service';
 import { TakeoutMatcher, TakeoutMetadataParser } from './takeout';
+import { FolderDateRuleService } from './folder-date-rule.service';
 @Module({
   controllers: [AppController],
   providers: [
@@ -17,6 +18,7 @@ import { TakeoutMatcher, TakeoutMetadataParser } from './takeout';
     TakeoutMetadataParser,
     TakeoutMatcher,
     ManualDateService,
+    FolderDateRuleService,
     MediaProxyService,
     RetentionService,
     SyncService,

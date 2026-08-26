@@ -22,12 +22,23 @@ type IndexedFolder = {
   path: string[];
   status: 'ACTIVE' | 'MISSING';
   photoCount: number;
+  classifiedPhotoCount: number;
+  unclassifiedPhotoCount: number;
+  dateRule: { precision: string; scope: string } | null;
 };
 type IndexedPhoto = {
   id: string;
+  folderId: string | null;
   fileName: string;
   thumbnailUrl: string;
-  effectiveDate: { precision: string };
+  effectiveDate: { precision: string; origin: string };
+};
+type ClassificationSummary = {
+  total: number;
+  automatic: number;
+  folder: number;
+  manual: number;
+  unclassified: number;
 };
 type SyncRun = {
   id: string;
@@ -48,6 +59,16 @@ const errorCopy = (error: unknown, fallback: string) => {
     return `Se alcanzó el límite temporal. Reintenta en ${error.retryAfterSeconds ?? 'unos'} segundos.${reference}`;
   return `${fallback}${reference}`;
 };
+const originLabel = (origin: string) =>
+  ({
+    EXIF: 'EXIF',
+    DRIVE_IMAGE_METADATA: 'Metadata de Drive',
+    TAKEOUT: 'Google Takeout',
+    FOLDER: 'Nombre de carpeta',
+    FOLDER_RULE: 'Regla de carpeta',
+    MANUAL: 'Corrección manual',
+    NONE: 'Sin fecha',
+  })[origin] ?? origin;
 
 export default function SettingsPage() {
   return (
@@ -65,12 +86,18 @@ export default function SettingsPage() {
 function Settings({ sessionConnection }: { sessionConnection: Connection | null }) {
   const [connection, setConnection] = useState(sessionConnection);
   const [sources, setSources] = useState<Source[]>([]);
+  const [selectedSourceId, setSelectedSourceId] = useState<string | null>(null);
   const [folderId, setFolderId] = useState('');
+  const [sourceName, setSourceName] = useState('');
+  const [sourceType, setSourceType] = useState<Source['type']>('GENERIC');
   const [driveFolders, setDriveFolders] = useState<DriveFolder[]>([]);
   const [folders, setFolders] = useState<IndexedFolder[]>([]);
+  const [summary, setSummary] = useState<ClassificationSummary | null>(null);
   const [selectedFolderId, setSelectedFolderId] = useState<string | null>(null);
   const [photos, setPhotos] = useState<IndexedPhoto[]>([]);
   const [photoCursor, setPhotoCursor] = useState<string | null>(null);
+  const [photoFilter, setPhotoFilter] = useState('ALL');
+  const [pendingView, setPendingView] = useState(false);
   const [selectedPhotos, setSelectedPhotos] = useState<Set<string>>(new Set());
   const [notice, setNotice] = useState('');
   const [busy, setBusy] = useState(false);
@@ -80,8 +107,14 @@ function Settings({ sessionConnection }: { sessionConnection: Connection | null 
   const [confirmDisconnect, setConfirmDisconnect] = useState(false);
   const [dateYear, setDateYear] = useState('');
   const [dateMonth, setDateMonth] = useState('');
+  const [ruleScope, setRuleScope] = useState('FALLBACK_DESCENDANTS');
   const [confirmDate, setConfirmDate] = useState(false);
-  const activeSource = sources.find((source) => source.status === 'ACTIVE') ?? null;
+  const [manualYear, setManualYear] = useState('');
+  const [manualMonth, setManualMonth] = useState('');
+  const [manualEditorOpen, setManualEditorOpen] = useState(false);
+  const activeSources = sources.filter((source) => source.status === 'ACTIVE');
+  const activeSource =
+    activeSources.find((source) => source.id === selectedSourceId) ?? activeSources[0] ?? null;
   const selectedFolder = folders.find((folder) => folder.id === selectedFolderId) ?? null;
   const descendantCount = useMemo(
     () =>
@@ -95,8 +128,15 @@ function Settings({ sessionConnection }: { sessionConnection: Connection | null 
     [folders, selectedFolder],
   );
 
-  const loadSources = async () =>
-    setSources((await apiJson<{ items: Source[] }>('/photo-sources')).items);
+  const loadSources = async () => {
+    const next = (await apiJson<{ items: Source[] }>('/photo-sources')).items;
+    setSources(next);
+    setSelectedSourceId((current) =>
+      next.some((source) => source.id === current && source.status === 'ACTIVE')
+        ? current
+        : (next.find((source) => source.status === 'ACTIVE')?.id ?? null),
+    );
+  };
   const loadArchive = async (sourceId: string) => {
     const all: IndexedFolder[] = [];
     let cursor: string | null = null;
@@ -108,16 +148,34 @@ function Settings({ sessionConnection }: { sessionConnection: Connection | null 
       cursor = page.nextCursor;
     } while (cursor);
     setFolders(all);
+    setSummary(
+      await apiJson<ClassificationSummary>(settingsEndpoint.classificationSummary(sourceId)),
+    );
     setHistory((await apiJson<{ items: SyncRun[] }>(settingsEndpoint.history(sourceId))).items);
     if (!selectedFolderId && all.length) setSelectedFolderId(all[0].id);
   };
   const loadPhotos = async (folderIdValue: string, cursor?: string, append = false) => {
     const page = await apiJson<{ items: IndexedPhoto[]; nextCursor: string | null }>(
-      settingsEndpoint.folderPhotos(folderIdValue, cursor),
+      settingsEndpoint.folderPhotos(
+        folderIdValue,
+        cursor,
+        photoFilter === 'ALL' ? undefined : photoFilter,
+      ),
     );
     setPhotos((current) => (append ? [...current, ...page.items] : page.items));
     setPhotoCursor(page.nextCursor);
     if (!append) setSelectedPhotos(new Set());
+  };
+  const loadPending = async (cursor?: string, append = false) => {
+    if (!activeSource) return;
+    const page = await apiJson<{ items: IndexedPhoto[]; nextCursor: string | null }>(
+      settingsEndpoint.pendingPhotos(activeSource.id, cursor),
+    );
+    setPhotos((current) => (append ? [...current, ...page.items] : page.items));
+    setPhotoCursor(page.nextCursor);
+    if (!append) setSelectedPhotos(new Set());
+    setPhotoFilter('UNCLASSIFIED');
+    setPendingView(true);
   };
 
   useEffect(() => {
@@ -129,6 +187,7 @@ function Settings({ sessionConnection }: { sessionConnection: Connection | null 
     if (!activeSource) {
       setFolders([]);
       setHistory([]);
+      setSummary(null);
       return;
     }
     void loadArchive(activeSource.id).catch((error) =>
@@ -140,10 +199,11 @@ function Settings({ sessionConnection }: { sessionConnection: Connection | null 
       setPhotos([]);
       return;
     }
+    if (pendingView) return;
     void loadPhotos(selectedFolderId).catch((error) =>
       setNotice(errorCopy(error, 'No se pudieron cargar las fotos de esta carpeta.')),
     );
-  }, [selectedFolderId]);
+  }, [selectedFolderId, photoFilter, pendingView]);
   useEffect(() => {
     if (!run || ['SUCCEEDED', 'PARTIAL', 'FAILED', 'CANCELLED'].includes(run.status)) return;
     const timer = window.setInterval(() => {
@@ -191,8 +251,8 @@ function Settings({ sessionConnection }: { sessionConnection: Connection | null 
         body: JSON.stringify({
           oauthConnectionId: connection.id,
           driveFolderId: folderId.trim(),
-          name: 'Carpeta seleccionada',
-          type: 'GENERIC',
+          name: sourceName.trim() || 'Carpeta seleccionada',
+          type: sourceType,
         }),
       });
       await loadSources();
@@ -251,16 +311,62 @@ function Settings({ sessionConnection }: { sessionConnection: Connection | null 
             year: Number(dateYear),
             ...(dateMonth ? { month: Number(dateMonth) } : {}),
             precision,
-            recursive: true,
+            scope: ruleScope,
             reason: 'Edición recursiva desde la carpeta indexada',
           }),
         },
       );
-      setConfirmDate(false);
-      setNotice(`Fecha aplicada a ${result.affectedCount} fotos de la carpeta y sus subcarpetas.`);
+      if (activeSource) await loadArchive(activeSource.id);
       await loadPhotos(selectedFolder.id);
+      setConfirmDate(false);
+      setNotice(`Regla guardada. Se recalcularon ${result.affectedCount} fotos del archivo.`);
     } catch (error) {
       setNotice(errorCopy(error, 'No se pudo aplicar la fecha. Revisa el año y el mes.'));
+    } finally {
+      setBusy(false);
+    }
+  };
+  const applyManualDate = async () => {
+    if (!selectedPhotos.size) return;
+    const precision = manualMonth ? 'MONTH' : 'YEAR';
+    setBusy(true);
+    try {
+      await apiJson<{ items: IndexedPhoto[] }>(settingsEndpoint.manualDates, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          photoIds: [...selectedPhotos],
+          year: Number(manualYear),
+          ...(manualMonth ? { month: Number(manualMonth) } : {}),
+          precision,
+          reason: 'Corrección manual desde la organización del archivo',
+        }),
+      });
+      setManualEditorOpen(false);
+      setSelectedPhotos(new Set());
+      if (pendingView) await loadPending();
+      else if (selectedFolderId) await loadPhotos(selectedFolderId);
+      if (activeSource) await loadArchive(activeSource.id);
+      setNotice('Fecha manual aplicada. La información detectada original se conserva.');
+    } catch (error) {
+      setNotice(errorCopy(error, 'No se pudo aplicar la corrección manual.'));
+    } finally {
+      setBusy(false);
+    }
+  };
+  const removeFolderDate = async () => {
+    if (!selectedFolder || !window.confirm('¿Eliminar esta regla de carpeta?')) return;
+    setBusy(true);
+    try {
+      const result = await apiJson<{ affectedCount: number }>(
+        settingsEndpoint.folderDate(selectedFolder.id),
+        { method: 'DELETE' },
+      );
+      if (activeSource) await loadArchive(activeSource.id);
+      await loadPhotos(selectedFolder.id);
+      setNotice(`Regla eliminada. Se recalcularon ${result.affectedCount} fotos del archivo.`);
+    } catch (error) {
+      setNotice(errorCopy(error, 'No se pudo eliminar la regla de carpeta.'));
     } finally {
       setBusy(false);
     }
@@ -338,6 +444,14 @@ function Settings({ sessionConnection }: { sessionConnection: Connection | null 
           <h2 id="source-picker-title">Configurar fuente</h2>
           <p>Introduce el ID de una carpeta concreta. Nunca se lista la raíz completa de Drive.</p>
           <form onSubmit={(event) => void browse(event)}>
+            <label htmlFor="source-name">Nombre de la fuente</label>
+            <input
+              id="source-name"
+              value={sourceName}
+              onChange={(event) => setSourceName(event.target.value)}
+              placeholder="Fotos familiares antiguas"
+              maxLength={200}
+            />
             <label htmlFor="folder-id">ID de carpeta</label>
             <div>
               <input
@@ -352,6 +466,16 @@ function Settings({ sessionConnection }: { sessionConnection: Connection | null 
               </button>
             </div>
           </form>
+          <label>
+            Tipo de contenido
+            <select
+              value={sourceType}
+              onChange={(event) => setSourceType(event.target.value as Source['type'])}
+            >
+              <option value="GENERIC">Archivo de fotografías</option>
+              <option value="GOOGLE_TAKEOUT">Google Photos Takeout</option>
+            </select>
+          </label>
           {!!driveFolders.length && (
             <div className={styles.folderList} aria-label="Carpetas hijas disponibles">
               {driveFolders.map((folder) => (
@@ -363,7 +487,7 @@ function Settings({ sessionConnection }: { sessionConnection: Connection | null 
             </div>
           )}
           {folderId && (
-            <button onClick={() => void createSource()} disabled={busy || Boolean(activeSource)}>
+            <button onClick={() => void createSource()} disabled={busy}>
               Guardar como fuente
             </button>
           )}
@@ -385,6 +509,22 @@ function Settings({ sessionConnection }: { sessionConnection: Connection | null 
             </button>
           )}
         </div>
+        {activeSources.length > 1 && (
+          <label>
+            Fuente activa
+            <select
+              value={activeSource?.id ?? ''}
+              onChange={(event) => setSelectedSourceId(event.target.value)}
+            >
+              {activeSources.map((source) => (
+                <option key={source.id} value={source.id}>
+                  {source.name} ·{' '}
+                  {source.type === 'GOOGLE_TAKEOUT' ? 'Google Photos Takeout' : 'Archivo'}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
         {!activeSource ? (
           <p>No hay una fuente activa configurada.</p>
         ) : (
@@ -396,6 +536,31 @@ function Settings({ sessionConnection }: { sessionConnection: Connection | null 
             </span>
           </p>
         )}
+        {summary && (
+          <dl className={styles.classificationSummary}>
+            <div>
+              <dt>Automáticas</dt>
+              <dd>{summary.automatic}</dd>
+            </div>
+            <div>
+              <dt>Por carpeta</dt>
+              <dd>{summary.folder}</dd>
+            </div>
+            <div>
+              <dt>Manuales</dt>
+              <dd>{summary.manual}</dd>
+            </div>
+            <div>
+              <dt>Sin clasificar</dt>
+              <dd>{summary.unclassified}</dd>
+            </div>
+          </dl>
+        )}
+        {summary?.unclassified ? (
+          <button onClick={() => void loadPending()}>
+            Revisar {summary.unclassified} pendientes
+          </button>
+        ) : null}
         {activeSource && !folders.length && (
           <p>
             Aún no hay carpetas indexadas. Ejecuta un escaneo correcto para construir la jerarquía.
@@ -408,19 +573,42 @@ function Settings({ sessionConnection }: { sessionConnection: Connection | null 
                 <button
                   key={folder.id}
                   className={folder.id === selectedFolderId ? styles.currentFolder : ''}
-                  onClick={() => setSelectedFolderId(folder.id)}
+                  onClick={() => {
+                    setPendingView(false);
+                    setSelectedFolderId(folder.id);
+                  }}
                   style={{
                     paddingInlineStart: `${12 + Math.max(0, folder.path.length - 1) * 16}px`,
                   }}
                 >
                   <span>{folder.name}</span>
                   <small>
-                    {folder.status === 'MISSING' ? 'No encontrada' : `${folder.photoCount} fotos`}
+                    {folder.status === 'MISSING'
+                      ? 'No encontrada'
+                      : folder.unclassifiedPhotoCount
+                        ? `${folder.unclassifiedPhotoCount} pendientes`
+                        : `${folder.classifiedPhotoCount} clasificadas`}
                   </small>
                 </button>
               ))}
             </nav>
             <div className={styles.folderContents}>
+              {pendingView && summary && (
+                <div className={styles.pendingHeading}>
+                  <div>
+                    <h3>Pendientes de toda la fuente</h3>
+                    <p>{summary.unclassified} fotografías siguen sin fecha suficiente.</p>
+                  </div>
+                  <button
+                    onClick={() => {
+                      setPendingView(false);
+                      setPhotoFilter('ALL');
+                    }}
+                  >
+                    Volver a la carpeta
+                  </button>
+                </div>
+              )}
               {selectedFolder && (
                 <>
                   <nav className={styles.breadcrumb} aria-label="Ruta de la carpeta">
@@ -436,37 +624,106 @@ function Settings({ sessionConnection }: { sessionConnection: Connection | null 
                         : 'Carpeta activa'}
                     </span>
                   </div>
+                  {selectedFolder.dateRule && (
+                    <div className={styles.ruleStatus}>
+                      <span>
+                        Regla directa: {selectedFolder.dateRule.precision} ·{' '}
+                        {selectedFolder.dateRule.scope}
+                      </span>
+                      <button
+                        className={styles.danger}
+                        onClick={() => void removeFolderDate()}
+                        disabled={busy}
+                      >
+                        Eliminar regla
+                      </button>
+                    </div>
+                  )}
                 </>
               )}
               {!photos.length ? (
                 <p>Esta carpeta no contiene fotos activas indexadas.</p>
               ) : (
+                <label>
+                  Mostrar
+                  <select
+                    value={photoFilter}
+                    onChange={(event) => {
+                      setPendingView(false);
+                      setPhotoFilter(event.target.value);
+                    }}
+                  >
+                    <option value="ALL">Todas</option>
+                    <option value="UNCLASSIFIED">Sin clasificar</option>
+                    <option value="AUTOMATIC">Automáticas</option>
+                    <option value="FOLDER">Por carpeta</option>
+                    <option value="MANUAL">Manuales</option>
+                  </select>
+                </label>
+              )}
+              {photos.length ? (
                 <div className={styles.photoGrid}>
                   {photos.map((photo) => (
-                    <label
+                    <article
                       key={photo.id}
                       className={selectedPhotos.has(photo.id) ? styles.selectedPhoto : ''}
                     >
-                      <input
-                        type="checkbox"
-                        checked={selectedPhotos.has(photo.id)}
-                        onChange={() =>
-                          setSelectedPhotos((current) => {
-                            const next = new Set(current);
-                            if (next.has(photo.id)) next.delete(photo.id);
-                            else next.add(photo.id);
-                            return next;
-                          })
-                        }
-                      />
-                      <img src={mediaUrl(api, photo.thumbnailUrl)} alt="" loading="lazy" />
-                      <span>{photo.fileName}</span>
-                      <small>{photo.effectiveDate.precision}</small>
-                    </label>
+                      <label>
+                        <input
+                          type="checkbox"
+                          checked={selectedPhotos.has(photo.id)}
+                          onChange={() =>
+                            setSelectedPhotos((current) => {
+                              const next = new Set(current);
+                              if (next.has(photo.id)) next.delete(photo.id);
+                              else next.add(photo.id);
+                              return next;
+                            })
+                          }
+                        />
+                        <img src={mediaUrl(api, photo.thumbnailUrl)} alt="" loading="lazy" />
+                        <span>{photo.fileName}</span>
+                        <small>
+                          {originLabel(photo.effectiveDate.origin)} ·{' '}
+                          {photo.effectiveDate.precision}
+                        </small>
+                      </label>
+                      {pendingView && photo.folderId && (
+                        <button
+                          className={styles.photoFolderLink}
+                          onClick={() => {
+                            setPendingView(false);
+                            setSelectedFolderId(photo.folderId);
+                          }}
+                        >
+                          Ver carpeta
+                        </button>
+                      )}
+                    </article>
                   ))}
                 </div>
-              )}
+              ) : null}
               <div className={styles.photoActions}>
+                <button
+                  onClick={() =>
+                    setSelectedPhotos(
+                      selectedPhotos.size === photos.length
+                        ? new Set()
+                        : new Set(photos.map((photo) => photo.id)),
+                    )
+                  }
+                  disabled={!photos.length || busy}
+                >
+                  {selectedPhotos.size === photos.length
+                    ? 'Cancelar selección'
+                    : 'Seleccionar visibles'}
+                </button>
+                <button
+                  onClick={() => setManualEditorOpen(true)}
+                  disabled={busy || !selectedPhotos.size}
+                >
+                  Asignar fecha a {selectedPhotos.size || ''} seleccionadas
+                </button>
                 <button
                   className={styles.danger}
                   onClick={() => void removeSelected()}
@@ -474,28 +731,83 @@ function Settings({ sessionConnection }: { sessionConnection: Connection | null 
                 >
                   Quitar seleccionadas del archivo
                 </button>
-                {photoCursor && selectedFolderId && (
+                {photoCursor && (
                   <button
-                    onClick={() => void loadPhotos(selectedFolderId, photoCursor, true)}
+                    onClick={() =>
+                      void (pendingView
+                        ? loadPending(photoCursor, true)
+                        : selectedFolderId
+                          ? loadPhotos(selectedFolderId, photoCursor, true)
+                          : Promise.resolve())
+                    }
                     disabled={busy}
                   >
                     Cargar más fotos
                   </button>
                 )}
               </div>
+              {manualEditorOpen && selectedPhotos.size > 0 && (
+                <div className={styles.manualEditor}>
+                  <div>
+                    <h3>Corregir {selectedPhotos.size} fotografías</h3>
+                    <p>
+                      La corrección manual tendrá prioridad, pero no eliminará la fecha detectada.
+                    </p>
+                  </div>
+                  <label>
+                    Año
+                    <input
+                      type="number"
+                      inputMode="numeric"
+                      min="1900"
+                      max="2100"
+                      value={manualYear}
+                      onChange={(event) => setManualYear(event.target.value)}
+                      placeholder="1998"
+                    />
+                  </label>
+                  <label>
+                    Mes opcional
+                    <select
+                      value={manualMonth}
+                      onChange={(event) => setManualMonth(event.target.value)}
+                    >
+                      <option value="">Solo año</option>
+                      {Array.from({ length: 12 }, (_, index) => (
+                        <option key={index + 1} value={index + 1}>
+                          {new Intl.DateTimeFormat('es', { month: 'long' }).format(
+                            new Date(Date.UTC(2024, index, 1)),
+                          )}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <div>
+                    <button onClick={() => void applyManualDate()} disabled={busy || !manualYear}>
+                      Aplicar corrección
+                    </button>
+                    <button onClick={() => setManualEditorOpen(false)} disabled={busy}>
+                      Cancelar
+                    </button>
+                  </div>
+                </div>
+              )}
               {selectedFolder && (
                 <div className={styles.dateEditor}>
-                  <h3>Fecha para carpeta y subcarpetas</h3>
+                  <h3>Regla de fecha de carpeta</h3>
                   <p>
-                    La decisión afecta esta carpeta y sus {Math.max(0, descendantCount - 1)}{' '}
-                    subcarpetas activas. Los valores se guardan como ajustes manuales y se conservan
-                    en futuros escaneos.
+                    Puede alcanzar esta carpeta y sus {Math.max(0, descendantCount - 1)} subcarpetas
+                    activas. La regla se conserva en futuros escaneos sin crear correcciones
+                    manuales.
                   </p>
                   <div>
                     <label>
                       Año
                       <input
+                        type="number"
                         inputMode="numeric"
+                        min="1900"
+                        max="2100"
                         value={dateYear}
                         onChange={(event) => setDateYear(event.target.value)}
                         placeholder="2024"
@@ -515,6 +827,21 @@ function Settings({ sessionConnection }: { sessionConnection: Connection | null 
                         ))}
                       </select>
                     </label>
+                    <label>
+                      Aplicar a
+                      <select
+                        value={ruleScope}
+                        onChange={(event) => setRuleScope(event.target.value)}
+                      >
+                        <option value="FALLBACK_DESCENDANTS">
+                          Fotos sin fecha de esta carpeta y subcarpetas
+                        </option>
+                        <option value="ALL_DESCENDANTS">
+                          Todas las fotos de esta carpeta y subcarpetas
+                        </option>
+                        <option value="DIRECT_ONLY">Solo fotos de esta carpeta</option>
+                      </select>
+                    </label>
                     <button onClick={() => setConfirmDate(true)} disabled={busy || !dateYear}>
                       Revisar cambio
                     </button>
@@ -531,8 +858,12 @@ function Settings({ sessionConnection }: { sessionConnection: Connection | null 
                   <h3 id="date-confirm-title">Confirmar edición recursiva</h3>
                   <p>
                     Se aplicará {dateMonth ? `el mes ${dateMonth} de ` : 'el año '}
-                    {dateYear} a todas las fotos activas de “{selectedFolder.name}” y todas sus
-                    subcarpetas.
+                    {dateYear}{' '}
+                    {ruleScope === 'DIRECT_ONLY'
+                      ? `a las fotos de “${selectedFolder.name}”.`
+                      : ruleScope === 'ALL_DESCENDANTS'
+                        ? `a todas las fotos de “${selectedFolder.name}” y sus subcarpetas.`
+                        : `solo a las fotos sin una fecha fiable de “${selectedFolder.name}” y sus subcarpetas.`}
                   </p>
                   <div>
                     <button onClick={() => void applyFolderDate()} disabled={busy}>

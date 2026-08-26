@@ -2,6 +2,7 @@ import { Inject, Injectable, NotFoundException, ServiceUnavailableException } fr
 import {
   DatePrecision,
   DateSource,
+  FolderDateRuleScope,
   PhotoStatus,
   Prisma,
   SyncIssueCode,
@@ -16,6 +17,7 @@ import { DriveAdapter, DriveItem, DriveRequestError, isFolder, isImage } from '.
 import { PhotoDateResolver } from './date-resolver';
 import { PrismaService } from './prisma.service';
 import { TakeoutMatcher, TakeoutMetadata, TakeoutMetadataParser } from './takeout';
+import { effectiveDate } from './manual-date.service';
 
 const queue = () =>
   new Queue('photo-sync', {
@@ -218,6 +220,11 @@ export class SyncService {
       item: DriveItem,
       folder: FolderWork,
       indexedFolderId: string,
+      folderRule: {
+        dateValue: Date;
+        precision: DatePrecision;
+        scope: FolderDateRuleScope;
+      } | null,
       candidates: Array<{ fileName: string; metadata: TakeoutMetadata }>,
     ) => {
       const excluded = await this.prisma.photoExclusion.findUnique({
@@ -247,6 +254,13 @@ export class SyncService {
           where: { userId_driveFileId: { userId: run.source.userId, driveFileId: item.id } },
           include: { override: true },
         });
+        const effective = effectiveDate({
+          detectedDate: detected.value,
+          detectedPrecision: detected.precision as DatePrecision,
+          detectedSource: detected.source as DateSource,
+          folderRule,
+          override: existing?.override,
+        });
         const data = {
           sourceId: run.source.id,
           folderId: indexedFolderId,
@@ -267,12 +281,9 @@ export class SyncService {
             where: { id: existing.id },
             data: {
               ...data,
-              ...(existing.override
-                ? {}
-                : {
-                    effectiveDateValue: detected.value,
-                    effectiveDatePrecision: detected.precision as DatePrecision,
-                  }),
+              effectiveDateValue: effective.value,
+              effectiveDatePrecision: effective.precision as DatePrecision,
+              effectiveDateSource: effective.origin as DateSource,
             },
           });
         else
@@ -281,14 +292,19 @@ export class SyncService {
               userId: run.source.userId,
               driveFileId: item.id,
               ...data,
-              effectiveDateValue: detected.value,
-              effectiveDatePrecision: detected.precision as DatePrecision,
+              effectiveDateValue: effective.value,
+              effectiveDatePrecision: effective.precision as DatePrecision,
+              effectiveDateSource: effective.origin as DateSource,
             },
           });
       });
       counts.indexed++;
       return true;
     };
+    const inheritedRules = new Map<
+      string,
+      { dateValue: Date; precision: DatePrecision; scope: FolderDateRuleScope } | null
+    >();
     try {
       while (checkpoint.pendingFolders.length) {
         const folder = checkpoint.pendingFolders[0]!;
@@ -329,7 +345,12 @@ export class SyncService {
             status: 'ACTIVE',
             lastSeenSyncRunId: run.id,
           },
+          include: { dateRule: true },
         });
+        const inherited = parent ? (inheritedRules.get(parent.id) ?? null) : null;
+        const folderRule =
+          indexedFolder.dateRule ?? (inherited?.scope === 'DIRECT_ONLY' ? null : inherited);
+        inheritedRules.set(indexedFolder.id, folderRule);
         const page = await this.retry(() =>
           this.drive.listChildren(run.source.connection, folder.id, folder.cursor),
         );
@@ -391,7 +412,7 @@ export class SyncService {
           await Promise.all(
             images.slice(offset, offset + concurrency).map(async (item) => {
               try {
-                await index(item, folder, indexedFolder.id, candidates);
+                await index(item, folder, indexedFolder.id, folderRule, candidates);
                 counts.processed++;
               } catch {
                 counts.processed++;
