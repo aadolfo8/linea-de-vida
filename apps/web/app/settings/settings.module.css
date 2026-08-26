@@ -192,6 +192,27 @@
   gap: 4px;
   overflow-wrap: anywhere;
 }
+.classificationSummary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 1px;
+  margin: 0;
+  background: var(--line);
+}
+.classificationSummary div {
+  padding: 16px;
+  background: #151a14;
+}
+.classificationSummary dt {
+  color: #aab1a5;
+  font-size: 0.78rem;
+}
+.classificationSummary dd {
+  margin: 6px 0 0;
+  color: var(--lime);
+  font-size: 1.55rem;
+  font-weight: 700;
+}
 .archiveLayout {
   display: grid !important;
   grid-template-columns: minmax(210px, 0.32fr) minmax(0, 1fr);
@@ -238,6 +259,30 @@
   gap: 24px !important;
   padding: 20px;
 }
+.ruleStatus {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid #758272;
+  color: #c9d0bd;
+}
+.pendingHeading {
+  display: flex !important;
+  align-items: end !important;
+  justify-content: space-between !important;
+  gap: 16px;
+  padding: 16px;
+  background: #202815;
+}
+.pendingHeading p {
+  margin: 5px 0 0;
+  color: #c9d0bd;
+}
+.pendingHeading button {
+  flex: 0 0 auto;
+}
 .breadcrumb {
   display: flex;
   flex-wrap: wrap;
@@ -260,16 +305,20 @@
   align-items: stretch !important;
   gap: 12px !important;
 }
-.photoGrid label {
+.photoGrid article {
   position: relative;
+  display: grid;
+  min-width: 0;
+  border: 1px solid #526050;
+}
+.photoGrid label {
   display: grid;
   min-width: 0;
   gap: 6px;
   padding: 8px;
-  border: 1px solid #526050;
   cursor: pointer;
 }
-.photoGrid label:focus-within,
+.photoGrid article:focus-within,
 .selectedPhoto {
   border-color: var(--lime) !important;
   background: #1c2417;
@@ -296,8 +345,35 @@
 .photoGrid small {
   color: #aab1a5;
 }
+.photoFolderLink {
+  min-height: 36px !important;
+  margin: 0 8px 8px;
+  padding: 7px 10px !important;
+  font-size: 0.75rem !important;
+}
 .photoActions {
+  display: flex !important;
+  flex-wrap: wrap;
   justify-content: flex-start !important;
+  gap: 10px !important;
+}
+.manualEditor {
+  display: grid !important;
+  grid-template-columns: minmax(220px, 1fr) repeat(2, minmax(130px, 0.45fr));
+  align-items: end !important;
+  gap: 14px !important;
+  padding: 20px;
+  background: #202815;
+}
+.manualEditor label {
+  display: grid;
+  gap: 6px;
+}
+.manualEditor > div:last-child {
+  grid-column: 1 / -1;
+  display: flex;
+  justify-content: flex-start;
+  gap: 10px;
 }
 .dateEditor,
 .inlineConfirm {
