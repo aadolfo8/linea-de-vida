@@ -197,7 +197,10 @@ describe('Phase 1 HTTP contracts', () => {
           { provide: PrismaService, useValue: prisma },
           { provide: SyncService, useValue: sync },
           { provide: ManualDateService, useValue: manualDates },
-          { provide: FolderDateRuleService, useValue: { set: async () => ({}), remove: async () => ({}) } },
+          {
+            provide: FolderDateRuleService,
+            useValue: { set: async () => ({}), remove: async () => ({}) },
+          },
           MediaProxyService,
           {
             provide: DriveAdapter,

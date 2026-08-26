@@ -347,10 +347,9 @@ export class SyncService {
           },
           include: { dateRule: true },
         });
-        const inherited = parent ? inheritedRules.get(parent.id) ?? null : null;
+        const inherited = parent ? (inheritedRules.get(parent.id) ?? null) : null;
         const folderRule =
-          indexedFolder.dateRule ??
-          (inherited?.scope === 'DIRECT_ONLY' ? null : inherited);
+          indexedFolder.dateRule ?? (inherited?.scope === 'DIRECT_ONLY' ? null : inherited);
         inheritedRules.set(indexedFolder.id, folderRule);
         const page = await this.retry(() =>
           this.drive.listChildren(run.source.connection, folder.id, folder.cursor),

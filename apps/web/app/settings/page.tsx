@@ -113,7 +113,8 @@ function Settings({ sessionConnection }: { sessionConnection: Connection | null 
   const [manualMonth, setManualMonth] = useState('');
   const [manualEditorOpen, setManualEditorOpen] = useState(false);
   const activeSources = sources.filter((source) => source.status === 'ACTIVE');
-  const activeSource = activeSources.find((source) => source.id === selectedSourceId) ?? activeSources[0] ?? null;
+  const activeSource =
+    activeSources.find((source) => source.id === selectedSourceId) ?? activeSources[0] ?? null;
   const selectedFolder = folders.find((folder) => folder.id === selectedFolderId) ?? null;
   const descendantCount = useMemo(
     () =>
@@ -133,7 +134,7 @@ function Settings({ sessionConnection }: { sessionConnection: Connection | null 
     setSelectedSourceId((current) =>
       next.some((source) => source.id === current && source.status === 'ACTIVE')
         ? current
-        : next.find((source) => source.status === 'ACTIVE')?.id ?? null,
+        : (next.find((source) => source.status === 'ACTIVE')?.id ?? null),
     );
   };
   const loadArchive = async (sourceId: string) => {
@@ -147,13 +148,19 @@ function Settings({ sessionConnection }: { sessionConnection: Connection | null 
       cursor = page.nextCursor;
     } while (cursor);
     setFolders(all);
-    setSummary(await apiJson<ClassificationSummary>(settingsEndpoint.classificationSummary(sourceId)));
+    setSummary(
+      await apiJson<ClassificationSummary>(settingsEndpoint.classificationSummary(sourceId)),
+    );
     setHistory((await apiJson<{ items: SyncRun[] }>(settingsEndpoint.history(sourceId))).items);
     if (!selectedFolderId && all.length) setSelectedFolderId(all[0].id);
   };
   const loadPhotos = async (folderIdValue: string, cursor?: string, append = false) => {
     const page = await apiJson<{ items: IndexedPhoto[]; nextCursor: string | null }>(
-      settingsEndpoint.folderPhotos(folderIdValue, cursor, photoFilter === 'ALL' ? undefined : photoFilter),
+      settingsEndpoint.folderPhotos(
+        folderIdValue,
+        cursor,
+        photoFilter === 'ALL' ? undefined : photoFilter,
+      ),
     );
     setPhotos((current) => (append ? [...current, ...page.items] : page.items));
     setPhotoCursor(page.nextCursor);
@@ -461,7 +468,10 @@ function Settings({ sessionConnection }: { sessionConnection: Connection | null 
           </form>
           <label>
             Tipo de contenido
-            <select value={sourceType} onChange={(event) => setSourceType(event.target.value as Source['type'])}>
+            <select
+              value={sourceType}
+              onChange={(event) => setSourceType(event.target.value as Source['type'])}
+            >
               <option value="GENERIC">Archivo de fotografías</option>
               <option value="GOOGLE_TAKEOUT">Google Photos Takeout</option>
             </select>
@@ -508,7 +518,8 @@ function Settings({ sessionConnection }: { sessionConnection: Connection | null 
             >
               {activeSources.map((source) => (
                 <option key={source.id} value={source.id}>
-                  {source.name} · {source.type === 'GOOGLE_TAKEOUT' ? 'Google Photos Takeout' : 'Archivo'}
+                  {source.name} ·{' '}
+                  {source.type === 'GOOGLE_TAKEOUT' ? 'Google Photos Takeout' : 'Archivo'}
                 </option>
               ))}
             </select>
@@ -527,10 +538,22 @@ function Settings({ sessionConnection }: { sessionConnection: Connection | null 
         )}
         {summary && (
           <dl className={styles.classificationSummary}>
-            <div><dt>Automáticas</dt><dd>{summary.automatic}</dd></div>
-            <div><dt>Por carpeta</dt><dd>{summary.folder}</dd></div>
-            <div><dt>Manuales</dt><dd>{summary.manual}</dd></div>
-            <div><dt>Sin clasificar</dt><dd>{summary.unclassified}</dd></div>
+            <div>
+              <dt>Automáticas</dt>
+              <dd>{summary.automatic}</dd>
+            </div>
+            <div>
+              <dt>Por carpeta</dt>
+              <dd>{summary.folder}</dd>
+            </div>
+            <div>
+              <dt>Manuales</dt>
+              <dd>{summary.manual}</dd>
+            </div>
+            <div>
+              <dt>Sin clasificar</dt>
+              <dd>{summary.unclassified}</dd>
+            </div>
           </dl>
         )}
         {summary?.unclassified ? (
@@ -603,8 +626,15 @@ function Settings({ sessionConnection }: { sessionConnection: Connection | null 
                   </div>
                   {selectedFolder.dateRule && (
                     <div className={styles.ruleStatus}>
-                      <span>Regla directa: {selectedFolder.dateRule.precision} · {selectedFolder.dateRule.scope}</span>
-                      <button className={styles.danger} onClick={() => void removeFolderDate()} disabled={busy}>
+                      <span>
+                        Regla directa: {selectedFolder.dateRule.precision} ·{' '}
+                        {selectedFolder.dateRule.scope}
+                      </span>
+                      <button
+                        className={styles.danger}
+                        onClick={() => void removeFolderDate()}
+                        disabled={busy}
+                      >
                         Eliminar regla
                       </button>
                     </div>
@@ -654,7 +684,8 @@ function Settings({ sessionConnection }: { sessionConnection: Connection | null 
                         <img src={mediaUrl(api, photo.thumbnailUrl)} alt="" loading="lazy" />
                         <span>{photo.fileName}</span>
                         <small>
-                          {originLabel(photo.effectiveDate.origin)} · {photo.effectiveDate.precision}
+                          {originLabel(photo.effectiveDate.origin)} ·{' '}
+                          {photo.effectiveDate.precision}
                         </small>
                       </label>
                       {pendingView && photo.folderId && (
@@ -683,7 +714,9 @@ function Settings({ sessionConnection }: { sessionConnection: Connection | null 
                   }
                   disabled={!photos.length || busy}
                 >
-                  {selectedPhotos.size === photos.length ? 'Cancelar selección' : 'Seleccionar visibles'}
+                  {selectedPhotos.size === photos.length
+                    ? 'Cancelar selección'
+                    : 'Seleccionar visibles'}
                 </button>
                 <button
                   onClick={() => setManualEditorOpen(true)}
@@ -717,7 +750,9 @@ function Settings({ sessionConnection }: { sessionConnection: Connection | null 
                 <div className={styles.manualEditor}>
                   <div>
                     <h3>Corregir {selectedPhotos.size} fotografías</h3>
-                    <p>La corrección manual tendrá prioridad, pero no eliminará la fecha detectada.</p>
+                    <p>
+                      La corrección manual tendrá prioridad, pero no eliminará la fecha detectada.
+                    </p>
                   </div>
                   <label>
                     Año
@@ -733,7 +768,10 @@ function Settings({ sessionConnection }: { sessionConnection: Connection | null 
                   </label>
                   <label>
                     Mes opcional
-                    <select value={manualMonth} onChange={(event) => setManualMonth(event.target.value)}>
+                    <select
+                      value={manualMonth}
+                      onChange={(event) => setManualMonth(event.target.value)}
+                    >
                       <option value="">Solo año</option>
                       {Array.from({ length: 12 }, (_, index) => (
                         <option key={index + 1} value={index + 1}>
@@ -759,7 +797,8 @@ function Settings({ sessionConnection }: { sessionConnection: Connection | null 
                   <h3>Regla de fecha de carpeta</h3>
                   <p>
                     Puede alcanzar esta carpeta y sus {Math.max(0, descendantCount - 1)} subcarpetas
-                    activas. La regla se conserva en futuros escaneos sin crear correcciones manuales.
+                    activas. La regla se conserva en futuros escaneos sin crear correcciones
+                    manuales.
                   </p>
                   <div>
                     <label>
@@ -790,7 +829,10 @@ function Settings({ sessionConnection }: { sessionConnection: Connection | null 
                     </label>
                     <label>
                       Aplicar a
-                      <select value={ruleScope} onChange={(event) => setRuleScope(event.target.value)}>
+                      <select
+                        value={ruleScope}
+                        onChange={(event) => setRuleScope(event.target.value)}
+                      >
                         <option value="FALLBACK_DESCENDANTS">
                           Fotos sin fecha de esta carpeta y subcarpetas
                         </option>
