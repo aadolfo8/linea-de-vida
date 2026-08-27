@@ -1,36 +1,28 @@
 'use client';
 
-import useEmblaCarousel from 'embla-carousel-react';
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import { api, ApiError, apiJson } from '../../lib/api';
 import { mediaUrl } from '../../lib/media';
+import { TimelinePhotoViewer } from './TimelinePhotoViewer';
+import {
+  isCurrentTimelineRequest,
+  monthLabel,
+  parseTimelineRoute,
+  shouldStartTimelineRequest,
+  timelineHref,
+  type TimelinePhoto,
+  type TimelinePhotoPage,
+  type TimelineView,
+  type TimelineYearSummary,
+  type TimelineYearsPage,
+} from './timeline-model';
 import styles from './timeline-experience.module.css';
 
-type Precision = 'YEAR' | 'MONTH' | 'DAY' | 'UNKNOWN';
-type Photo = {
-  id: string;
-  fileName: string;
-  mimeType: string;
-  thumbnailUrl: string;
-  effectiveDate: { value: string | null; precision: Precision };
-};
-type Years = {
-  firstYear: number | null;
-  lastYear: number | null;
-  latestYear: number | null;
-  items: { year: number; photoCount: number }[];
-};
-type Summary = {
-  year: number;
-  total: number;
-  months: { month: number; photoCount: number }[];
-  unknownMonthCount: number;
-  previews: Photo[];
-};
-type PhotoPage = { items: Photo[]; nextCursor: string | null };
-const monthFormatter = new Intl.DateTimeFormat('es', { month: 'long', timeZone: 'UTC' });
-const monthLabel = (month: number) => monthFormatter.format(new Date(Date.UTC(2024, month - 1)));
+type Photo = TimelinePhoto;
+type Years = TimelineYearsPage;
+type Summary = TimelineYearSummary;
+type PhotoPage = TimelinePhotoPage;
 const isReduced = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 const isEditable = (target: EventTarget | null) =>
   target instanceof HTMLInputElement ||
@@ -39,18 +31,13 @@ const isEditable = (target: EventTarget | null) =>
   (target instanceof HTMLElement && target.isContentEditable);
 
 export function routeFrom(pathname: string) {
-  const parts = pathname.split('/').filter(Boolean);
-  if (parts.length > 3) return { year: null, month: null, unknown: false };
-  const year = /^\d{4}$/.test(parts[1] ?? '') ? Number(parts[1]) : null;
-  const month = /^\d{1,2}$/.test(parts[2] ?? '') ? Number(parts[2]) : null;
-  return {
-    year,
-    month: month && month >= 1 && month <= 12 ? month : null,
-    unknown: parts[2] === 'sin-mes',
-  };
+  const route = parseTimelineRoute(pathname);
+  return route.invalid
+    ? { year: null, month: null, unknown: false }
+    : { year: route.year, month: route.month, unknown: route.unknown };
 }
 
-export function TimelineExperience() {
+export function TimelineExperience({ view = 'editorial' }: { view?: TimelineView }) {
   const pathname = usePathname();
   const router = useRouter();
   const route = routeFrom(pathname);
@@ -60,6 +47,7 @@ export function TimelineExperience() {
   const [summaryError, setSummaryError] = useState('');
   const [settling, setSettling] = useState(false);
   const [viewer, setViewer] = useState<{ photos: Photo[]; index: number } | null>(null);
+  const summaryRequest = useRef(0);
 
   useEffect(() => {
     apiJson<Years>('/timeline/years')
@@ -67,29 +55,46 @@ export function TimelineExperience() {
         setYears(data);
         setYearsError('');
         if (!route.year && data.latestYear)
-          router.replace(`/timeline/${data.latestYear}`, { scroll: false });
+          router.replace(timelineHref({ year: data.latestYear, view }), { scroll: false });
       })
       .catch(() => setYearsError('No se pudieron cargar los años.'));
-  }, [router]);
+  }, [router, view]);
   useEffect(() => {
-    if (!route.year) return;
+    const requestId = ++summaryRequest.current;
+    if (!route.year) {
+      setSummary(null);
+      setSummaryError('');
+      setSettling(false);
+      return;
+    }
+    const controller = new AbortController();
     setSummary(null);
     setSummaryError('');
     setSettling(true);
     const timer = window.setTimeout(() => {
-      apiJson<Summary>(`/timeline/years/${route.year}`)
+      apiJson<Summary>(`/timeline/years/${route.year}`, { signal: controller.signal })
         .then((data) => {
+          if (!isCurrentTimelineRequest(requestId, summaryRequest.current)) return;
           setSummary(data);
           setSummaryError('');
         })
-        .catch(() => setSummaryError('No se pudo cargar el resumen de este año.'))
-        .finally(() => setSettling(false));
+        .catch(() => {
+          if (controller.signal.aborted) return;
+          if (isCurrentTimelineRequest(requestId, summaryRequest.current))
+            setSummaryError('No se pudo cargar el resumen de este año.');
+        })
+        .finally(() => {
+          if (isCurrentTimelineRequest(requestId, summaryRequest.current)) setSettling(false);
+        });
     }, 260);
-    return () => window.clearTimeout(timer);
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
   }, [route.year]);
-  const selectYear = (year: number) => router.push(`/timeline/${year}`, { scroll: false });
+  const selectYear = (year: number) => router.push(timelineHref({ year, view }), { scroll: false });
   const selectMonth = (month: number | 'sin-mes') =>
-    route.year && router.push(`/timeline/${route.year}/${month}`, { scroll: false });
+    route.year && router.push(timelineHref({ year: route.year, month, view }), { scroll: false });
   const selectedYear = route.year ?? years?.latestYear ?? null;
   const selectedMonthLabel = route.unknown
     ? 'Sin mes'
@@ -147,7 +152,7 @@ export function TimelineExperience() {
         </section>
       )}
       {viewer && (
-        <PhotoDialog
+        <TimelinePhotoViewer
           photos={viewer.photos}
           initialIndex={viewer.index}
           onClose={() => setViewer(null)}
@@ -299,12 +304,32 @@ function MonthGallery({
   const [photos, setPhotos] = useState<Photo[]>([]);
   const [cursor, setCursor] = useState<string | null>(null);
   const [state, setState] = useState<'loading' | 'ready' | 'error'>('loading');
-  const [cooldown, setCooldown] = useState(0);
+  const [cooldownUntil, setCooldownUntil] = useState(0);
+  const cooldown = useRef(0);
   const loading = useRef(false);
+  const request = useRef(0);
+  const controller = useRef<AbortController | null>(null);
   const load = useCallback(
-    async (next?: string | null) => {
-      if (loading.current || Date.now() < cooldown) return;
+    async (next?: string | null, reset = false) => {
+      if (reset) {
+        controller.current?.abort();
+        request.current += 1;
+        loading.current = false;
+      }
+      if (
+        !shouldStartTimelineRequest({
+          reset,
+          loading: loading.current,
+          cooldownUntil: cooldown.current,
+          now: Date.now(),
+        })
+      )
+        return;
+      const activeController = new AbortController();
+      controller.current = activeController;
+      const requestId = ++request.current;
       loading.current = true;
+      if (reset) setState('loading');
       try {
         const path =
           month === 'sin-mes'
@@ -312,7 +337,9 @@ function MonthGallery({
             : `/timeline/years/${year}/months/${month}/photos`;
         const page = await apiJson<PhotoPage>(
           `${path}?limit=30${next ? `&cursor=${encodeURIComponent(next)}` : ''}`,
+          { signal: activeController.signal },
         );
+        if (!isCurrentTimelineRequest(requestId, request.current)) return;
         setPhotos((current) =>
           next
             ? [
@@ -324,21 +351,44 @@ function MonthGallery({
         setCursor(page.nextCursor);
         setState('ready');
       } catch (error) {
-        if (error instanceof ApiError && error.status === 429)
-          setCooldown(Date.now() + (error.retryAfterSeconds ?? 5) * 1000);
+        if (activeController.signal.aborted) return;
+        if (!isCurrentTimelineRequest(requestId, request.current)) return;
+        if (error instanceof ApiError && error.status === 429) {
+          const until = Date.now() + (error.retryAfterSeconds ?? 5) * 1000;
+          cooldown.current = until;
+          setCooldownUntil(until);
+        }
         setState('error');
       } finally {
-        loading.current = false;
+        if (isCurrentTimelineRequest(requestId, request.current)) loading.current = false;
       }
     },
-    [cooldown, month, year],
+    [month, year],
   );
   useEffect(() => {
     setPhotos([]);
     setCursor(null);
+    setCooldownUntil(0);
+    cooldown.current = 0;
     setState('loading');
-    void load();
+    void load(null, true);
+    return () => {
+      request.current += 1;
+      controller.current?.abort();
+      loading.current = false;
+    };
   }, [load]);
+  useEffect(() => {
+    if (!cooldownUntil) return;
+    const timer = window.setTimeout(
+      () => {
+        cooldown.current = 0;
+        setCooldownUntil(0);
+      },
+      Math.max(0, cooldownUntil - Date.now()),
+    );
+    return () => window.clearTimeout(timer);
+  }, [cooldownUntil]);
   return (
     <section className={styles.gallery} aria-labelledby="month-title">
       <header>
@@ -370,7 +420,7 @@ function MonthGallery({
       {state === 'error' ? (
         <Retry
           text={
-            cooldown > Date.now()
+            cooldownUntil > Date.now()
               ? 'La carga se pausó para proteger el archivo. Espera unos segundos.'
               : 'No se pudieron cargar las fotografías.'
           }
@@ -467,106 +517,4 @@ function GallerySkeleton() {
   );
 }
 
-function PhotoDialog({
-  photos,
-  initialIndex,
-  onClose,
-}: {
-  photos: Photo[];
-  initialIndex: number;
-  onClose: () => void;
-}) {
-  const [viewportRef, embla] = useEmblaCarousel({ loop: true, duration: 24 });
-  const [index, setIndex] = useState(initialIndex);
-  const dialog = useRef<HTMLElement>(null);
-  useEffect(() => {
-    if (!embla) return;
-    embla.scrollTo(initialIndex, true);
-    const select = () => setIndex(embla.selectedScrollSnap());
-    embla.on('select', select);
-    return () => {
-      embla.off('select', select);
-    };
-  }, [embla, initialIndex]);
-  useEffect(() => {
-    const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    dialog.current?.focus();
-    return () => previous?.focus();
-  }, []);
-  const selected = photos[index];
-  const keyDown = (event: KeyboardEvent<HTMLElement>) => {
-    if (isEditable(event.target)) return;
-    if (event.key === 'Escape' || event.key === 'Backspace') {
-      event.preventDefault();
-      onClose();
-    }
-    if (event.key === 'ArrowLeft') {
-      event.preventDefault();
-      embla?.scrollPrev();
-    }
-    if (event.key === 'ArrowRight') {
-      event.preventDefault();
-      embla?.scrollNext();
-    }
-  };
-  return (
-    <div
-      className={styles.dialogBackdrop}
-      onPointerDown={(event) => {
-        if (event.target === event.currentTarget) onClose();
-      }}
-    >
-      <section
-        ref={dialog}
-        className={styles.dialog}
-        role="dialog"
-        aria-modal="true"
-        aria-label={`Vista ampliada de ${selected.fileName}`}
-        tabIndex={-1}
-        onKeyDown={keyDown}
-      >
-        <header>
-          <span>
-            {index + 1} de {photos.length}
-          </span>
-          <button onClick={onClose}>Cerrar</button>
-        </header>
-        <div className={styles.emblaViewport} ref={viewportRef}>
-          <div className={styles.emblaContainer}>
-            {photos.map((photo, photoIndex) => (
-              <div className={styles.emblaSlide} key={photo.id}>
-                {galleryOriginalIndexes(index, photos.length).has(photoIndex) ? (
-                  <img
-                    src={mediaUrl(api, `/v1/photos/${photo.id}/content`)}
-                    alt={photo.fileName}
-                    onError={(event) => {
-                      event.currentTarget.src = mediaUrl(api, photo.thumbnailUrl);
-                    }}
-                  />
-                ) : (
-                  <img src={mediaUrl(api, photo.thumbnailUrl)} alt="" />
-                )}
-              </div>
-            ))}
-          </div>
-        </div>
-        <footer>
-          <strong>{selected.fileName}</strong>
-          <div>
-            <button aria-label="Foto anterior" onClick={() => embla?.scrollPrev()}>
-              ←
-            </button>
-            <button aria-label="Foto siguiente" onClick={() => embla?.scrollNext()}>
-              →
-            </button>
-          </div>
-        </footer>
-      </section>
-    </div>
-  );
-}
-export function galleryOriginalIndexes(selectedIndex: number, length: number) {
-  return length
-    ? new Set([selectedIndex, (selectedIndex - 1 + length) % length, (selectedIndex + 1) % length])
-    : new Set<number>();
-}
+export { galleryOriginalIndexes } from './TimelinePhotoViewer';

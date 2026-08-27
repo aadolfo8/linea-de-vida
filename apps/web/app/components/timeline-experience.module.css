@@ -5,7 +5,7 @@
   --muted: #796e5e;
   --amber: #b96f17;
   --line: #d3c4aa;
-  min-height: 100vh;
+  min-height: 100dvh;
   background: var(--paper);
   color: var(--ink);
 }
@@ -368,7 +368,7 @@
 }
 .dialog {
   width: min(1100px, 100%);
-  max-height: calc(100vh - 2rem);
+  max-height: calc(100dvh - 2rem);
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) auto;
   background: var(--paper);
@@ -418,7 +418,7 @@
 }
 .emblaSlide img {
   max-width: 100%;
-  max-height: min(65vh, 720px);
+  max-height: min(65dvh, 720px);
   object-fit: contain;
 }
 @keyframes shimmer {
