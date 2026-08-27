@@ -132,9 +132,9 @@
 .arrow {
   position: relative;
   z-index: 2;
-  width: 2.75rem;
-  min-width: 2.75rem;
-  min-height: 2.75rem;
+  width: 44px;
+  min-width: 44px;
+  min-height: 44px;
   display: grid;
   justify-self: center;
   border: 1px solid var(--timeline-line, #5a665a);
@@ -190,9 +190,9 @@
   }
 
   .arrow {
-    width: 2.75rem;
-    min-width: 2.75rem;
-    min-height: 2.75rem;
+    width: 44px;
+    min-width: 44px;
+    min-height: 44px;
   }
 }
 

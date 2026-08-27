@@ -47,18 +47,47 @@ export function TimelineExperience({ view = 'editorial' }: { view?: TimelineView
   const [summaryError, setSummaryError] = useState('');
   const [settling, setSettling] = useState(false);
   const [viewer, setViewer] = useState<{ photos: Photo[]; index: number } | null>(null);
+  const yearsCache = useRef<Years | null>(null);
+  const yearsRequest = useRef(0);
+  const redirectedToYear = useRef<string | null>(null);
   const summaryRequest = useRef(0);
 
   useEffect(() => {
-    apiJson<Years>('/timeline/years')
+    if (yearsCache.current) return;
+
+    const controller = new AbortController();
+    const requestId = ++yearsRequest.current;
+    setYearsError('');
+    apiJson<Years>('/timeline/years', { signal: controller.signal })
       .then((data) => {
+        if (!isCurrentTimelineRequest(requestId, yearsRequest.current)) return;
+        yearsCache.current = data;
         setYears(data);
         setYearsError('');
-        if (!route.year && data.latestYear)
-          router.replace(timelineHref({ year: data.latestYear, view }), { scroll: false });
       })
-      .catch(() => setYearsError('No se pudieron cargar los años.'));
-  }, [router, view]);
+      .catch(() => {
+        if (controller.signal.aborted) return;
+        if (isCurrentTimelineRequest(requestId, yearsRequest.current))
+          setYearsError('No se pudieron cargar los años.');
+      });
+
+    return () => {
+      controller.abort();
+      if (isCurrentTimelineRequest(requestId, yearsRequest.current)) yearsRequest.current += 1;
+    };
+  }, [route.year, view]);
+
+  useEffect(() => {
+    if (route.year || !years?.latestYear) {
+      redirectedToYear.current = null;
+      return;
+    }
+    const target = timelineHref({ year: years.latestYear, view });
+    if (redirectedToYear.current === target) return;
+    redirectedToYear.current = target;
+    router.replace(target, { scroll: false });
+  }, [route.year, router, view, years?.latestYear]);
+
   useEffect(() => {
     const requestId = ++summaryRequest.current;
     if (!route.year) {

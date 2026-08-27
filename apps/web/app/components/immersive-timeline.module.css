@@ -271,7 +271,8 @@
 .loadMore,
 .notice button,
 .emptyArchive a {
-  min-height: 2.9rem;
+  min-width: 44px;
+  min-height: 44px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
