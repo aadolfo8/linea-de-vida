@@ -1,0 +1,124 @@
+.backdrop {
+  position: fixed;
+  z-index: 50;
+  inset: 0;
+  display: grid;
+  padding: 1rem;
+  background: rgb(6 10 8 / 0.94);
+  place-items: center;
+}
+
+.dialog {
+  --viewer-paper: #f3f0e8;
+  --viewer-ink: #151a16;
+  --viewer-accent: #b7d43b;
+  width: min(70rem, 100%);
+  max-height: calc(100dvh - 2rem);
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  overflow: hidden;
+  border-radius: 0.875rem;
+  background: var(--viewer-paper);
+  color: var(--viewer-ink);
+  box-shadow: 0 1.75rem 5rem rgb(0 0 0 / 0.38);
+  outline: 0;
+}
+
+.dialog header,
+.dialog footer {
+  min-height: 4rem;
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: center;
+  padding: 0.75rem 1rem;
+}
+
+.dialog header {
+  border-bottom: 1px solid #cbd0c7;
+}
+
+.dialog footer {
+  border-top: 1px solid #cbd0c7;
+}
+
+.dialog footer strong {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 0.9rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dialog button {
+  min-width: 2.75rem;
+  min-height: 2.75rem;
+  border: 1px solid #66705f;
+  border-radius: 0.75rem;
+  padding-inline: 0.8rem;
+  background: transparent;
+  color: var(--viewer-ink);
+  transition:
+    background 180ms ease,
+    color 180ms ease,
+    transform 180ms ease;
+}
+
+.dialog button:hover {
+  background: var(--viewer-ink);
+  color: var(--viewer-paper);
+}
+
+.dialog button:active {
+  transform: translateY(1px);
+}
+
+.dialog button:focus-visible {
+  outline: 3px solid var(--viewer-accent);
+  outline-offset: 3px;
+}
+
+.dialog footer div {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.dialog svg {
+  width: 1.15rem;
+  fill: none;
+  stroke: currentcolor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.8;
+}
+
+.viewport {
+  min-height: 0;
+  overflow: hidden;
+}
+
+.container {
+  display: flex;
+  height: 100%;
+  touch-action: pan-y pinch-zoom;
+}
+
+.slide {
+  min-width: 100%;
+  min-height: 0;
+  display: grid;
+  background: #080c09;
+  place-items: center;
+}
+
+.slide img {
+  max-width: 100%;
+  max-height: min(68dvh, 45rem);
+  object-fit: contain;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dialog button {
+    transition: none;
+  }
+}
