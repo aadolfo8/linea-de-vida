@@ -14,6 +14,7 @@ export function TimelineRoute({ view = 'immersive' }: { view?: TimelineView }) {
   const pathname = usePathname();
   const router = useRouter();
   const route = parseTimelineRoute(pathname);
+  const routeDepth = route.month || route.unknown ? 'month' : route.year ? 'year' : 'panorama';
 
   useEffect(() => {
     if (!route.invalid) return;
@@ -26,6 +27,7 @@ export function TimelineRoute({ view = 'immersive' }: { view?: TimelineView }) {
         <div
           className={`${styles.shell} ${view === 'editorial' ? 'timeline-editorial-shell' : 'timeline-immersive-shell'}`}
           data-mode={view}
+          data-route-depth={routeDepth}
         >
           <ArchiveNav name={session.user.displayName} timelinePath={timelineHref({ view })} />
           <nav className={styles.modeBar} aria-label="Vista de la cronología">

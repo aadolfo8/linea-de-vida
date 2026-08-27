@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   collectTimelineYears,
+  groupTimelineGalleryRows,
   isCurrentTimelineRequest,
   parseTimelineRoute,
   resolveInitialTimelineYear,
@@ -39,6 +40,28 @@ describe('timeline route state', () => {
 });
 
 describe('timeline pagination and selection guards', () => {
+  it('groups gallery items into complete ordered rows without reordering photos', () => {
+    const items = Array.from({ length: 12 }, (_, index) => `photo-${index}`);
+    const rows = groupTimelineGalleryRows(items);
+
+    expect(rows.map((row) => row.entries.map(({ span }) => span))).toEqual([
+      [7, 5],
+      [4, 3, 5],
+      [5, 7],
+      [7, 5],
+      [4, 3, 5],
+    ]);
+    expect(rows.flatMap((row) => row.entries.map(({ item }) => item))).toEqual(items);
+    rows.forEach((row) => {
+      expect(row.entries.reduce((total, entry) => total + entry.span, 0)).toBe(12);
+    });
+
+    for (let count = 2; count <= 20; count += 1) {
+      const grouped = groupTimelineGalleryRows(Array.from({ length: count }, (_, index) => index));
+      expect(grouped.every((row) => row.entries.length > 1)).toBe(true);
+    }
+  });
+
   it('follows bounded year pages and removes duplicate boundary items', async () => {
     const pages: TimelineYearsPage[] = [
       {
