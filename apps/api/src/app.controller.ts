@@ -72,9 +72,12 @@ export class AppController {
     }
   }
   private feedCursor(date: Date | null, id: string) {
-    return Buffer.from(
-      JSON.stringify({ scope: 'timeline-feed', date: date?.toISOString() ?? null, id }),
-    ).toString('base64url');
+    return this.keysetCursor('timeline-feed', date, id);
+  }
+  private keysetCursor(scope: string, date: Date | null, id: string) {
+    return Buffer.from(JSON.stringify({ scope, date: date?.toISOString() ?? null, id })).toString(
+      'base64url',
+    );
   }
   private parseFeedCursor(cursor?: string) {
     if (!cursor) return null;
@@ -93,6 +96,34 @@ export class AppController {
     } catch {
       throw new BadRequestException({ code: 'INVALID_CURSOR', message: 'The cursor is invalid.' });
     }
+  }
+  private timelineCursor(scope: string, cursor?: string) {
+    if (!cursor) return null;
+    try {
+      const value = JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8')) as {
+        scope?: string;
+        date?: string;
+        id?: string;
+      };
+      const date = new Date(value.date ?? '');
+      if (value.scope !== scope || typeof value.id !== 'string' || Number.isNaN(date.getTime()))
+        throw new Error('invalid');
+      return { date, id: value.id };
+    } catch {
+      throw new BadRequestException({ code: 'INVALID_CURSOR', message: 'The cursor is invalid.' });
+    }
+  }
+  private compactPhoto(photo: any) {
+    return {
+      id: photo.id,
+      fileName: photo.fileName,
+      mimeType: photo.mimeType,
+      thumbnailUrl: `/v1/photos/${photo.id}/thumbnail`,
+      effectiveDate: {
+        value: photo.effectiveDateValue,
+        precision: photo.effectiveDatePrecision,
+      },
+    };
   }
   private year(value: string) {
     const year = Number(value);
@@ -747,26 +778,180 @@ export class AppController {
       nextCursor: records.length > limit ? this.cursor(`sync-issues:${id}`, offset + limit) : null,
     };
   }
-  @UseGuards(SessionGuard) @Get('timeline/years') async years(
+  @UseGuards(SessionGuard)
+  @Get('timeline/years')
+  async years(
     @CurrentUserId() userId: string,
     @Query('cursor') cursor?: string,
     @Query('limit') rawLimit?: string,
   ) {
-    const { limit, offset } = this.page(cursor, rawLimit, 'years');
-    const rows = await this.prisma.$queryRawUnsafe<{ year: number; photoCount: bigint }[]>(
+    const rows = await this.prisma.$queryRawUnsafe<
+      { firstYear: number | null; lastYear: number | null }[]
+    >(
+      `SELECT MIN(EXTRACT(YEAR FROM "effectiveDateValue")::int) AS "firstYear",
+              MAX(EXTRACT(YEAR FROM "effectiveDateValue")::int) AS "lastYear"
+       FROM "Photo" WHERE "userId" = $1 AND status = 'ACTIVE' AND "effectiveDateValue" IS NOT NULL`,
+      userId,
+    );
+    const firstYear = rows[0]?.firstYear;
+    const lastYear = rows[0]?.lastYear;
+    if (!firstYear || !lastYear)
+      return { firstYear: null, lastYear: null, latestYear: null, items: [] };
+    const counts = await this.prisma.$queryRawUnsafe<{ year: number; photoCount: bigint }[]>(
       `SELECT EXTRACT(YEAR FROM "effectiveDateValue")::int AS year, COUNT(*)::bigint AS "photoCount"
        FROM "Photo" WHERE "userId" = $1 AND status = 'ACTIVE' AND "effectiveDateValue" IS NOT NULL
-       GROUP BY 1 ORDER BY 1 DESC LIMIT $2 OFFSET $3`,
+       GROUP BY 1`,
       userId,
-      limit + 1,
-      offset,
     );
-    const page = rows
-      .slice(0, limit)
-      .map((row) => ({ ...row, photoCount: Number(row.photoCount) }));
+    const byYear = new Map(counts.map((row) => [row.year, Number(row.photoCount)]));
+    const { limit, offset } = this.page(cursor, rawLimit, 'years');
+    const items = Array.from({ length: lastYear - firstYear + 1 }, (_, index) => {
+      const year = lastYear - index;
+      return { year, photoCount: byYear.get(year) ?? 0 };
+    });
+    const paginated = cursor !== undefined || rawLimit !== undefined;
     return {
-      items: page,
-      nextCursor: rows.length > limit ? this.cursor('years', offset + limit) : null,
+      firstYear,
+      lastYear,
+      latestYear: lastYear,
+      items: items.slice(offset, offset + limit),
+      ...(paginated
+        ? {
+            nextCursor: offset + limit < items.length ? this.cursor('years', offset + limit) : null,
+          }
+        : {}),
+    };
+  }
+  @UseGuards(SessionGuard) @Get('timeline/years/:year') async yearSummary(
+    @CurrentUserId() userId: string,
+    @Param('year') year: string,
+  ) {
+    const parsedYear = this.year(year);
+    const start = new Date(Date.UTC(parsedYear, 0, 1));
+    const end = new Date(Date.UTC(parsedYear + 1, 0, 1));
+    const rows = await this.prisma.$queryRawUnsafe<
+      {
+        month: number;
+        photoCount: bigint;
+      }[]
+    >(
+      `SELECT EXTRACT(MONTH FROM "effectiveDateValue")::int AS month, COUNT(*)::bigint AS "photoCount"
+       FROM "Photo" WHERE "userId" = $1 AND status = 'ACTIVE'
+         AND "effectiveDateValue" >= $2 AND "effectiveDateValue" < $3
+         AND "effectiveDatePrecision" IN ('MONTH', 'DAY')
+       GROUP BY 1`,
+      userId,
+      start,
+      end,
+    );
+    const unknownRows = await this.prisma.$queryRawUnsafe<{ photoCount: bigint }[]>(
+      `SELECT COUNT(*)::bigint AS "photoCount" FROM "Photo"
+       WHERE "userId" = $1 AND status = 'ACTIVE'
+         AND "effectiveDateValue" >= $2 AND "effectiveDateValue" < $3
+         AND "effectiveDatePrecision" = 'YEAR'`,
+      userId,
+      start,
+      end,
+    );
+    const previewIds = await this.prisma.$queryRawUnsafe<{ id: string }[]>(
+      `WITH ordered AS (
+         SELECT id, "effectiveDateValue", NTILE(8) OVER (ORDER BY "effectiveDateValue" DESC, id DESC) AS bucket
+         FROM "Photo" WHERE "userId" = $1 AND status = 'ACTIVE'
+           AND "effectiveDateValue" >= $2 AND "effectiveDateValue" < $3
+       ) SELECT DISTINCT ON (bucket) id FROM ordered ORDER BY bucket, "effectiveDateValue" DESC, id DESC`,
+      userId,
+      start,
+      end,
+    );
+    const records = previewIds.length
+      ? await this.prisma.photo.findMany({
+          where: { userId, id: { in: previewIds.map((row) => row.id) } },
+          include: { override: true },
+        })
+      : [];
+    const byId = new Map(records.map((photo) => [photo.id, photo]));
+    const months = new Map(rows.map((row) => [row.month, Number(row.photoCount)]));
+    const unknownMonthCount = Number(unknownRows[0]?.photoCount ?? 0);
+    const total = [...months.values()].reduce((sum, count) => sum + count, 0) + unknownMonthCount;
+    return {
+      year: parsedYear,
+      total,
+      months: Array.from({ length: 12 }, (_, index) => ({
+        month: index + 1,
+        photoCount: months.get(index + 1) ?? 0,
+      })),
+      unknownMonthCount,
+      previews: previewIds
+        .map((row) => byId.get(row.id))
+        .filter(Boolean)
+        .map((photo) => this.compactPhoto(photo)),
+    };
+  }
+  @UseGuards(SessionGuard) @Get('timeline/years/:year/months/:month/photos') async monthPhotos(
+    @CurrentUserId() userId: string,
+    @Param('year') year: string,
+    @Param('month') month: string,
+    @Query('cursor') cursor?: string,
+    @Query('limit') rawLimit?: string,
+  ) {
+    const parsedYear = this.year(year);
+    const parsedMonth = this.month(month);
+    return this.timelinePhotos(userId, parsedYear, parsedMonth, cursor, rawLimit, false);
+  }
+  @UseGuards(SessionGuard)
+  @Get('timeline/years/:year/unknown-month/photos')
+  async unknownMonthPhotos(
+    @CurrentUserId() userId: string,
+    @Param('year') year: string,
+    @Query('cursor') cursor?: string,
+    @Query('limit') rawLimit?: string,
+  ) {
+    return this.timelinePhotos(userId, this.year(year), null, cursor, rawLimit, true);
+  }
+  private async timelinePhotos(
+    userId: string,
+    year: number,
+    month: number | null,
+    cursor: string | undefined,
+    rawLimit: string | undefined,
+    unknownMonth: boolean,
+  ) {
+    const limit = Math.min(100, Math.max(1, Number(rawLimit ?? 30) || 30));
+    const scope = `timeline-photos:${year}:${unknownMonth ? 'unknown-month' : month}`;
+    const after = this.timelineCursor(scope, cursor);
+    const start = unknownMonth
+      ? new Date(Date.UTC(year, 0, 1))
+      : new Date(Date.UTC(year, month! - 1, 1));
+    const end = unknownMonth
+      ? new Date(Date.UTC(year + 1, 0, 1))
+      : new Date(Date.UTC(year, month!, 1));
+    const records = await this.prisma.photo.findMany({
+      where: {
+        userId,
+        status: 'ACTIVE',
+        effectiveDateValue: { gte: start, lt: end },
+        effectiveDatePrecision: unknownMonth ? 'YEAR' : { in: ['MONTH', 'DAY'] },
+        ...(after
+          ? {
+              OR: [
+                { effectiveDateValue: { lt: after.date } },
+                { effectiveDateValue: after.date, id: { lt: after.id } },
+              ],
+            }
+          : {}),
+      },
+      orderBy: [{ effectiveDateValue: 'desc' }, { id: 'desc' }],
+      take: limit + 1,
+      include: { override: true },
+    });
+    const items = records.slice(0, limit).map((photo) => this.compactPhoto(photo));
+    const last = records[limit - 1];
+    return {
+      items,
+      nextCursor:
+        records.length > limit && last
+          ? this.keysetCursor(scope, last.effectiveDateValue!, last.id)
+          : null,
     };
   }
   @UseGuards(SessionGuard) @Get('timeline/years/:year/months') async months(
