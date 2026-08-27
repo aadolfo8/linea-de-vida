@@ -71,31 +71,10 @@ export class AppController {
       throw new BadRequestException({ code: 'INVALID_CURSOR', message: 'The cursor is invalid.' });
     }
   }
-  private feedCursor(date: Date | null, id: string) {
-    return this.keysetCursor('timeline-feed', date, id);
-  }
   private keysetCursor(scope: string, date: Date | null, id: string) {
     return Buffer.from(JSON.stringify({ scope, date: date?.toISOString() ?? null, id })).toString(
       'base64url',
     );
-  }
-  private parseFeedCursor(cursor?: string) {
-    if (!cursor) return null;
-    try {
-      const value = JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8')) as {
-        scope?: string;
-        date?: string | null;
-        id?: string;
-      };
-      if (value.scope !== 'timeline-feed' || typeof value.id !== 'string')
-        throw new Error('invalid');
-      if (value.date === null) return { date: null, id: value.id };
-      const date = new Date(value.date ?? '');
-      if (Number.isNaN(date.getTime())) throw new Error('invalid');
-      return { date, id: value.id };
-    } catch {
-      throw new BadRequestException({ code: 'INVALID_CURSOR', message: 'The cursor is invalid.' });
-    }
   }
   private timelineCursor(scope: string, cursor?: string) {
     if (!cursor) return null;
@@ -1034,66 +1013,6 @@ export class AppController {
       userId,
     );
     return { photoCount: Number(rows[0]?.photoCount ?? 0) };
-  }
-  @UseGuards(SessionGuard) @Get('timeline/feed') async feed(
-    @CurrentUserId() userId: string,
-    @Query('cursor') cursor?: string,
-    @Query('limit') rawLimit?: string,
-  ) {
-    const limit = Math.min(100, Math.max(1, Number(rawLimit ?? 30) || 30));
-    const after = this.parseFeedCursor(cursor);
-    const records = await this.prisma.photo.findMany({
-      where: {
-        userId,
-        status: 'ACTIVE',
-        ...(after
-          ? after.date
-            ? {
-                OR: [
-                  { effectiveDateValue: { lt: after.date } },
-                  { effectiveDateValue: after.date, id: { lt: after.id } },
-                  { effectiveDateValue: null },
-                ],
-              }
-            : { effectiveDateValue: null, id: { lt: after.id } }
-          : {}),
-      },
-      orderBy: [{ effectiveDateValue: { sort: 'desc', nulls: 'last' } }, { id: 'desc' }],
-      take: limit + 1,
-      include: { override: true },
-    });
-    const items = records.slice(0, limit).map((photo) => {
-      const response = photoDateResponse(photo);
-      const value = response.effectiveDate.value;
-      const date = value ? new Date(value) : null;
-      const year = date ? date.getUTCFullYear() : null;
-      // A technical anchor for YEAR precision must never become an invented January group.
-      const month =
-        date && response.effectiveDate.precision !== 'YEAR' ? date.getUTCMonth() + 1 : null;
-      return {
-        ...response,
-        thumbnailUrl: `/v1/photos/${photo.id}/thumbnail`,
-        period: {
-          year,
-          month,
-          key:
-            year === null
-              ? 'unknown'
-              : `${year}-${month === null ? 'partial' : String(month).padStart(2, '0')}`,
-        },
-      };
-    });
-    const last = items.at(-1);
-    return {
-      items,
-      nextCursor:
-        records.length > limit && last
-          ? this.feedCursor(
-              last.effectiveDate.value ? new Date(last.effectiveDate.value) : null,
-              last.id,
-            )
-          : null,
-    };
   }
   @UseGuards(SessionGuard) @Get('photos') async photos(
     @CurrentUserId() userId: string,
