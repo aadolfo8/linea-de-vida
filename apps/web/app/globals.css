@@ -165,6 +165,10 @@ body:has(.timeline-editorial-shell) a:focus-visible {
   color: #d9ddd2;
   place-items: center;
 }
+.route-pending button {
+  min-width: 44px;
+  min-height: 44px;
+}
 @media (max-width: 680px) {
   .archive-nav {
     min-height: 64px;
@@ -178,7 +182,7 @@ body:has(.timeline-editorial-shell) a:focus-visible {
     justify-content: space-between;
   }
   .archive-nav nav a {
-    min-height: 42px;
+    min-height: 44px;
   }
   .session-status {
     display: none;
