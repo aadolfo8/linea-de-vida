@@ -82,8 +82,8 @@ describe('production controls', () => {
     };
     const next = vi.fn();
     const base = { method: 'GET', signedCookies: { lv_session: 'user-1' }, ip: '127.0.0.1' };
-    await middleware({ ...base, originalUrl: '/v1/timeline/feed' } as any, response, next);
-    await middleware({ ...base, originalUrl: '/v1/timeline/feed' } as any, response, next);
+    await middleware({ ...base, originalUrl: '/v1/timeline/years' } as any, response, next);
+    await middleware({ ...base, originalUrl: '/v1/timeline/years' } as any, response, next);
     await middleware({ ...base, originalUrl: '/v1/me' } as any, response, next);
     await middleware(
       {

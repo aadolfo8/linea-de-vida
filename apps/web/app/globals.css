@@ -105,32 +105,41 @@ input:focus-visible {
   color: #0b0e0b;
   background: #d9ff3f;
 }
-body:has(.experience) {
+body:has(.experience),
+body:has(.timeline-editorial-shell) {
   background: #f5efe2;
 }
-body:has(.experience) .archive-nav {
+body:has(.experience) .archive-nav,
+body:has(.timeline-editorial-shell) .archive-nav {
   background: #f5efe2;
   color: #282117;
   border-bottom-color: #d3c4aa;
 }
-body:has(.experience) .archive-nav a:hover {
+body:has(.experience) .archive-nav a:hover,
+body:has(.timeline-editorial-shell) .archive-nav a:hover {
   color: #b96f17;
 }
-body:has(.experience) .archive-nav nav a {
+body:has(.experience) .archive-nav nav a,
+body:has(.timeline-editorial-shell) .archive-nav nav a {
   color: #796e5e;
 }
-body:has(.experience) .archive-nav nav a[aria-current='page'] {
+body:has(.experience) .archive-nav nav a[aria-current='page'],
+body:has(.timeline-editorial-shell) .archive-nav nav a[aria-current='page'] {
   background: #282117;
   color: #f5efe2;
 }
-body:has(.experience) .session-status {
+body:has(.experience) .session-status,
+body:has(.timeline-editorial-shell) .session-status {
   color: #796e5e;
 }
-body:has(.experience) .session-status span {
+body:has(.experience) .session-status span,
+body:has(.timeline-editorial-shell) .session-status span {
   background: #b96f17;
 }
 body:has(.experience) button:focus-visible,
-body:has(.experience) a:focus-visible {
+body:has(.experience) a:focus-visible,
+body:has(.timeline-editorial-shell) button:focus-visible,
+body:has(.timeline-editorial-shell) a:focus-visible {
   outline-color: #b96f17;
 }
 .session-status {
@@ -149,7 +158,7 @@ body:has(.experience) a:focus-visible {
   border-radius: 50%;
 }
 .route-pending {
-  min-height: 100vh;
+  min-height: 100dvh;
   display: grid;
   padding: 24px;
   background: #0b0e0b;
