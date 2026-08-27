@@ -51,7 +51,7 @@
 .stage[data-depth='month'] {
   min-height: auto;
   grid-template-rows: auto auto auto;
-  padding-bottom: 1.5rem;
+  padding-bottom: 0;
 }
 
 .stageHeader {
@@ -91,6 +91,23 @@
   margin-bottom: clamp(1rem, 2vw, 2rem);
 }
 
+.yearAnchor {
+  width: min(88rem, calc(100% - max(2rem, 8vw)));
+  display: flex;
+  gap: 0.8rem;
+  align-items: baseline;
+  margin: 0 auto;
+  color: var(--timeline-muted);
+  font-size: 0.78rem;
+}
+
+.yearAnchor strong {
+  color: var(--timeline-ink);
+  font-size: 1.15rem;
+  font-variant-numeric: tabular-nums;
+  font-weight: 650;
+}
+
 .announcement {
   position: absolute;
   width: 1px;
@@ -108,10 +125,10 @@
 }
 
 .yearFocus {
-  min-height: clamp(27rem, 49dvh, 42rem);
+  min-height: clamp(25rem, 46dvh, 38rem);
   display: grid;
-  grid-template-columns: minmax(0, 1.6fr) minmax(14rem, 0.62fr);
-  gap: clamp(2rem, 5vw, 5rem);
+  grid-template-columns: minmax(0, 1.3fr) minmax(14rem, 0.7fr);
+  gap: clamp(1.5rem, 3vw, 3rem);
   align-items: center;
 }
 
@@ -140,7 +157,7 @@
 
 .collage {
   position: relative;
-  min-height: clamp(26rem, 49dvh, 40rem);
+  min-height: clamp(25rem, 46dvh, 36rem);
   isolation: isolate;
 }
 
@@ -191,43 +208,33 @@
 }
 
 .orbit0 {
-  inset: 3% 31% 26% 4%;
+  inset: 5% 45% 19% 2%;
   z-index: 3;
 }
 
 .orbit1 {
-  inset: 0 5% 45% 70%;
+  inset: 0 4% 50% 58%;
   z-index: 2;
 }
 
 .orbit2 {
-  inset: 57% 61% 0 12%;
+  inset: 56% 34% 0 37%;
   z-index: 4;
 }
 
 .orbit3 {
-  inset: 58% 4% 2% 43%;
+  inset: 56% 4% 4% 72%;
   z-index: 5;
 }
 
 .orbit4 {
-  inset: 29% 0 35% 79%;
+  inset: 8% 72% 65% 14%;
   z-index: 1;
 }
 
 .orbit5 {
-  inset: 0 55% 70% 27%;
+  inset: 30% 1% 46% 79%;
   z-index: 1;
-}
-
-.orbit6 {
-  inset: 70% 72% 0 0;
-  z-index: 2;
-}
-
-.orbit7 {
-  inset: 72% 19% 0 63%;
-  z-index: 6;
 }
 
 .distribution {
@@ -321,33 +328,32 @@
 }
 
 .monthFocus {
-  min-height: clamp(12rem, 23dvh, 19rem);
-  display: grid;
-  align-content: center;
-  justify-items: center;
-  padding-block: 1rem 2rem;
-  text-align: center;
+  min-height: 0;
+  display: flex;
+  justify-content: space-between;
+  gap: 2rem;
+  align-items: end;
+  padding: clamp(1rem, 2vw, 2rem) 0 clamp(1.5rem, 3vw, 2.5rem);
+  text-align: left;
 }
 
 .monthFocus p {
-  max-width: 36rem;
-  margin: 1.25rem auto 0;
+  max-width: 30rem;
+  margin: 0;
   color: var(--timeline-muted);
   line-height: 1.6;
 }
 
 .monthTitle {
   max-width: 13ch;
-  font-size: clamp(3.25rem, 8vw, 6rem);
+  font-size: clamp(2.5rem, 5.5vw, 4.75rem);
   text-transform: lowercase;
 }
 
 .monthLevel {
   position: relative;
-  z-index: 4;
-  padding: clamp(3rem, 6vw, 5rem) 0 clamp(3.5rem, 7vw, 6rem);
-  background: var(--timeline-surface);
-  box-shadow: 0 -1.5rem 4rem rgb(0 0 0 / 0.18);
+  padding: clamp(1.5rem, 3vw, 2.5rem) 0 clamp(3rem, 5vw, 4.5rem);
+  background: var(--timeline-bg);
 }
 
 .monthHeader {
@@ -356,7 +362,7 @@
   justify-content: space-between;
   gap: 2rem;
   align-items: end;
-  margin: 0 auto 2rem;
+  margin: 0 auto clamp(1.25rem, 2vw, 2rem);
 }
 
 .monthHeader h2 {
@@ -378,14 +384,36 @@
 }
 
 .galleryWrap {
-  background: #edf0e7;
+  background: linear-gradient(to bottom, var(--timeline-bg) 0 4.5rem, #edf0e7 12rem 100%);
   color: #172018;
 }
 
 .gallery {
   width: min(82rem, calc(100% - max(2rem, 10vw)));
   margin-inline: auto;
-  padding: clamp(4rem, 8vw, 8rem) 0 clamp(5rem, 10vw, 10rem);
+  padding: 0 0 clamp(5rem, 10vw, 10rem);
+}
+
+.galleryBridge {
+  min-height: 12rem;
+  display: flex;
+  justify-content: space-between;
+  gap: 2rem;
+  align-items: flex-start;
+  padding-top: 1rem;
+  color: var(--timeline-ink);
+}
+
+.galleryBridge span {
+  color: var(--timeline-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.galleryBridge strong {
+  font-size: clamp(1.5rem, 3vw, 2.75rem);
+  font-weight: 580;
+  letter-spacing: -0.03em;
+  text-transform: lowercase;
 }
 
 .gallery > header {
@@ -416,42 +444,41 @@
 
 .galleryGrid {
   display: grid;
-  grid-template-columns: repeat(12, 1fr);
+  gap: clamp(0.75rem, 1.5vw, 1.25rem);
+}
+
+.galleryRow {
+  height: clamp(18rem, 34vw, 32rem);
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
   gap: clamp(0.65rem, 1.25vw, 1rem);
-  align-items: start;
+}
+
+.galleryRow[data-size='3'] {
+  height: clamp(17rem, 28vw, 26rem);
+}
+
+.galleryRow[data-size='1'] {
+  height: clamp(20rem, 38vw, 34rem);
+}
+
+.galleryTile,
+.gallerySkeleton {
+  grid-column: span var(--gallery-span);
+  height: 100%;
 }
 
 .galleryGrid .photo {
-  grid-column: span 4;
-  aspect-ratio: 4 / 5;
   background: #cfd5c9;
   box-shadow: 0 1.25rem 3rem rgb(35 50 38 / 0.12);
 }
 
-.galleryGrid .photo:nth-child(5n + 1) {
-  grid-column: span 7;
-  aspect-ratio: 16 / 10;
+.galleryRow:nth-child(even) .photo:first-child {
+  transform: rotate(-0.25deg);
 }
 
-.galleryGrid .photo:nth-child(5n + 2) {
-  grid-column: span 5;
-  margin-top: clamp(2rem, 6vw, 6rem);
-  aspect-ratio: 4 / 5;
-}
-
-.galleryGrid .photo:nth-child(5n + 3) {
-  grid-column: 2 / span 4;
-  aspect-ratio: 1;
-}
-
-.galleryGrid .photo:nth-child(5n + 4) {
-  grid-column: span 5;
-  aspect-ratio: 3 / 2;
-}
-
-.galleryGrid .photo:nth-child(5n) {
-  grid-column: span 3;
-  aspect-ratio: 3 / 4;
+.galleryRow:nth-child(3n) .photo:last-child {
+  transform: rotate(0.3deg);
 }
 
 .photoFallback {
@@ -582,8 +609,6 @@
 }
 
 .gallerySkeleton {
-  grid-column: span 4;
-  min-height: 22rem;
   background: linear-gradient(100deg, #d5dbd0 34%, #eef1e9 50%, #d5dbd0 66%);
   background-size: 200% 100%;
 }
@@ -663,11 +688,11 @@
   }
 
   .orbit0 {
-    inset: 3% 24% 37% 0;
+    inset: 3% 42% 33% 0;
   }
 
   .orbit1 {
-    inset: 0 0 58% 70%;
+    inset: 0 0 58% 62%;
   }
 
   .orbit2 {
@@ -690,6 +715,14 @@
     display: block;
   }
 
+  .monthFocus {
+    display: block;
+  }
+
+  .monthFocus p {
+    margin-top: 0.85rem;
+  }
+
   .backToYear {
     margin-top: 1.5rem;
   }
@@ -699,27 +732,20 @@
   }
 
   .galleryGrid {
-    grid-template-columns: repeat(2, 1fr);
+    gap: 0.75rem;
   }
 
-  .galleryGrid .photo,
-  .galleryGrid .photo:nth-child(5n + 1),
-  .galleryGrid .photo:nth-child(5n + 2),
-  .galleryGrid .photo:nth-child(5n + 3),
-  .galleryGrid .photo:nth-child(5n + 4),
-  .galleryGrid .photo:nth-child(5n),
-  .gallerySkeleton {
-    grid-column: span 1;
-    margin-top: 0;
+  .galleryRow {
+    height: clamp(13rem, 52vw, 20rem);
+    gap: 0.5rem;
   }
 
-  .galleryGrid .photo:nth-child(3n + 1) {
-    grid-column: span 2;
-    aspect-ratio: 4 / 3;
+  .galleryRow[data-size='3'] {
+    height: clamp(11rem, 42vw, 17rem);
   }
 
-  .gallerySkeleton {
-    min-height: 14rem;
+  .galleryRow[data-size='1'] {
+    height: clamp(18rem, 76vw, 28rem);
   }
 }
 
