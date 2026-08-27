@@ -134,8 +134,8 @@ export function TemporalCarousel({
                     aria-label={item.ariaLabel}
                     aria-current={active ? 'date' : undefined}
                     animate={{
-                      opacity: active ? 1 : 0.48,
-                      scale: reduceMotion ? 1 : active ? 1.12 : 0.92,
+                      opacity: active ? 1 : 0.68,
+                      scale: reduceMotion ? 1 : active ? (variant === 'month' ? 1.06 : 1.08) : 0.96,
                     }}
                     transition={reduceMotion ? { duration: 0 } : { duration: 0.3, ease: 'easeOut' }}
                     onClick={() => {
