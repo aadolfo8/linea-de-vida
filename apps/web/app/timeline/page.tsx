@@ -1,18 +1,5 @@
-'use client';
-
-import { ArchiveNav } from '../components/ArchiveNav';
-import { ProtectedSurface } from '../components/ProtectedSurface';
-import { TimelineExperience } from '../components/TimelineExperience';
+import { TimelineRoute } from '../components/TimelineRoute';
 
 export default function TimelinePage() {
-  return (
-    <ProtectedSurface>
-      {(session) => (
-        <>
-          <ArchiveNav name={session.user.displayName} />
-          <TimelineExperience />
-        </>
-      )}
-    </ProtectedSurface>
-  );
+  return <TimelineRoute />;
 }

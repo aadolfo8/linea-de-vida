@@ -70,6 +70,7 @@ describe('Phase 1 HTTP contracts', () => {
     },
     $transaction: async (operation: (value: typeof prisma) => unknown) => operation(prisma),
     $queryRawUnsafe: async (query: string, ...args: unknown[]) => {
+      if (query.includes('MIN(EXTRACT(YEAR')) return [{ firstYear: 2023, lastYear: 2024 }];
       if (query.includes('AS year'))
         return [
           { year: 2024, photoCount: 2n },
