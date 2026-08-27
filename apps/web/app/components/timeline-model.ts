@@ -127,6 +127,48 @@ export function temporalSelectionIndex(
   return selectedIndex >= 0 ? selectedIndex : 0;
 }
 
+export type TimelineGalleryRow<T> = {
+  entries: { item: T; index: number; span: number }[];
+};
+
+const galleryRowSpans = [
+  [7, 5],
+  [4, 3, 5],
+  [5, 7],
+] as const;
+
+export function groupTimelineGalleryRows<T>(items: readonly T[]): TimelineGalleryRow<T>[] {
+  const rows: TimelineGalleryRow<T>[] = [];
+  let index = 0;
+  let patternIndex = 0;
+
+  while (index < items.length) {
+    const remaining = items.length - index;
+    const spans =
+      remaining === 1
+        ? ([12] as const)
+        : remaining === 2
+          ? ([7, 5] as const)
+          : remaining === 3
+            ? ([4, 3, 5] as const)
+            : remaining === 4
+              ? ([7, 5] as const)
+              : galleryRowSpans[patternIndex % galleryRowSpans.length];
+
+    rows.push({
+      entries: spans.map((span, offset) => ({
+        item: items[index + offset]!,
+        index: index + offset,
+        span,
+      })),
+    });
+    index += spans.length;
+    patternIndex += 1;
+  }
+
+  return rows;
+}
+
 export function shouldStartTimelineRequest({
   reset,
   loading,

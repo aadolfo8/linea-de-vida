@@ -26,17 +26,17 @@ button:disabled {
   z-index: 100;
   top: 0;
   left: 0;
-  width: 14px;
-  height: 14px;
-  border: 1px solid #d9ff3f;
+  width: 52px;
+  height: 52px;
+  visibility: hidden;
+  border: 0;
   border-radius: 50%;
+  opacity: 0;
   pointer-events: none;
   mix-blend-mode: difference;
   transition:
-    width 160ms ease,
-    height 160ms ease,
-    margin 160ms ease,
-    background 160ms ease;
+    opacity 120ms ease,
+    visibility 120ms ease;
 }
 .context-cursor span {
   position: absolute;
@@ -49,13 +49,10 @@ button:disabled {
   place-items: center;
   text-transform: uppercase;
 }
-.context-cursor--photo,
-.context-cursor--route,
-.context-cursor--action {
-  width: 52px;
-  height: 52px;
-  margin: -19px 0 0 -19px;
+.context-cursor--visible {
+  visibility: visible;
   background: #d9ff3f;
+  opacity: 1;
 }
 button:focus-visible,
 a:focus-visible,
@@ -114,6 +111,11 @@ body:has(.timeline-editorial-shell) .archive-nav {
   background: #f5efe2;
   color: #282117;
   border-bottom-color: #d3c4aa;
+}
+.timeline-immersive-shell[data-route-depth='month'] .archive-nav,
+.timeline-editorial-shell[data-route-depth='month'] .archive-nav {
+  position: relative;
+  top: auto;
 }
 body:has(.experience) .archive-nav a:hover,
 body:has(.timeline-editorial-shell) .archive-nav a:hover {

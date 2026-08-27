@@ -29,6 +29,11 @@
   color: #796e5e;
 }
 
+.shell[data-route-depth='month'] .modeBar {
+  position: relative;
+  top: auto;
+}
+
 .modeBar > span {
   font-size: 0.72rem;
 }

@@ -59,6 +59,7 @@ describe('Timeline shell targets', () => {
   let root: Root;
 
   beforeEach(() => {
+    navigation.pathname = '/timeline';
     container = document.createElement('div');
     document.body.append(container);
     root = createRoot(container);
@@ -86,5 +87,20 @@ describe('Timeline shell targets', () => {
         '44px',
       );
     });
+  });
+
+  it('exposes month-gallery depth and releases both shell controls from sticky positioning', async () => {
+    navigation.pathname = '/timeline/2018/5';
+    await act(async () => root.render(<TimelineRoute view="immersive" />));
+
+    const shell = container.querySelector<HTMLElement>('[data-route-depth="month"]');
+    const archiveNav = container.querySelector<HTMLElement>('.archive-nav');
+    const modeBar = container.querySelector<HTMLElement>(
+      'nav[aria-label="Vista de la cronología"]',
+    );
+
+    expect(shell).not.toBeNull();
+    expect(window.getComputedStyle(archiveNav!).position).toBe('relative');
+    expect(window.getComputedStyle(modeBar!).position).toBe('relative');
   });
 });

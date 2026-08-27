@@ -9,6 +9,7 @@ import { TemporalCarousel, type TemporalCarouselItem } from './TemporalCarousel'
 import { TimelinePhotoViewer } from './TimelinePhotoViewer';
 import {
   collectTimelineYears,
+  groupTimelineGalleryRows,
   isCurrentTimelineRequest,
   monthLabel,
   parseTimelineRoute,
@@ -260,7 +261,12 @@ export function ImmersiveTimelineExperience() {
             </p>
           </header>
 
-          {yearItems.length ? (
+          {isMonthRoute && route.year ? (
+            <p className={styles.yearAnchor} aria-label={`Año de referencia: ${route.year}`}>
+              <span>Año de referencia</span>
+              <strong>{route.year}</strong>
+            </p>
+          ) : yearItems.length ? (
             <div className={styles.yearInstrument}>
               <TemporalCarousel
                 items={yearItems}
@@ -439,15 +445,17 @@ function YearCollage({
   if (!summary.previews.length)
     return <p className={styles.emptyCollage}>Este año no tiene fotografías con fecha.</p>;
 
+  const previews = summary.previews.slice(0, 6);
+
   return (
     <div className={styles.collage} aria-label={`Vista previa de ${summary.year}`}>
-      {summary.previews.map((photo, index) => (
+      {previews.map((photo, index) => (
         <ImmersivePhotoTile
           key={photo.id}
           photo={photo}
           variation={index}
           className={styles[`orbit${index}`] ?? ''}
-          onOpen={() => onOpen({ photos: summary.previews, index })}
+          onOpen={() => onOpen({ photos: previews, index })}
         />
       ))}
     </div>
@@ -587,8 +595,14 @@ function ImmersiveMonthGallery({
     return () => window.clearTimeout(timer);
   }, [cooldownUntil]);
 
+  const galleryRows = useMemo(() => groupTimelineGalleryRows(photos), [photos]);
+
   return (
     <section className={styles.gallery} aria-labelledby="month-gallery-title">
+      <div className={styles.galleryBridge} aria-hidden="true">
+        <span>{year}</span>
+        <strong>{label}</strong>
+      </div>
       <header>
         <h2 id="month-gallery-title">
           {label} de {year}
@@ -602,13 +616,23 @@ function ImmersiveMonthGallery({
       {state === 'loading' && !photos.length && <GallerySkeleton />}
       {photos.length > 0 && (
         <div className={styles.galleryGrid}>
-          {photos.map((photo, index) => (
-            <ImmersivePhotoTile
-              key={photo.id}
-              photo={photo}
-              variation={index}
-              onOpen={() => onOpen({ photos, index })}
-            />
+          {galleryRows.map((row, rowIndex) => (
+            <div
+              className={styles.galleryRow}
+              data-size={row.entries.length}
+              key={row.entries[0]?.item.id ?? rowIndex}
+            >
+              {row.entries.map(({ item: photo, index, span }) => (
+                <ImmersivePhotoTile
+                  key={photo.id}
+                  photo={photo}
+                  variation={index}
+                  className={styles.galleryTile}
+                  style={{ '--gallery-span': span } as CSSProperties}
+                  onOpen={() => onOpen({ photos, index })}
+                />
+              ))}
+            </div>
           ))}
         </div>
       )}
@@ -642,17 +666,22 @@ function ImmersivePhotoTile({
   photo,
   variation,
   className = '',
+  style,
   onOpen,
 }: {
   photo: TimelinePhoto;
   variation: number;
   className?: string;
+  style?: CSSProperties;
   onOpen: () => void;
 }) {
   const [failed, setFailed] = useState(false);
   const unsupported = /^image\/(heic|heif)$/i.test(photo.mimeType);
   return (
-    <article className={`${styles.photo} ${styles[`photo${variation % 6}`]} ${className}`}>
+    <article
+      className={`${styles.photo} ${styles[`photo${variation % 6}`]} ${className}`}
+      style={style}
+    >
       <button onClick={onOpen} aria-label={`Abrir ${photo.fileName}`} data-cursor="photo">
         {unsupported ? (
           <span className={styles.photoFallback}>
@@ -716,10 +745,19 @@ function CollageSkeleton({ label }: { label: string }) {
 }
 
 function GallerySkeleton() {
+  const rows = groupTimelineGalleryRows(Array.from({ length: 8 }, (_, index) => index));
   return (
     <div className={styles.galleryGrid} aria-label="Cargando fotografías">
-      {Array.from({ length: 8 }, (_, index) => (
-        <i className={styles.gallerySkeleton} key={index} />
+      {rows.map((row, rowIndex) => (
+        <div className={styles.galleryRow} data-size={row.entries.length} key={rowIndex}>
+          {row.entries.map(({ index, span }) => (
+            <i
+              className={styles.gallerySkeleton}
+              key={index}
+              style={{ '--gallery-span': span } as CSSProperties}
+            />
+          ))}
+        </div>
       ))}
     </div>
   );
