@@ -2,6 +2,11 @@
   min-height: 100dvh;
 }
 
+.shell :is(a, button) {
+  min-width: 44px;
+  min-height: 44px;
+}
+
 .modeBar {
   position: sticky;
   z-index: 19;
@@ -41,8 +46,10 @@
 }
 
 .modeBar a {
-  min-height: 2rem;
+  min-width: 44px;
+  min-height: 44px;
   display: inline-flex;
+  justify-content: center;
   align-items: center;
   border-radius: 0.55rem;
   padding: 0.3rem 0.7rem;
@@ -89,9 +96,8 @@
   }
 
   .modeBar a {
-    min-width: 2.75rem;
-    min-height: 2.75rem;
-    justify-content: center;
+    min-width: 44px;
+    min-height: 44px;
   }
 }
 
