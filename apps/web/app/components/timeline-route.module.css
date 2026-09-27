@@ -90,6 +90,51 @@
   outline-offset: 3px;
 }
 
+.focusButton {
+  min-width: 44px;
+  min-height: 44px;
+  border: 1px solid currentColor;
+  border-radius: 0.55rem;
+  padding: 0.45rem 0.85rem;
+  background: transparent;
+  color: inherit;
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+
+.focusButton:hover {
+  background: rgb(186 216 63 / 0.16);
+}
+
+.focusButton:focus-visible {
+  outline: 3px solid #bad83f;
+  outline-offset: 3px;
+}
+
+.shell[data-mode='editorial'] .focusButton:focus-visible {
+  outline-color: #b96f17;
+}
+
+.focusExit {
+  position: sticky;
+  z-index: 21;
+  top: 0;
+  display: flex;
+  justify-content: flex-end;
+  padding: 0.5rem max(1rem, 5vw);
+  background: #0b100c;
+  color: #f0f2e9;
+}
+
+.shell[data-mode='editorial'] .focusExit {
+  background: #f5efe2;
+  color: #282117;
+}
+
+.shell[data-route-depth='month'] .focusExit {
+  position: relative;
+}
+
 .shell[data-mode='editorial'] .modeBar a:focus-visible {
   outline-color: #b96f17;
 }
@@ -98,6 +143,7 @@
   .modeBar {
     top: 6.625rem;
     justify-content: space-between;
+    flex-wrap: wrap;
   }
 
   .modeBar a {

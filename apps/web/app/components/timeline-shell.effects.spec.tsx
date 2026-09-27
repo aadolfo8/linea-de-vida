@@ -5,6 +5,7 @@ import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { TimelineRoute } from './TimelineRoute';
+import { TimelineFocusProvider } from './TimelineFocus';
 
 const navigation = vi.hoisted(() => ({
   pathname: '/timeline',
@@ -57,6 +58,12 @@ vi.mock('./TimelineExperience', () => ({ TimelineExperience: () => null }));
 describe('Timeline shell targets', () => {
   let container: HTMLDivElement;
   let root: Root;
+  const renderRoute = (view: 'immersive' | 'editorial' = 'immersive') =>
+    root.render(
+      <TimelineFocusProvider>
+        <TimelineRoute view={view} />
+      </TimelineFocusProvider>,
+    );
 
   beforeEach(() => {
     navigation.pathname = '/timeline';
@@ -74,7 +81,7 @@ describe('Timeline shell targets', () => {
   });
 
   it('renders archive, mode, and action controls with a 44px minimum hit area', async () => {
-    await act(async () => root.render(<TimelineRoute view="immersive" />));
+    await act(async () => renderRoute());
 
     const controls = [...container.querySelectorAll<HTMLElement>('a, button')];
     expect(controls.length).toBeGreaterThanOrEqual(8);
@@ -91,7 +98,7 @@ describe('Timeline shell targets', () => {
 
   it('exposes month-gallery depth and releases both shell controls from sticky positioning', async () => {
     navigation.pathname = '/timeline/2018/5';
-    await act(async () => root.render(<TimelineRoute view="immersive" />));
+    await act(async () => renderRoute());
 
     const shell = container.querySelector<HTMLElement>('[data-route-depth="month"]');
     const archiveNav = container.querySelector<HTMLElement>('.archive-nav');
@@ -102,5 +109,85 @@ describe('Timeline shell targets', () => {
     expect(shell).not.toBeNull();
     expect(window.getComputedStyle(archiveNav!).position).toBe('relative');
     expect(window.getComputedStyle(modeBar!).position).toBe('relative');
+  });
+
+  for (const view of ['immersive', 'editorial'] as const) {
+    for (const pathname of [
+      '/timeline',
+      '/timeline/2018',
+      '/timeline/2018/5',
+      '/timeline/2018/sin-mes',
+    ]) {
+      it(`keeps timeline controls and view when concentrating ${view} ${pathname}`, async () => {
+        navigation.pathname = pathname;
+        await act(async () => renderRoute(view));
+        const enter = [...container.querySelectorAll('button')].find(
+          (button) => button.textContent === 'Concentrar vista',
+        )!;
+        enter.focus();
+        await act(async () => enter.click());
+
+        expect(container.querySelector('[data-focus="on"]')).not.toBeNull();
+        expect(container.querySelector('.archive-nav')).toBeNull();
+        expect(container.querySelector('nav[aria-label="Vista de la cronología"]')).toBeNull();
+        expect(container.textContent).toContain('Salir del modo concentración');
+        if (view === 'immersive') expect(container.textContent).toContain('Cargar más fotografías');
+        const exit = [...container.querySelectorAll('button')].find((button) =>
+          button.textContent?.includes('Salir del modo concentración'),
+        )!;
+        expect(document.activeElement).toBe(exit);
+        expect(navigation.router.replace).not.toHaveBeenCalled();
+
+        await act(async () => exit.click());
+        expect(document.activeElement).toBe(container.querySelector('button'));
+        expect(container.querySelector('.archive-nav')).not.toBeNull();
+        expect(
+          container.querySelector<HTMLAnchorElement>('a[aria-current="page"]')?.href,
+        ).toContain(view === 'editorial' ? 'view=editorial' : '/timeline');
+      });
+    }
+  }
+
+  it('keeps focus mode on nested route changes and exits with Escape', async () => {
+    await act(async () => renderRoute('editorial'));
+    await act(async () => {
+      [...container.querySelectorAll('button')]
+        .find((button) => button.textContent === 'Concentrar vista')!
+        .click();
+    });
+    navigation.pathname = '/timeline/2018/5';
+    await act(async () => renderRoute('editorial'));
+    expect(container.querySelector('[data-focus="on"][data-route-depth="month"]')).not.toBeNull();
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    });
+    expect(container.querySelector('[data-focus="off"]')).not.toBeNull();
+    expect(document.activeElement?.textContent).toBe('Concentrar vista');
+    expect(
+      container.querySelector<HTMLAnchorElement>('a[href="/timeline/2018/5?view=editorial"]'),
+    ).not.toBeNull();
+  });
+
+  it('leaves Escape to an open photo dialog and respects already handled keys', async () => {
+    await act(async () => renderRoute());
+    await act(async () => {
+      [...container.querySelectorAll('button')]
+        .find((button) => button.textContent === 'Concentrar vista')!
+        .click();
+    });
+    const dialog = document.createElement('div');
+    dialog.setAttribute('role', 'dialog');
+    container.append(dialog);
+    await act(async () => {
+      dialog.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+      const handled = new KeyboardEvent('keydown', {
+        key: 'Escape',
+        bubbles: true,
+        cancelable: true,
+      });
+      handled.preventDefault();
+      window.dispatchEvent(handled);
+    });
+    expect(container.querySelector('[data-focus="on"]')).not.toBeNull();
   });
 });
