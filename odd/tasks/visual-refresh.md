@@ -30,9 +30,9 @@ VR-1 forecast: approximately 220–350 authored changed lines across route shell
 
 ## VR-1 evidence and status
 
-- Status: implemented and verified locally; commit pending. A shared timeline layout provider keeps focus mode across nested route changes; entering hides only peripheral shell controls, leaving the timeline and a visible exit in place. Escape defers to the photo dialog.
+- Status: implemented and verified locally. A shared timeline layout provider keeps focus mode across nested route changes; entering hides only peripheral shell controls, leaving the timeline and a visible exit in place. Escape defers to the photo dialog.
 - Focused test: `timeline-shell.effects.spec.tsx` — 12 passed, including both variants at panorama/year/month/unknown-month depths, persistent nested navigation, Escape, and focus restoration. Runtime harness: N/A (no browser runtime harness exercised in this unit); jsdom component integration covers UI transitions, but visual behavior in a real browser remains unverified.
 - Checks: `pnpm --filter @linea-de-vida/web test` — 9 files, 43 tests passed; `pnpm --filter @linea-de-vida/web typecheck` — passed; `pnpm --filter @linea-de-vida/web lint` — passed; `pnpm format:check` — passed (100 files). `node C:\Users\acpal\.agents\skills\impeccable\scripts\detect.mjs --json` on changed UI targets — `[]` (no mechanical findings). Initial `pnpm exec prettier --write` could not run because Prettier is not installed; formatted with the repository's `pnpm exec oxfmt` instead.
 - Rollback boundary: VR-1 route-shell behavior, scoped CSS, and associated tests; VR-2/VR-3 remain untouched.
-- Commit identity and verification: pending.
-- Engram mirror topic: `odd/visual-refresh/tasks`; pre-source-write mirror and readback succeeded; final status mirror pending.
+- Work-unit commit: `2d20383e1b21b4a00c59f168a7a900bf5f844492` (`feat(timeline): add in-app concentration mode`); 271 additions and 21 deletions, below the 400-line advisory. The ledger status is recorded in a separate docs-only commit after the behavior commit.
+- Engram mirror topic: `odd/visual-refresh/tasks`; pre-source-write mirror and readback succeeded. Final status mirrored and read back after the work-unit commit.
