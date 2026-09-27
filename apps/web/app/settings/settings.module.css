@@ -1,24 +1,24 @@
 .settings {
-  --page: #0f120e;
-  --surface: #151a13;
-  --surface-raised: #1b2118;
-  --surface-selected: #242d1b;
-  --line: #354033;
-  --line-strong: #52604e;
-  --text: #edf1e7;
-  --muted: #adb6a8;
-  --accent: #c3df55;
-  --accent-strong: #d3ed6f;
-  --accent-ink: #151b08;
-  --danger: #e58d80;
-  --danger-surface: #281816;
+  --page: var(--map-paper);
+  --surface: var(--map-surface);
+  --surface-raised: var(--map-panel);
+  --surface-selected: #d4e8e2;
+  --line: var(--map-line);
+  --line-strong: #718e8d;
+  --text: var(--map-ink);
+  --muted: var(--map-muted);
+  --accent: var(--map-active);
+  --accent-strong: #9d3b2c;
+  --accent-ink: var(--map-ink);
+  --danger: var(--map-danger);
+  --danger-surface: #f8e9e4;
   width: min(1440px, 100%);
   min-height: calc(100dvh - 72px);
   margin: 0 auto;
   padding: 56px clamp(20px, 4vw, 64px) 112px;
   background: var(--page);
   color: var(--text);
-  color-scheme: dark;
+  color-scheme: light;
   font-variant-numeric: tabular-nums;
 }
 
@@ -111,7 +111,7 @@
 .settings select:focus-visible,
 .settings summary:focus-visible,
 .settings [role='treeitem']:focus-visible {
-  outline: 2px solid var(--accent-strong);
+  outline: 2px solid var(--map-focus);
   outline-offset: 3px;
 }
 
@@ -122,7 +122,7 @@
   border: 1px solid var(--line-strong);
   border-radius: 8px;
   padding: 0 12px;
-  background: #10140f;
+  background: var(--surface);
   color: var(--text);
   caret-color: var(--accent);
   transition:
@@ -132,11 +132,11 @@
 
 .settings input:hover,
 .settings select:hover {
-  border-color: #768273;
+  border-color: var(--map-route);
 }
 
 .settings input::placeholder {
-  color: #879183;
+  color: #586f74;
 }
 
 .settings input[aria-invalid='true'],
@@ -167,6 +167,60 @@
   font-size: 1.03rem;
 }
 
+.taskRail {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 26px;
+  margin-block-end: 8px;
+  border-block: 1px solid var(--line);
+  padding-block: 14px;
+}
+
+.taskPrimary,
+.taskLink {
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  padding: 9px 14px;
+  font-size: 0.84rem;
+  font-weight: 650;
+  text-decoration: none;
+}
+
+.taskPrimary {
+  border-radius: 6px;
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+
+.taskPrimary:hover:not(:disabled) {
+  background: #f08468;
+}
+
+.taskLink {
+  color: var(--text);
+  text-decoration: underline;
+  text-decoration-color: transparent;
+  text-underline-offset: 4px;
+}
+
+.taskLink::before {
+  width: 8px;
+  height: 8px;
+  border: 1px solid var(--map-route);
+  border-radius: 50%;
+  background: var(--map-route-soft);
+  content: '';
+}
+
+.taskLink:hover {
+  color: var(--map-route);
+  text-decoration-color: currentColor;
+}
+
 .notice {
   display: flex;
   align-items: flex-start;
@@ -194,19 +248,19 @@
 }
 
 .notice_success {
-  border-color: #60764e;
+  border-color: #4c8068;
 }
 
 .notice_warning {
-  border-color: #806e3f;
+  border-color: #97721d;
 }
 
 .notice_warning .noticeMark {
-  background: #e0bd65;
+  background: #d49a27;
 }
 
 .notice_error {
-  border-color: #7a4a44;
+  border-color: var(--danger);
   background: var(--danger-surface);
 }
 
@@ -222,9 +276,32 @@
 }
 
 .connectionSection,
-.sourceSetup {
+.sourceSetupContent {
   display: grid;
   gap: 22px;
+}
+
+.sourceSetupSummary {
+  min-height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  color: var(--text);
+  cursor: pointer;
+  font-weight: 650;
+}
+
+.sourceSetupSummary span {
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-weight: 450;
+}
+
+.sourceSetup[open] > .sourceSetupSummary {
+  margin-block-end: 22px;
+  border-bottom: 1px solid var(--line);
+  padding-block-end: 14px;
 }
 
 .sectionHeading,
@@ -299,9 +376,9 @@
 }
 
 .dangerButton {
-  border: 1px solid #875048 !important;
-  background: #6e3731;
-  color: #fff5f2;
+  border: 1px solid var(--danger) !important;
+  background: var(--danger);
+  color: #fff;
 }
 
 .textButton,
@@ -336,7 +413,7 @@
 .confirmationPanel {
   display: grid;
   gap: 18px;
-  border: 1px solid #70504a;
+  border: 1px solid var(--danger);
   border-radius: 10px;
   padding: 20px;
   background: var(--danger-surface);
@@ -348,7 +425,7 @@
 
 .confirmationPanel p {
   margin-block-end: 0;
-  color: #d6c4bf;
+  color: var(--muted);
 }
 
 .buttonRow {
@@ -374,7 +451,7 @@
   width: 100%;
   border-bottom: 1px solid var(--line);
   padding: 12px 16px;
-  background: #11150f;
+  background: var(--surface-raised);
 }
 
 .sourceChoices > label,
@@ -470,7 +547,7 @@
 .driveFolderList > p {
   margin: 0;
   padding: 10px 13px;
-  background: #11150f;
+  background: var(--surface-raised);
   color: var(--muted);
   font-size: 0.76rem;
   font-weight: 650;
@@ -598,15 +675,15 @@
 }
 
 .sync_failed {
-  border-color: #754a44;
+  border-color: var(--danger);
 }
 
 .sync_partial {
-  border-color: #77683d;
+  border-color: #97721d;
 }
 
 .sync_succeeded {
-  border-color: #536746;
+  border-color: #4c8068;
 }
 
 .syncPanelHeading,
@@ -642,12 +719,12 @@
   border: 0;
   border-radius: 999px;
   overflow: hidden;
-  background: #0d100c;
+  background: var(--line);
 }
 
 .progressBlock progress::-webkit-progress-bar,
 .indeterminateProgress::-webkit-progress-bar {
-  background: #0d100c;
+  background: var(--line);
 }
 
 .progressBlock progress::-webkit-progress-value {
@@ -710,8 +787,8 @@
 .issues li {
   border-radius: 7px;
   padding: 11px 12px;
-  background: #251c13;
-  color: #e5d3b3;
+  background: #f5eddb;
+  color: #4c3b1a;
   font-size: 0.82rem;
   line-height: 1.5;
 }
@@ -732,7 +809,12 @@
 .summarySkeleton span,
 .photoSkeletons span {
   min-height: 124px;
-  background: linear-gradient(100deg, var(--surface) 25%, #232a20 45%, var(--surface) 65%);
+  background: linear-gradient(
+    100deg,
+    var(--surface) 25%,
+    var(--surface-raised) 45%,
+    var(--surface) 65%
+  );
   background-size: 240% 100%;
   animation: shimmer 1.5s ease-in-out infinite;
 }
@@ -815,11 +897,11 @@
 }
 
 .classificationSummary .needsReview {
-  background: #201b12;
+  background: #f5eddb;
 }
 
 .classificationSummary .needsReview dd {
-  color: #e1bd65;
+  color: #795614;
 }
 
 .emptyState {
@@ -829,7 +911,7 @@
   border: 1px dashed var(--line-strong);
   border-radius: 10px;
   padding: 28px;
-  background: #121610;
+  background: var(--surface-raised);
 }
 
 .emptyState p {
@@ -850,7 +932,7 @@
 .treePanel {
   min-width: 0;
   border-inline-end: 1px solid var(--line);
-  background: #11150f;
+  background: var(--surface-raised);
 }
 
 .treeHeading {
@@ -882,7 +964,7 @@
   max-height: 760px;
   align-content: start;
   overflow: auto;
-  scrollbar-color: var(--line-strong) #11150f;
+  scrollbar-color: var(--line-strong) var(--surface-raised);
   scrollbar-width: thin;
 }
 
@@ -892,7 +974,7 @@
 }
 
 .tree::-webkit-scrollbar-thumb {
-  border: 3px solid #11150f;
+  border: 3px solid var(--surface-raised);
   border-radius: 999px;
   background: var(--line-strong);
 }
@@ -1015,10 +1097,10 @@
 }
 
 .missingLabel {
-  border: 1px solid #765047;
+  border: 1px solid var(--danger);
   border-radius: 999px;
   padding: 2px 6px;
-  color: #d5a399;
+  color: var(--danger);
   font-size: 0.61rem;
   white-space: nowrap;
 }
@@ -1066,7 +1148,7 @@
 .breadcrumb span:not(:last-child)::after {
   content: '/';
   margin-inline-start: 4px;
-  color: #737c70;
+  color: var(--muted);
 }
 
 .folderTitleRow {
@@ -1086,7 +1168,7 @@
   border-radius: 7px;
   padding: 7px 9px;
   background: var(--danger-surface);
-  color: #d5a399;
+  color: var(--danger);
   font-size: 0.72rem;
   line-height: 1.4;
 }
@@ -1163,7 +1245,7 @@
   border: 1px solid var(--line);
   border-radius: 12px;
   overflow: hidden;
-  background: #11150f;
+  background: var(--surface);
   transition:
     background-color 170ms ease,
     border-color 170ms ease,
@@ -1192,7 +1274,7 @@
   width: 100%;
   aspect-ratio: 4 / 3;
   object-fit: cover;
-  background: #252b23;
+  background: var(--surface-raised);
 }
 
 .photoMeta {
@@ -1240,7 +1322,7 @@
   place-items: center;
   border: 1px solid var(--line-strong);
   border-radius: 5px;
-  background: #0d100c;
+  background: var(--surface);
 }
 
 .selectedPhoto .selectionState {
@@ -1434,7 +1516,7 @@
   justify-content: space-between;
   gap: 20px;
   padding: 11px 13px;
-  background: #11150f;
+  background: var(--surface);
 }
 
 .history li > span:first-child {
@@ -1454,7 +1536,8 @@
 
 @media (hover: hover) {
   .primaryButton:hover:not(:disabled) {
-    background: var(--accent-strong);
+    background: #f08468;
+    color: var(--accent-ink);
   }
 
   .secondaryButton:hover:not(:disabled),
@@ -1465,7 +1548,7 @@
   }
 
   .dangerButton:hover:not(:disabled) {
-    background: #82443c;
+    background: #87382c;
   }
 
   .textButton:hover:not(:disabled),
@@ -1479,17 +1562,17 @@
   .treeItem:hover,
   .pendingTreeRow:hover,
   .folderCandidate:hover {
-    background: #1d241a;
+    background: var(--surface-selected);
   }
 
   .disclosure:hover {
-    background: #283024;
+    background: var(--surface-selected);
     color: var(--text);
   }
 
   .photoGrid article:hover {
     border-color: var(--line-strong);
-    background: #181d16;
+    background: var(--surface-selected);
   }
 
   .photoFolderLink:hover {
@@ -1546,6 +1629,7 @@
 
   .sectionHeading,
   .archiveHeader,
+  .sourceSetupSummary,
   .sourceIdentity,
   .summaryHeading,
   .syncPanelHeading,

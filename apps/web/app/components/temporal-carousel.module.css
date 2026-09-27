@@ -65,7 +65,7 @@
   display: grid;
   align-content: center;
   gap: 0.2rem;
-  border: 0;
+  border: 1px solid var(--timeline-line, #afc2bd);
   border-radius: 50%;
   padding: 0.5rem;
   background: var(--timeline-surface, #111914);
@@ -85,13 +85,13 @@
   position: absolute;
   inset: calc(50% - 0.3rem);
   border-radius: 50%;
-  background: var(--timeline-accent, #b7d43b);
-  box-shadow: 0 0 0 4px var(--timeline-bg, #09100c);
+  background: var(--timeline-route, #1d7780);
+  box-shadow: 0 0 0 4px var(--timeline-bg, #f1efe8);
 }
 
 .node[aria-current='date']::before {
   inset: calc(50% - 0.4rem);
-  background: var(--timeline-ink, #eef1e8);
+  background: var(--timeline-accent, #e96b4d);
 }
 
 .node:focus-visible {
@@ -103,14 +103,12 @@
   position: absolute;
   inset: -0.65rem;
   z-index: -1;
-  border: 1px solid color-mix(in srgb, var(--timeline-accent, #b7d43b) 68%, transparent);
+  border: 2px solid var(--timeline-accent, #e96b4d);
   border-radius: 50%;
-  box-shadow: 0 0 2.5rem color-mix(in srgb, var(--timeline-accent, #b7d43b) 22%, transparent);
 }
 
 .instrument[data-variant='month'] .halo {
   inset: -0.35rem;
-  box-shadow: 0 0 1.5rem color-mix(in srgb, var(--timeline-accent, #b7d43b) 18%, transparent);
 }
 
 .primary,

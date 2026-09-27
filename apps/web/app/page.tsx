@@ -61,11 +61,15 @@ export default function Home() {
       <a className={styles.skip} href="#access">
         Saltar al acceso
       </a>
-      <div className={styles.orbit} aria-hidden="true">
-        <span />
-        <span />
-        <span />
-      </div>
+      <svg className={styles.routeMap} viewBox="0 0 720 520" aria-hidden="true">
+        <path d="M58 430h164c48 0 64-32 64-78V210c0-53 25-78 78-78h256" />
+        <path d="M286 290h115c52 0 79 27 79 79v61" />
+        <circle cx="58" cy="430" r="10" />
+        <circle cx="286" cy="290" r="10" />
+        <circle cx="364" cy="132" r="10" />
+        <circle cx="560" cy="132" r="10" />
+        <circle cx="480" cy="430" r="10" />
+      </svg>
       <section>
         <p className={styles.wordmark}>Línea de vida</p>
         <h1>Lo que elegiste guardar sigue siendo solo tuyo.</h1>
