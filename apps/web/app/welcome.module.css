@@ -1,16 +1,18 @@
 .welcome {
-  --ink: #0b0e0b;
-  --lime: #d9ff3f;
-  min-height: 100vh;
+  --ink: var(--map-ink);
+  --paper: var(--map-paper);
+  --route: var(--map-route);
+  --active: var(--map-active);
+  min-height: 100dvh;
   position: relative;
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(220px, 25vw);
-  align-items: end;
-  gap: 48px;
+  align-items: center;
+  gap: clamp(32px, 7vw, 112px);
   overflow: hidden;
-  padding: clamp(28px, 6vw, 88px);
-  background: var(--ink);
-  color: #e5e9df;
+  padding: clamp(28px, 7vw, 112px);
+  background: var(--paper);
+  color: var(--ink);
 }
 .welcome section {
   position: relative;
@@ -18,8 +20,8 @@
   max-width: 950px;
 }
 .wordmark {
-  margin: 0 0 clamp(70px, 16vh, 180px);
-  color: var(--lime);
+  margin: 0 0 clamp(36px, 8vh, 88px);
+  color: var(--route);
   font-size: 0.78rem;
   font-weight: 700;
   letter-spacing: 0.13em;
@@ -28,14 +30,14 @@
 .welcome h1 {
   max-width: 9.5ch;
   margin: 0;
-  font-size: clamp(3.5rem, 9vw, 9rem);
-  line-height: 0.83;
-  letter-spacing: -0.06em;
+  font-size: clamp(3.25rem, 8vw, 7.25rem);
+  line-height: 0.9;
+  letter-spacing: -0.04em;
 }
 .lede {
   max-width: 52ch;
   margin: 32px 0;
-  color: #c4cbc0;
+  color: #3d5962;
   font-size: clamp(1.05rem, 1.8vw, 1.35rem);
   line-height: 1.55;
 }
@@ -47,39 +49,40 @@
 .access button {
   min-height: 52px;
   width: max-content;
-  border: 1px solid var(--lime);
+  border: 1px solid var(--active);
   padding: 0 20px;
-  background: var(--lime);
+  background: var(--active);
   color: var(--ink);
   font: inherit;
   font-weight: 750;
 }
 .access .secondary {
   background: transparent;
-  color: var(--lime);
+  color: var(--ink);
+  border-color: var(--map-line);
 }
 .access p {
   max-width: 52ch;
   margin: 4px 0 0;
-  color: #a9b2a5;
+  color: #435d64;
   line-height: 1.45;
 }
 .welcome aside {
   position: relative;
   z-index: 1;
-  align-self: stretch;
+  align-self: center;
   display: flex;
   flex-direction: column;
   justify-content: end;
-  gap: 11px;
-  padding-bottom: 2px;
-  border-left: 1px solid #435042;
-  color: #bdc5b9;
+  gap: 16px;
+  padding: 24px 0 24px 24px;
+  border-left: 2px solid var(--route);
+  color: var(--ink);
 }
 .welcome aside span {
   margin: 0 0 12px;
   padding-left: 20px;
-  color: var(--lime);
+  color: var(--route);
   font-size: 0.72rem;
   font-weight: 700;
   letter-spacing: 0.1em;
@@ -89,26 +92,28 @@
   margin: 0;
   padding-left: 20px;
 }
-.orbit {
+.routeMap {
   position: absolute;
-  inset: -12vw -10vw auto auto;
-  width: min(72vw, 920px);
-  aspect-ratio: 1;
-  border: 1px solid #344133;
-  border-radius: 50%;
+  top: 3%;
+  right: -6%;
+  width: min(64vw, 790px);
+  height: auto;
+  overflow: visible;
+  opacity: 0.26;
+  fill: var(--active);
+  stroke: var(--route);
+  stroke-width: 4;
+  vector-effect: non-scaling-stroke;
 }
-.orbit span {
-  position: absolute;
-  inset: 12%;
-  border: 1px solid #283426;
-  border-radius: 50%;
+.routeMap path {
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 3;
 }
-.orbit span:nth-child(2) {
-  inset: 29%;
-}
-.orbit span:nth-child(3) {
-  inset: 48%;
-  background: var(--lime);
+.routeMap circle {
+  stroke: var(--paper);
+  stroke-width: 4;
 }
 .skip {
   position: fixed;
@@ -116,7 +121,7 @@
   top: -60px;
   left: 12px;
   padding: 12px 16px;
-  background: var(--lime);
+  background: var(--active);
   color: var(--ink);
   font-weight: 700;
 }
@@ -124,11 +129,11 @@
   top: 12px;
 }
 .pending {
-  min-height: 100vh;
+  min-height: 100dvh;
   display: grid;
   padding: 24px;
-  background: #0b0e0b;
-  color: #e5e9df;
+  background: var(--paper);
+  color: var(--ink);
   place-items: center;
 }
 @media (max-width: 680px) {
@@ -138,17 +143,17 @@
     padding: 24px;
   }
   .wordmark {
-    margin-bottom: 18vh;
+    margin-bottom: 42px;
   }
   .welcome h1 {
-    font-size: clamp(3.2rem, 15vw, 5.8rem);
+    font-size: clamp(3rem, 14vw, 5.2rem);
   }
   .welcome aside {
     display: grid;
     grid-template-columns: 1fr 1fr;
     gap: 8px;
     padding-top: 24px;
-    border-top: 1px solid #435042;
+    border-top: 1px solid var(--line);
     border-left: 0;
   }
   .welcome aside span {
@@ -158,9 +163,10 @@
   .welcome aside p {
     padding-left: 0;
   }
-  .orbit {
-    width: 120vw;
-    right: -36vw;
-    top: -25vw;
+  .routeMap {
+    top: 2%;
+    right: -48%;
+    width: 105vw;
+    opacity: 0.17;
   }
 }

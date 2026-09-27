@@ -17,16 +17,16 @@
   align-items: center;
   gap: 0.8rem;
   padding: 0.45rem max(1rem, 5vw);
-  border-bottom: 1px solid #344137;
-  background: rgb(8 16 12 / 0.94);
-  color: #aeb8aa;
+  border-bottom: 1px solid var(--map-line);
+  background: rgb(241 239 232 / 0.96);
+  color: var(--map-muted);
   backdrop-filter: blur(0.75rem);
 }
 
 .shell[data-mode='editorial'] .modeBar {
-  border-bottom-color: #d3c4aa;
-  background: rgb(245 239 226 / 0.95);
-  color: #796e5e;
+  border-bottom-color: var(--map-line);
+  background: rgb(241 239 232 / 0.96);
+  color: var(--map-muted);
 }
 
 .shell[data-route-depth='month'] .modeBar {
@@ -41,13 +41,13 @@
 .modeBar > div {
   display: flex;
   gap: 0.2rem;
-  border: 1px solid #4a584b;
+  border: 1px solid var(--map-line);
   border-radius: 0.75rem;
   padding: 0.2rem;
 }
 
 .shell[data-mode='editorial'] .modeBar > div {
-  border-color: #c7b89f;
+  border-color: var(--map-line);
 }
 
 .modeBar a {
@@ -68,36 +68,82 @@
 }
 
 .modeBar a:hover {
-  color: #f0f2e9;
+  color: var(--map-ink);
 }
 
 .modeBar a[aria-current='page'] {
-  background: #bad83f;
-  color: #0b120d;
+  background: var(--map-route-soft);
+  color: var(--map-ink);
 }
 
 .shell[data-mode='editorial'] .modeBar a:hover {
-  color: #282117;
+  color: var(--map-ink);
 }
 
 .shell[data-mode='editorial'] .modeBar a[aria-current='page'] {
-  background: #282117;
-  color: #f5efe2;
+  background: var(--map-route-soft);
+  color: var(--map-ink);
 }
 
 .modeBar a:focus-visible {
-  outline: 3px solid #bad83f;
+  outline: 3px solid var(--map-active);
   outline-offset: 3px;
 }
 
+.focusButton {
+  min-width: 44px;
+  min-height: 44px;
+  border: 1px solid currentColor;
+  border-radius: 0.55rem;
+  padding: 0.45rem 0.85rem;
+  background: transparent;
+  color: inherit;
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+
+.focusButton:hover {
+  background: color-mix(in srgb, var(--map-route-soft) 42%, transparent);
+}
+
+.focusButton:focus-visible {
+  outline: 3px solid var(--map-active);
+  outline-offset: 3px;
+}
+
+.shell[data-mode='editorial'] .focusButton:focus-visible {
+  outline-color: var(--map-active);
+}
+
+.focusExit {
+  position: sticky;
+  z-index: 21;
+  top: 0;
+  display: flex;
+  justify-content: flex-end;
+  padding: 0.5rem max(1rem, 5vw);
+  background: var(--map-paper);
+  color: var(--map-ink);
+}
+
+.shell[data-mode='editorial'] .focusExit {
+  background: var(--map-paper);
+  color: var(--map-ink);
+}
+
+.shell[data-route-depth='month'] .focusExit {
+  position: relative;
+}
+
 .shell[data-mode='editorial'] .modeBar a:focus-visible {
-  outline-color: #b96f17;
+  outline-color: var(--map-active);
 }
 
 @media (max-width: 42.5rem) {
   .modeBar {
     top: 6.625rem;
     justify-content: space-between;
+    flex-wrap: wrap;
   }
 
   .modeBar a {
