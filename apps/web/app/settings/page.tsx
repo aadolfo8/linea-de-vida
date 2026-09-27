@@ -276,6 +276,12 @@ function Settings({ sessionConnection }: { sessionConnection: Connection | null 
   const visibleFolders = useMemo(() => {
     const visible: IndexedFolder[] = [];
     const visited = new Set<string>();
+    const covered = new Set<string>();
+    const cover = (folder: IndexedFolder) => {
+      if (covered.has(folder.id)) return;
+      covered.add(folder.id);
+      for (const child of folderRelations.childrenById.get(folder.id) ?? []) cover(child);
+    };
     const append = (folder: IndexedFolder) => {
       if (visited.has(folder.id)) return;
       visited.add(folder.id);
@@ -283,8 +289,15 @@ function Settings({ sessionConnection }: { sessionConnection: Connection | null 
       if (collapsedFolders.has(folder.id)) return;
       for (const child of folderRelations.childrenById.get(folder.id) ?? []) append(child);
     };
-    for (const root of folderRelations.roots) append(root);
-    for (const folder of folders) append(folder);
+    for (const root of folderRelations.roots) {
+      cover(root);
+      append(root);
+    }
+    for (const folder of folders) {
+      if (covered.has(folder.id)) continue;
+      cover(folder);
+      append(folder);
+    }
     return visible;
   }, [collapsedFolders, folderRelations, folders]);
 
