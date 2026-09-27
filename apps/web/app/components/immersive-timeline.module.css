@@ -1,15 +1,15 @@
 .experience {
-  --timeline-bg: #08100c;
-  --timeline-surface: #111a14;
-  --timeline-surface-raised: #172219;
-  --timeline-ink: #f0f2e9;
-  --timeline-muted: #aeb8aa;
-  --timeline-line: #4a584b;
-  --timeline-accent: #bad83f;
+  --timeline-bg: var(--map-paper);
+  --timeline-surface: var(--map-surface);
+  --timeline-surface-raised: var(--map-panel);
+  --timeline-ink: var(--map-ink);
+  --timeline-muted: var(--map-muted);
+  --timeline-line: var(--map-line);
+  --timeline-route: var(--map-route);
+  --timeline-accent: var(--map-active);
   min-height: 100dvh;
   overflow: clip;
-  background:
-    radial-gradient(circle at 50% 22%, rgb(57 75 52 / 0.28), transparent 38rem), var(--timeline-bg);
+  background: var(--timeline-bg);
   color: var(--timeline-ink);
 }
 
@@ -21,7 +21,7 @@
 
 .experience ::selection {
   background: var(--timeline-accent);
-  color: #0b120d;
+  color: var(--timeline-ink);
 }
 
 .skipLink {
@@ -32,7 +32,7 @@
   border-radius: 0.75rem;
   padding: 0.75rem 1rem;
   background: var(--timeline-accent);
-  color: #0b120d;
+  color: var(--timeline-ink);
   transition: top 180ms ease;
 }
 
@@ -298,7 +298,7 @@
 .enterYear {
   margin-top: 2rem;
   background: var(--timeline-accent);
-  color: #0b120d;
+  color: var(--timeline-ink);
   font-weight: 650;
 }
 
@@ -308,7 +308,7 @@
 .notice button:hover,
 .emptyArchive a:hover {
   background: var(--timeline-accent);
-  color: #0b120d;
+  color: var(--timeline-ink);
 }
 
 .enterYear:active,
@@ -384,8 +384,8 @@
 }
 
 .galleryWrap {
-  background: linear-gradient(to bottom, var(--timeline-bg) 0 4.5rem, #edf0e7 12rem 100%);
-  color: #172018;
+  background: var(--timeline-bg);
+  color: var(--timeline-ink);
 }
 
 .gallery {
@@ -437,7 +437,7 @@
 
 .gallery header p {
   margin: 0;
-  color: #526054;
+  color: var(--timeline-muted);
   line-height: 1.65;
   text-wrap: pretty;
 }
@@ -469,8 +469,8 @@
 }
 
 .galleryGrid .photo {
-  background: #cfd5c9;
-  box-shadow: 0 1.25rem 3rem rgb(35 50 38 / 0.12);
+  background: var(--timeline-surface-raised);
+  box-shadow: 0 1rem 2rem rgb(12 41 53 / 0.1);
 }
 
 .galleryRow:nth-child(even) .photo:first-child {
@@ -485,7 +485,7 @@
   min-height: 100%;
   display: grid;
   padding: 1.25rem;
-  color: #aab5a8;
+  color: var(--timeline-muted);
   font-size: 0.82rem;
   line-height: 1.5;
   place-items: center;
@@ -493,19 +493,19 @@
 }
 
 .galleryGrid .photoFallback {
-  color: #526054;
+  color: var(--timeline-muted);
 }
 
 .loadMore {
   margin-top: 3rem;
-  border-color: #344d37;
-  color: #27412d;
+  border-color: var(--timeline-line);
+  color: var(--timeline-ink);
 }
 
 .loadMore:hover {
-  border-color: #344d37;
-  background: #344d37;
-  color: #f5f7f1;
+  border-color: var(--timeline-route, #1d7780);
+  background: var(--timeline-route, #1d7780);
+  color: var(--map-surface);
 }
 
 .notice,
@@ -545,7 +545,7 @@
 }
 
 .emptyGallery {
-  color: #526054;
+  color: var(--timeline-muted);
 }
 
 .emptyCollage {
@@ -579,7 +579,12 @@
 .gallerySkeleton {
   display: block;
   border-radius: 0.75rem;
-  background: linear-gradient(100deg, #152019 34%, #263329 50%, #152019 66%);
+  background: linear-gradient(
+    100deg,
+    var(--timeline-surface-raised) 34%,
+    var(--map-surface) 50%,
+    var(--timeline-surface-raised) 66%
+  );
   background-size: 200% 100%;
   animation: shimmer 1.35s infinite linear;
 }
@@ -609,7 +614,12 @@
 }
 
 .gallerySkeleton {
-  background: linear-gradient(100deg, #d5dbd0 34%, #eef1e9 50%, #d5dbd0 66%);
+  background: linear-gradient(
+    100deg,
+    var(--timeline-surface-raised) 34%,
+    var(--map-surface) 50%,
+    var(--timeline-surface-raised) 66%
+  );
   background-size: 200% 100%;
 }
 
