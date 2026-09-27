@@ -315,6 +315,18 @@ function Settings({ sessionConnection }: { sessionConnection: Connection | null 
 
   const announce = (message: string, tone: Notice['tone'] = 'info') => setNotice({ message, tone });
 
+  const reviewPendingPhotos = () => {
+    if (!activeSource) return;
+    void loadPending(activeSource.id)
+      .then(() => document.getElementById('photos-workspace')?.scrollIntoView({ block: 'start' }))
+      .catch((error) =>
+        announce(
+          errorCopy(error, 'No se pudieron cargar las fotos pendientes. Reintenta.'),
+          'error',
+        ),
+      );
+  };
+
   const loadSources = async () => {
     setLoadingSources(true);
     try {
@@ -939,13 +951,57 @@ function Settings({ sessionConnection }: { sessionConnection: Connection | null 
   return (
     <main className={styles.settings}>
       <header className={styles.intro}>
-        <h1>Organiza las fechas de tu archivo</h1>
+        <h1>Organiza las fechas de tus fotos</h1>
         <p>
           Comprueba qué fotos tienen fecha, corrige las que lo necesiten y revisa los cambios de
           Drive. Línea de vida solo lee la carpeta que eliges: nunca modifica ni elimina archivos en
           Drive.
         </p>
       </header>
+
+      <nav className={styles.taskRail} aria-label="Acciones frecuentes de Ajustes">
+        {activeSource && summary?.unclassified ? (
+          <button
+            type="button"
+            className={styles.taskPrimary}
+            onClick={reviewPendingPhotos}
+            disabled={loadingArchive || loadingPhotos}
+          >
+            Revisar {summary.unclassified.toLocaleString('es-ES')} fotos sin fecha
+          </button>
+        ) : (
+          <a className={styles.taskPrimary} href="#archive-title">
+            {activeSource ? 'Ver estado del archivo' : 'Configurar el archivo'}
+          </a>
+        )}
+        {connection && (
+          <a
+            className={styles.taskLink}
+            href="#source-setup"
+            onClick={() => {
+              const setup = document.getElementById('source-setup');
+              if (setup instanceof HTMLDetailsElement) setup.open = true;
+            }}
+          >
+            Añadir una carpeta
+          </a>
+        )}
+        <a className={styles.taskLink} href="#drive-title">
+          Acceso y privacidad
+        </a>
+        {history.length > 0 && (
+          <a
+            className={styles.taskLink}
+            href="#review-history"
+            onClick={() => {
+              const historySection = document.getElementById('review-history');
+              if (historySection instanceof HTMLDetailsElement) historySection.open = true;
+            }}
+          >
+            Revisiones anteriores
+          </a>
+        )}
+      </nav>
 
       {notice && (
         <div
@@ -1014,135 +1070,145 @@ function Settings({ sessionConnection }: { sessionConnection: Connection | null 
       </section>
 
       {connection && (
-        <section className={styles.sourceSetup} aria-labelledby="source-picker-title">
-          <div className={styles.sectionHeading}>
-            <div>
-              <h2 id="source-picker-title">Añade una carpeta de fotos</h2>
-              <p>
-                Elige el tipo correcto para que podamos interpretar las fechas sin alterar los
-                archivos originales.
-              </p>
-            </div>
-          </div>
-
-          <fieldset className={styles.sourceChoices}>
-            <legend>¿Qué contiene la carpeta?</legend>
-            <label className={sourceType === 'GENERIC' ? styles.sourceChoiceSelected : ''}>
-              <input
-                type="radio"
-                name="source-type"
-                value="GENERIC"
-                checked={sourceType === 'GENERIC'}
-                onChange={() => setSourceType('GENERIC')}
-              />
-              <span>
-                <strong>Una carpeta normal de fotografías</strong>
-                <small>
-                  Elige esta opción para imágenes organizadas por ti. La fecha se obtiene de la
-                  información disponible en Drive y, si hace falta, del nombre de las carpetas.
-                </small>
-              </span>
-            </label>
-            <label className={sourceType === 'GOOGLE_TAKEOUT' ? styles.sourceChoiceSelected : ''}>
-              <input
-                type="radio"
-                name="source-type"
-                value="GOOGLE_TAKEOUT"
-                checked={sourceType === 'GOOGLE_TAKEOUT'}
-                onChange={() => setSourceType('GOOGLE_TAKEOUT')}
-              />
-              <span>
-                <strong>Una exportación de Google Fotos</strong>
-                <small>
-                  Google Takeout es la descarga que crea Google Fotos con imágenes y archivos de
-                  datos. Elige esta opción si copiaste esa exportación completa a Drive; usaremos
-                  esos datos para recuperar mejor la fecha de captura.
-                </small>
-              </span>
-            </label>
-          </fieldset>
-
-          <form className={styles.sourceForm} onSubmit={(event) => void browse(event)}>
-            <label htmlFor="source-name">
-              Nombre para reconocer esta fuente
-              <input
-                id="source-name"
-                value={sourceName}
-                onChange={(event) => setSourceName(event.target.value)}
-                placeholder="Fotos familiares antiguas"
-                maxLength={200}
-              />
-            </label>
-            <label htmlFor="folder-id">
-              ID de la carpeta de Google Drive
-              <span className={styles.fieldHint}>
-                Es la parte de la dirección de Drive que aparece después de <code>/folders/</code>.
-                Nunca usamos la raíz completa de tu Drive.
-              </span>
-              <div className={styles.inputAction}>
-                <input
-                  id="folder-id"
-                  value={folderId}
-                  onChange={(event) => {
-                    setFolderId(event.target.value);
-                    setDriveFolders([]);
-                  }}
-                  placeholder="Pega aquí el ID de la carpeta"
-                  required
-                />
-                <button
-                  type="submit"
-                  className={styles.secondaryButton}
-                  disabled={busy || !folderId.trim()}
-                >
-                  {busyAction === 'browse' && (
-                    <span className={styles.spinner} aria-hidden="true" />
-                  )}
-                  Comprobar carpeta
-                </button>
+        <details
+          className={styles.sourceSetup}
+          id="source-setup"
+          open={!loadingSources && !activeSource}
+        >
+          <summary className={styles.sourceSetupSummary}>
+            Añadir una carpeta de fotos
+            <span>La carpeta siempre la eliges tú</span>
+          </summary>
+          <section className={styles.sourceSetupContent} aria-labelledby="source-picker-title">
+            <div className={styles.sectionHeading}>
+              <div>
+                <h2 id="source-picker-title">Elige una carpeta de Drive</h2>
+                <p>
+                  Elige el tipo correcto para que podamos interpretar las fechas sin alterar los
+                  archivos originales.
+                </p>
               </div>
-            </label>
-          </form>
-
-          {!!driveFolders.length && (
-            <div className={styles.driveFolderList} aria-label="Subcarpetas disponibles">
-              <p>Subcarpetas encontradas</p>
-              {driveFolders.map((folder) => (
-                <button
-                  type="button"
-                  key={folder.id}
-                  className={styles.folderCandidate}
-                  onClick={() => {
-                    setFolderId(folder.id);
-                    setDriveFolders([]);
-                    announce(`Subcarpeta “${folder.name}” seleccionada.`, 'info');
-                  }}
-                >
-                  <svg viewBox="0 0 20 20" aria-hidden="true">
-                    <path d="M2.75 5.75h5l1.5 1.75h8v7.75h-14.5z" />
-                  </svg>
-                  <span>{folder.name}</span>
-                  <small>Usar esta carpeta</small>
-                </button>
-              ))}
             </div>
-          )}
 
-          <div className={styles.sourceSaveRow}>
-            <button
-              type="button"
-              className={styles.primaryButton}
-              onClick={() => void createSource()}
-              disabled={busy || !folderId.trim()}
-            >
-              {busyAction === 'create-source' && (
-                <span className={styles.spinner} aria-hidden="true" />
-              )}
-              Guardar esta carpeta como fuente
-            </button>
-            <p>Después podrás revisar su contenido y clasificar las fechas.</p>
-          </div>
-        </section>
+            <fieldset className={styles.sourceChoices}>
+              <legend>¿Qué contiene la carpeta?</legend>
+              <label className={sourceType === 'GENERIC' ? styles.sourceChoiceSelected : ''}>
+                <input
+                  type="radio"
+                  name="source-type"
+                  value="GENERIC"
+                  checked={sourceType === 'GENERIC'}
+                  onChange={() => setSourceType('GENERIC')}
+                />
+                <span>
+                  <strong>Una carpeta normal de fotografías</strong>
+                  <small>
+                    Elige esta opción para imágenes organizadas por ti. La fecha se obtiene de la
+                    información disponible en Drive y, si hace falta, del nombre de las carpetas.
+                  </small>
+                </span>
+              </label>
+              <label className={sourceType === 'GOOGLE_TAKEOUT' ? styles.sourceChoiceSelected : ''}>
+                <input
+                  type="radio"
+                  name="source-type"
+                  value="GOOGLE_TAKEOUT"
+                  checked={sourceType === 'GOOGLE_TAKEOUT'}
+                  onChange={() => setSourceType('GOOGLE_TAKEOUT')}
+                />
+                <span>
+                  <strong>Una exportación de Google Fotos</strong>
+                  <small>
+                    Google Takeout es la descarga que crea Google Fotos con imágenes y archivos de
+                    datos. Elige esta opción si copiaste esa exportación completa a Drive; usaremos
+                    esos datos para recuperar mejor la fecha de captura.
+                  </small>
+                </span>
+              </label>
+            </fieldset>
+
+            <form className={styles.sourceForm} onSubmit={(event) => void browse(event)}>
+              <label htmlFor="source-name">
+                Nombre para reconocer esta fuente
+                <input
+                  id="source-name"
+                  value={sourceName}
+                  onChange={(event) => setSourceName(event.target.value)}
+                  placeholder="Fotos familiares antiguas"
+                  maxLength={200}
+                />
+              </label>
+              <label htmlFor="folder-id">
+                ID de la carpeta de Google Drive
+                <span className={styles.fieldHint}>
+                  Es la parte de la dirección de Drive que aparece después de <code>/folders/</code>
+                  . Nunca usamos la raíz completa de tu Drive.
+                </span>
+                <div className={styles.inputAction}>
+                  <input
+                    id="folder-id"
+                    value={folderId}
+                    onChange={(event) => {
+                      setFolderId(event.target.value);
+                      setDriveFolders([]);
+                    }}
+                    placeholder="Pega aquí el ID de la carpeta"
+                    required
+                  />
+                  <button
+                    type="submit"
+                    className={styles.secondaryButton}
+                    disabled={busy || !folderId.trim()}
+                  >
+                    {busyAction === 'browse' && (
+                      <span className={styles.spinner} aria-hidden="true" />
+                    )}
+                    Comprobar carpeta
+                  </button>
+                </div>
+              </label>
+            </form>
+
+            {!!driveFolders.length && (
+              <div className={styles.driveFolderList} aria-label="Subcarpetas disponibles">
+                <p>Subcarpetas encontradas</p>
+                {driveFolders.map((folder) => (
+                  <button
+                    type="button"
+                    key={folder.id}
+                    className={styles.folderCandidate}
+                    onClick={() => {
+                      setFolderId(folder.id);
+                      setDriveFolders([]);
+                      announce(`Subcarpeta “${folder.name}” seleccionada.`, 'info');
+                    }}
+                  >
+                    <svg viewBox="0 0 20 20" aria-hidden="true">
+                      <path d="M2.75 5.75h5l1.5 1.75h8v7.75h-14.5z" />
+                    </svg>
+                    <span>{folder.name}</span>
+                    <small>Usar esta carpeta</small>
+                  </button>
+                ))}
+              </div>
+            )}
+
+            <div className={styles.sourceSaveRow}>
+              <button
+                type="button"
+                className={styles.primaryButton}
+                onClick={() => void createSource()}
+                disabled={busy || !folderId.trim()}
+              >
+                {busyAction === 'create-source' && (
+                  <span className={styles.spinner} aria-hidden="true" />
+                )}
+                Guardar esta carpeta como fuente
+              </button>
+              <p>Después podrás revisar su contenido y clasificar las fechas.</p>
+            </div>
+          </section>
+        </details>
       )}
 
       <section
@@ -1386,7 +1452,7 @@ function Settings({ sessionConnection }: { sessionConnection: Connection | null 
         )}
 
         {!!folders.length && (
-          <div className={styles.archiveWorkspace}>
+          <div className={styles.archiveWorkspace} id="photos-workspace">
             <aside className={styles.treePanel}>
               <div className={styles.treeHeading}>
                 <div>
@@ -2080,7 +2146,7 @@ function Settings({ sessionConnection }: { sessionConnection: Connection | null 
         )}
 
         {!!history.length && (
-          <details className={styles.history}>
+          <details className={styles.history} id="review-history">
             <summary>Historial de revisiones de Drive</summary>
             <ul>
               {history.map((item) => (

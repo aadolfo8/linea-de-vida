@@ -2,13 +2,14 @@
 
 ## Objective and boundary
 
-Improve the archive's visual clarity and settings usability in reviewable, independent work units. This branch starts at merge-base `03258dab386c17d0dbc1654c114a94cb0b1ecbd2` against `origin/main`. The current work unit is **VR-1 only**: an in-app concentration mode for the timeline, not the browser Fullscreen API. Do not touch the user's dirty `.gitignore`, remote state, backend, or unrelated features. Preserve privacy, user authorization, date precision (`YEAR`, `MONTH`, `DAY`, `UNKNOWN`), and the existing editorial/immersive navigation.
+Improve the archive's visual clarity and settings usability in reviewable, independent work units. This branch starts at merge-base `03258dab386c17d0dbc1654c114a94cb0b1ecbd2` against `origin/main`. VR-1 delivered the in-app concentration mode; VR-2 and VR-3 are now authorized after the user's visual-world selection. Do not touch the user's dirty `.gitignore`, remote state, backend, or unrelated features. Preserve privacy, user authorization, date precision (`YEAR`, `MONTH`, `DAY`, `UNKNOWN`), and both editorial/immersive exploration modes.
 
 ## Route and trigger evidence
 
 - `apps/web/app/timeline/page.tsx`, `[year]/page.tsx`, and `[year]/[month]/page.tsx` all render `TimelineRoute`, selecting editorial only when `view=editorial`.
 - `TimelineRoute.tsx` owns `ArchiveNav`, the view switch, and the renderer for all three depths; `timelineHref` preserves the editorial query in timeline navigation. `timeline-shell.effects.spec.tsx` already checks shell controls and month positioning.
-- This ledger covers three requested outcomes, but only VR-1 is authorized for implementation in this work unit. Later visual-world choices require user direction; do not replace `DESIGN.md` here.
+- Impeccable decision board `http://127.0.0.1:49630/`, seed `4bc7ea36`: the user chose the assigned direction **Cartografía de recuerdos**. Its grammar is survey-paper surfaces, marine ink, mint route lines, coral active stations, and unfiltered authenticated photographs. Years and months are wayfinding nodes; never invent locations or date precision. The category-standard option and unchosen challengers were not selected.
+- Image generation is unavailable in this environment (`OPENAI_API_KEY` is unset). No generated sketches/composition comps were used; do not represent catalog inspiration as a promised product screenshot.
 
 ## Stable tasks
 
@@ -16,17 +17,17 @@ Improve the archive's visual clarity and settings usability in reviewable, indep
 
 Add an explicit, reversible in-app focus presentation for panorama, year, and month routes in both timeline variants. Hide peripheral archive navigation and the view switch while active, retain temporal navigation, back/retry/load-more and other critical content controls, and keep a visible exit. Enter/exit and Escape must work with keyboard focus restored appropriately. Do not enter the native browser Fullscreen API, change the current pathname or `view` query, or alter the interpretation of dates or authorization. Test route depths, variants, keyboard, and transitions alongside the behavior.
 
-### VR-2 — Coherent replacement visual identity across timeline/home (deferred)
+### VR-2 — Approved visual-world rollout across home and timeline (in progress)
 
-Choose a replacement visual world with the user and implement it coherently across timeline and home, preserving product truth and interaction contracts. Acceptance: both surfaces share a consistent approved identity, remain usable at mobile and desktop widths, and preserve existing archive flows. Do not choose the world or modify `DESIGN.md` in VR-1.
+Apply Cartografía de recuerdos across root tokens, welcome, navigation, immersive timeline, editorial timeline, and concentration mode. Preserve current routes, both exploration modes, temporal controls, privacy, and real precision. Acceptance: the surfaces share one light wayfinding palette and route-marker grammar; mobile, keyboard, loading/error/empty states, and reduced motion remain usable; root build output retains the visual contract. Record `DESIGN.md` at finish from the shipped implementation.
 
-### VR-3 — Settings task-first information architecture (deferred)
+### VR-3 — Task-first Settings under the approved world (in progress)
 
-Organize settings around user tasks and recovery paths without changing authorization or data semantics. Acceptance: major tasks are discoverable, keyboard-operable, and retain their existing behavior; test critical settings flows.
+Keep the recent photo-classification redesign and present common tasks first: review photos without dates, inspect archive state, add a selected folder, and verify Drive access. Progressive disclosure may collapse secondary folder setup only when a source exists. Preserve every confirmation, folder scope warning, Drive read-only boundary, authorization behavior, and existing date semantics. Acceptance: task entry points are visible, keyboard-operable, and reveal the intended existing task without changing API behavior.
 
 ## Review workload and delivery
 
-VR-1 forecast: approximately 220–350 authored changed lines across route shell, scoped styles, tests, and this ledger; VR-2 and VR-3 are separate units and not estimated until scoped. The 400-line advisory is not a reason to compress tests or code. Delivery strategy: **ask-on-risk** if the cohesive VR-1 change exceeds 400 authored additions plus deletions or cannot be reviewed independently; do not silently start another task or PR. No TDD configuration is explicitly known, so use ordinary functional checks: `pnpm --filter @linea-de-vida/web test`, `pnpm --filter @linea-de-vida/web typecheck`, `pnpm --filter @linea-de-vida/web lint`, and `pnpm format:check` (targeted check if an unrelated global baseline fails). Format edited source before verification. Record actual outcomes and counts here.
+The visual identity and settings IA share one surface rollout; authored-line count and review risk will be recorded after the diff is complete. The 400-line advisory is not a reason to compress tests or code. No TDD configuration is explicitly known, so use ordinary functional checks: `pnpm --filter @linea-de-vida/web test`, `pnpm --filter @linea-de-vida/web typecheck`, `pnpm --filter @linea-de-vida/web lint`, `pnpm --filter @linea-de-vida/web build`, and `pnpm format:check`. Format edited source before verification. Record actual outcomes and counts here.
 
 ## VR-1 evidence and status
 
