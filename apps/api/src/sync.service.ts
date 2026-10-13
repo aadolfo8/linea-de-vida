@@ -38,7 +38,14 @@ export const syncJobId = (sourceId: string, runId: string) => {
   return `sync-s${source.length}-${source}r${run.length}-${run}`;
 };
 
-type FolderWork = { id: string; path: string[]; parentDriveFolderId?: string; cursor?: string };
+type TakeoutCandidate = { fileName: string; metadata: TakeoutMetadata };
+type FolderWork = {
+  id: string;
+  path: string[];
+  parentDriveFolderId?: string;
+  cursor?: string;
+  takeout?: { candidates: TakeoutCandidate[]; cursor?: string; complete: boolean; bytes: number };
+};
 type Checkpoint = { pendingFolders: FolderWork[]; seenFolders: string[] };
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -201,7 +208,7 @@ export class SyncService {
       indexed: run.indexedCount,
       issues: run.issueCount,
     };
-    let partial = false;
+    let partial = run.issueCount > 0;
     const issue = async (
       code: SyncIssueCode,
       severity: SyncIssueSeverity,
@@ -292,11 +299,10 @@ export class SyncService {
     try {
       while (checkpoint.pendingFolders.length) {
         const folder = checkpoint.pendingFolders[0]!;
-        if (!folder.cursor && checkpoint.seenFolders.includes(folder.id)) {
+        if (!folder.cursor && !folder.takeout && checkpoint.seenFolders.includes(folder.id)) {
           checkpoint.pendingFolders.shift();
           continue;
         }
-        if (!folder.cursor) checkpoint.seenFolders.push(folder.id);
         const parent = folder.parentDriveFolderId
           ? await this.prisma.indexedFolder.findUnique({
               where: {
@@ -330,6 +336,80 @@ export class SyncService {
             lastSeenSyncRunId: run.id,
           },
         });
+        // Collect metadata across the entire folder before matching any image page.
+        // Only the current folder carries this bounded, resumable metadata checkpoint.
+        if (run.source.type === 'GOOGLE_TAKEOUT') {
+          folder.takeout ??= { candidates: [], complete: false, bytes: 0 };
+          const metadata = folder.takeout;
+          while (!metadata.complete) {
+            const metadataPage = await this.retry(() =>
+              this.drive.listChildren(run.source.connection, folder.id, metadata.cursor),
+            );
+            const additions: TakeoutCandidate[] = [];
+            const invalid: string[] = [];
+            let addedBytes = 0;
+            for (const sidecar of metadataPage.items.filter((entry) =>
+              /\.json$/i.test(entry.name),
+            )) {
+              const text = await this.retry(async () => {
+                const media = await this.drive.getContentStream(
+                  run.source.connection,
+                  sidecar.id,
+                );
+                const chunks: Buffer[] = [];
+                let size = 0;
+                try {
+                  for await (const chunk of media.stream) {
+                    size += Buffer.byteLength(chunk);
+                    if (size > 1024 * 1024) return null;
+                    chunks.push(Buffer.from(chunk));
+                  }
+                } catch (error) {
+                  // A broken body is a transport failure, not evidence of invalid JSON.
+                  if (error instanceof DriveRequestError) throw error;
+                  throw new DriveRequestError(503, 'Takeout metadata stream failed.');
+                }
+                return Buffer.concat(chunks).toString('utf8');
+              });
+              const parsed = text === null ? null : this.takeoutParser.parse(text);
+              if (parsed?.kind === 'VALID') {
+                const candidate = { fileName: sidecar.name, metadata: parsed.metadata };
+                addedBytes += Buffer.byteLength(JSON.stringify(candidate));
+                additions.push(candidate);
+              } else invalid.push(sidecar.id);
+              if (
+                metadata.candidates.length + additions.length > 10_000 ||
+                metadata.bytes + addedBytes > 8 * 1024 * 1024
+              ) {
+                await issue(
+                  SyncIssueCode.LIMIT_REACHED,
+                  SyncIssueSeverity.ERROR,
+                  'The Takeout folder metadata safety limit was reached.',
+                );
+                await this.persist(run.id, checkpoint, counts);
+                await this.prisma.syncRun.update({
+                  where: { id: run.id },
+                  data: { status: 'PARTIAL' },
+                });
+                return;
+              }
+            }
+            for (const id of invalid)
+              await issue(
+                SyncIssueCode.INVALID_TAKEOUT_JSON,
+                SyncIssueSeverity.WARNING,
+                'Takeout metadata JSON was invalid.',
+                id,
+              );
+            metadata.candidates.push(...additions);
+            metadata.bytes += addedBytes;
+            metadata.complete = !metadataPage.nextCursor;
+            if (metadataPage.nextCursor) metadata.cursor = metadataPage.nextCursor;
+            else delete metadata.cursor;
+            await this.persist(run.id, checkpoint, counts);
+          }
+        }
+        const candidates = folder.takeout?.candidates ?? [];
         const page = await this.retry(() =>
           this.drive.listChildren(run.source.connection, folder.id, folder.cursor),
         );
@@ -350,38 +430,6 @@ export class SyncService {
             'The configured pending-folder safety limit was reached.',
           );
           break;
-        }
-        const candidates: Array<{ fileName: string; metadata: TakeoutMetadata }> = [];
-        if (run.source.type === 'GOOGLE_TAKEOUT') {
-          for (const sidecar of page.items.filter((entry) => /\.json$/i.test(entry.name))) {
-            try {
-              const media = await this.drive.getContentStream(run.source.connection, sidecar.id);
-              let text = '';
-              let size = 0;
-              for await (const chunk of media.stream) {
-                size += Buffer.byteLength(chunk);
-                if (size > 1024 * 1024) throw new Error('too large');
-                text += Buffer.from(chunk).toString('utf8');
-              }
-              const parsed = this.takeoutParser.parse(text);
-              if (parsed.kind === 'VALID')
-                candidates.push({ fileName: sidecar.name, metadata: parsed.metadata });
-              else
-                await issue(
-                  SyncIssueCode.INVALID_TAKEOUT_JSON,
-                  SyncIssueSeverity.WARNING,
-                  'Takeout metadata JSON was invalid.',
-                  sidecar.id,
-                );
-            } catch {
-              await issue(
-                SyncIssueCode.INVALID_TAKEOUT_JSON,
-                SyncIssueSeverity.WARNING,
-                'Takeout metadata JSON was invalid.',
-                sidecar.id,
-              );
-            }
-          }
         }
         const concurrency = Math.min(
           10,
@@ -406,7 +454,10 @@ export class SyncService {
           );
         }
         if (page.nextCursor) folder.cursor = page.nextCursor;
-        else checkpoint.pendingFolders.shift();
+        else {
+          checkpoint.seenFolders.push(folder.id);
+          checkpoint.pendingFolders.shift();
+        }
         await this.persist(run.id, checkpoint, counts);
       }
       const status =
