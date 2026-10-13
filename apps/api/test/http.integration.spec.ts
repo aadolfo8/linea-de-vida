@@ -259,6 +259,28 @@ describe('Phase 1 HTTP contracts', () => {
       .expect(404);
   });
 
+  it('exposes bounded batch removal with CSRF enforcement and neutral absent results', async () => {
+    await createApp('owner', { csrf: true });
+    await request(app.getHttpServer())
+      .post('/v1/photo-removals')
+      .set('Origin', 'http://attacker.example.test')
+      .send({ photoIds: ['unknown'] })
+      .expect(403);
+    await request(app.getHttpServer())
+      .post('/v1/photo-removals')
+      .set('Origin', 'http://localhost:3000')
+      .send({ photoIds: [] })
+      .expect(400);
+    await request(app.getHttpServer())
+      .post('/v1/photo-removals')
+      .set('Origin', 'http://localhost:3000')
+      .send({ photoIds: ['unknown'] })
+      .expect(200)
+      .expect(({ body }) =>
+        expect(body).toEqual({ results: [{ id: 'unknown', status: 'ABSENT' }] }),
+      );
+  });
+
   it('accepts Takeout only as an explicit owned source type', async () => {
     await createApp();
     await request(app.getHttpServer())
