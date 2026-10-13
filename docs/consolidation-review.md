@@ -11,25 +11,25 @@ The implementation is separated into five behavior-based commits, not one large 
 - This planning document is separate from the five implementation units.
 - Counts below include additions and deletions, blank lines, new files, tests, and each unit's README fragment. Recalculate if the worktree changes.
 
-| Order | Proposed conventional commit | Authored lines | Generated lines | Dependency |
-| --- | --- | ---: | ---: | --- |
-| 1 | `fix(media): serve private Drive thumbnails and clean up cancelled streams` | 249 | 0 | Base |
-| 2 | `fix(sync): match Takeout metadata across resumable folder pages` | 348 | 0 | Base |
-| 3 | `fix(worker): drain jobs and release queue resources safely` | 384 | 0 | Base |
-| 4 | `feat(archive): add bounded private photo removal batches` | 100 | 0 | Base |
-| 5 | `fix(settings): preserve pending photo removals and refresh selection` | 347 | 317 | Unit 4 |
+| Order | Proposed conventional commit                                                | Authored lines | Generated lines | Dependency |
+| ----- | --------------------------------------------------------------------------- | -------------: | --------------: | ---------- |
+| 1     | `fix(media): serve private Drive thumbnails and clean up cancelled streams` |            249 |               0 | Base       |
+| 2     | `fix(sync): match Takeout metadata across resumable folder pages`           |            348 |               0 | Base       |
+| 3     | `fix(worker): drain jobs and release queue resources safely`                |            384 |               0 | Base       |
+| 4     | `feat(archive): add bounded private photo removal batches`                  |            100 |               0 | Base       |
+| 5     | `fix(settings): preserve pending photo removals and refresh selection`      |            347 |             317 | Unit 4     |
 
 The proposed order is a validated cumulative review sequence: each step was tested with preceding units, without later units. Units 2–4 have not been tested independently on the base or in a different order. Unit 5 is 664 changed lines including its generated lockfile, exceeding a 400-line total-diff budget. Review that generated dependency change explicitly; if the future review gate counts it, obtain a size exception rather than dropping tests or hiding the lockfile.
 
 ### Created commits
 
-| Unit | Commit |
-| --- | --- |
-| 1 | `c9bb7e7` |
-| 2 | `c9377c5` |
-| 3 | `81641b3` |
-| 4 | `2f859cd` |
-| 5 | `8c6156d` |
+| Unit | Commit    |
+| ---- | --------- |
+| 1    | `c9bb7e7` |
+| 2    | `c9377c5` |
+| 3    | `81641b3` |
+| 4    | `2f859cd` |
+| 5    | `8c6156d` |
 
 Before each commit, staged file contents were compared with the validated sequence, changed-line counts checked, and staged whitespace verified. The user's `.gitignore` modification was excluded and its file hash preserved. Push status is reported separately from this record.
 
@@ -89,17 +89,17 @@ Includes the manual-refresh selection lock. Rollback boundary: Settings batch fl
 
 All commands below ran against the **combined worktree**, not individual staged units. Counts are evidence from the consolidation review, not a promise that future snapshots pass.
 
-| Scope | Command | Result |
-| --- | --- | --- |
-| Media | `pnpm --filter @linea-de-vida/api exec vitest run test/drive-media.spec.ts test/media-proxy.service.spec.ts` | 24 passed |
-| Takeout | `pnpm --filter @linea-de-vida/api exec vitest run test/robust-sync.spec.ts test/takeout.spec.ts test/sync-takeout.integration.spec.ts` | 30 passed |
-| Lifecycle | `pnpm --filter @linea-de-vida/api exec vitest run test/worker.spec.ts test/sync-enqueue.spec.ts` | 15 passed |
-| Removal API | `pnpm --filter @linea-de-vida/api exec vitest run test/archive-management.spec.ts test/http.integration.spec.ts` | 35 passed |
-| Removal UI | `pnpm --filter @linea-de-vida/web exec vitest run app/settings/page.spec.tsx lib/photo-removal.spec.ts` | 7 passed |
-| Full suite | `pnpm test` | 124 API + 18 web = 142 passed |
-| Static checks | `pnpm lint` and `pnpm typecheck` | Passed |
-| Web build | `pnpm --filter @linea-de-vida/web build` | Passed; existing Next ESLint-plugin warning |
-| Whitespace | `git diff --check` | Passed; LF/CRLF warnings only |
+| Scope         | Command                                                                                                                                | Result                                      |
+| ------------- | -------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------- |
+| Media         | `pnpm --filter @linea-de-vida/api exec vitest run test/drive-media.spec.ts test/media-proxy.service.spec.ts`                           | 24 passed                                   |
+| Takeout       | `pnpm --filter @linea-de-vida/api exec vitest run test/robust-sync.spec.ts test/takeout.spec.ts test/sync-takeout.integration.spec.ts` | 30 passed                                   |
+| Lifecycle     | `pnpm --filter @linea-de-vida/api exec vitest run test/worker.spec.ts test/sync-enqueue.spec.ts`                                       | 15 passed                                   |
+| Removal API   | `pnpm --filter @linea-de-vida/api exec vitest run test/archive-management.spec.ts test/http.integration.spec.ts`                       | 35 passed                                   |
+| Removal UI    | `pnpm --filter @linea-de-vida/web exec vitest run app/settings/page.spec.tsx lib/photo-removal.spec.ts`                                | 7 passed                                    |
+| Full suite    | `pnpm test`                                                                                                                            | 124 API + 18 web = 142 passed               |
+| Static checks | `pnpm lint` and `pnpm typecheck`                                                                                                       | Passed                                      |
+| Web build     | `pnpm --filter @linea-de-vida/web build`                                                                                               | Passed; existing Next ESLint-plugin warning |
+| Whitespace    | `git diff --check`                                                                                                                     | Passed; LF/CRLF warnings only               |
 
 The mounted Settings tests use React DOM and jsdom with mocked API/auth/navigation. They cover partial success, lost responses, safe ABSENT retries, stale pagination responses, selection retention and refresh locking. They are not browser visual tests. The `*.integration.spec.ts` names do not imply these scenarios were verified against real infrastructure.
 
@@ -115,13 +115,13 @@ The mounted Settings tests use React DOM and jsdom with mocked API/auth/navigati
 
 The base was exported with `git archive` to a temporary directory outside the worktree. Only the inclusion map above was applied, in order, including the partitioned README and `sync.service.ts` changes. No commits, staging, branch changes or remote operations were used.
 
-| Snapshot | API tests | Web tests | Total | Typecheck |
-| --- | ---: | ---: | ---: | --- |
-| Base + unit 1 | 92 | 11 | 103 | Passed |
-| Previous + unit 2 | 102 | 11 | 113 | Passed |
-| Previous + unit 3 | 114 | 11 | 125 | Passed |
-| Previous + unit 4 | 124 | 11 | 135 | Passed |
-| Previous + unit 5 | 124 | 18 | 142 | Passed |
+| Snapshot          | API tests | Web tests | Total | Typecheck |
+| ----------------- | --------: | --------: | ----: | --------- |
+| Base + unit 1     |        92 |        11 |   103 | Passed    |
+| Previous + unit 2 |       102 |        11 |   113 | Passed    |
+| Previous + unit 3 |       114 |        11 |   125 | Passed    |
+| Previous + unit 4 |       124 |        11 |   135 | Passed    |
+| Previous + unit 5 |       124 |        18 |   142 | Passed    |
 
 Each snapshot ran `pnpm test` and `pnpm typecheck`. The final snapshot also passed `pnpm lint` and the web production build, with the existing Next ESLint-plugin warning. All 20 included final files match the source worktree after line-ending normalization. Source-file and index fingerprints were unchanged throughout validation. The snapshot retained the base `.gitignore` and excluded the user's modification and this planning document.
 

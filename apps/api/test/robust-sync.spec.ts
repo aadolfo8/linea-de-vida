@@ -45,6 +45,13 @@ function fixture(pages: Record<string, { items: DriveItem[]; nextCursor?: string
         exclusions.has(where.userId_driveFileId.driveFileId) ? { id: 'excluded' } : null,
     },
     indexedFolder: {
+      findFirst: async ({ where }: any) =>
+        [...folders.values()].find(
+          (folder) =>
+            folder.id === where.id &&
+            folder.userId === where.userId &&
+            folder.sourceId === where.sourceId,
+        ) ?? null,
       findUnique: async ({ where }: any) =>
         folders.get(where.userId_driveFolderId.driveFolderId) ?? null,
       upsert: async ({ where, create, update }: any) => {
@@ -116,6 +123,130 @@ function fixture(pages: Record<string, { items: DriveItem[]; nextCursor?: string
 }
 
 describe('robust sync', () => {
+  it.each([
+    ['DIRECT_ONLY', false],
+    ['FALLBACK_DESCENDANTS', false],
+    ['ALL_DESCENDANTS', false],
+    ['DIRECT_ONLY', true],
+    ['FALLBACK_DESCENDANTS', true],
+    ['ALL_DESCENDANTS', true],
+  ] as const)('applies folder scope %s with resumed checkpoint: %s', async (scope, resumed) => {
+    const f = fixture({
+      'root:': {
+        items: [
+          image('direct'),
+          {
+            id: 'child',
+            name: 'Child',
+            mimeType: 'application/vnd.google-apps.folder',
+            parents: ['root'],
+          },
+        ],
+      },
+      'child:': {
+        items: [image('unknown'), { ...image('dated'), imageTime: '2010-06-15T12:00:00Z' }],
+      },
+    });
+    const ruleDate = new Date('1998-01-01T00:00:00Z');
+    f.folders.set('root', {
+      id: 'root',
+      userId: 'owner',
+      sourceId: 'source',
+      parentId: null,
+      dateRule: { dateValue: ruleDate, precision: 'YEAR', scope },
+    });
+    if (resumed) {
+      f.run.checkpoint = {
+        pendingFolders: [
+          { id: 'child', parentDriveFolderId: 'root', path: ['Family archive', 'Child'] },
+        ],
+        seenFolders: ['root'],
+      };
+    }
+    await f.service.execute('run');
+    expect(f.run.status).toBe('SUCCEEDED');
+    if (!resumed)
+      expect(f.photos.get('direct')).toMatchObject({
+        effectiveDateValue: ruleDate,
+        effectiveDatePrecision: 'YEAR',
+        effectiveDateSource: 'FOLDER_RULE',
+      });
+    expect(f.photos.get('unknown')).toMatchObject(
+      scope === 'DIRECT_ONLY'
+        ? {
+            effectiveDateValue: null,
+            effectiveDatePrecision: 'UNKNOWN',
+            effectiveDateSource: 'NONE',
+          }
+        : {
+            effectiveDateValue: ruleDate,
+            effectiveDatePrecision: 'YEAR',
+            effectiveDateSource: 'FOLDER_RULE',
+          },
+    );
+    expect(f.photos.get('dated')).toMatchObject(
+      scope === 'ALL_DESCENDANTS'
+        ? {
+            effectiveDateValue: ruleDate,
+            effectiveDatePrecision: 'YEAR',
+            effectiveDateSource: 'FOLDER_RULE',
+          }
+        : {
+            effectiveDateValue: f.photos.get('dated').detectedDate,
+            effectiveDatePrecision: f.photos.get('dated').detectedPrecision,
+            effectiveDateSource: 'DRIVE_IMAGE_METADATA',
+          },
+    );
+  });
+
+  it.each([
+    ['owner', 'source', true],
+    ['other-owner', 'source', false],
+    ['owner', 'other-source', false],
+  ])('resolves past a direct-only parent within %s/%s', async (userId, sourceId, inherits) => {
+    const f = fixture({ 'child:': { items: [image('a')] } });
+    const ruleDate = new Date('1998-07-01T00:00:00Z');
+    f.folders.set('root', {
+      id: 'root',
+      userId,
+      sourceId,
+      parentId: null,
+      dateRule: { dateValue: ruleDate, precision: 'MONTH', scope: 'FALLBACK_DESCENDANTS' },
+    });
+    f.folders.set('parent', {
+      id: 'parent',
+      userId: 'owner',
+      sourceId: 'source',
+      parentId: 'root',
+      dateRule: {
+        dateValue: new Date('2001-01-01T00:00:00Z'),
+        precision: 'YEAR',
+        scope: 'DIRECT_ONLY',
+      },
+    });
+    f.run.checkpoint = {
+      pendingFolders: [
+        { id: 'child', parentDriveFolderId: 'parent', path: ['Archive', 'Parent', 'Child'] },
+      ],
+      seenFolders: ['root', 'parent'],
+    };
+    await f.service.execute('run');
+    expect(f.run.status).toBe('SUCCEEDED');
+    expect(f.photos.get('a')).toMatchObject(
+      inherits
+        ? {
+            effectiveDateValue: ruleDate,
+            effectiveDatePrecision: 'MONTH',
+            effectiveDateSource: 'FOLDER_RULE',
+          }
+        : {
+            effectiveDateValue: null,
+            effectiveDatePrecision: 'UNKNOWN',
+            effectiveDateSource: 'NONE',
+          },
+    );
+  });
+
   const sidecar = (id: string, name = 'a.jpg.json'): DriveItem => ({
     id,
     name,
