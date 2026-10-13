@@ -17,13 +17,6 @@ import { PhotoDateResolver } from './date-resolver';
 import { PrismaService } from './prisma.service';
 import { TakeoutMatcher, TakeoutMetadata, TakeoutMetadataParser } from './takeout';
 
-const queue = () =>
-  new Queue('photo-sync', {
-    connection: new IORedis(process.env.REDIS_URL ?? 'redis://localhost:6379', {
-      maxRetriesPerRequest: null,
-    }),
-  });
-
 const jobOptions: JobsOptions = {
   attempts: 3,
   backoff: { type: 'exponential', delay: 1_000, jitter: 0.25 },
@@ -51,6 +44,46 @@ const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 @Injectable()
 export class SyncService {
+  private producer?: Queue;
+  private producerConnection?: IORedis;
+  private closing?: Promise<void>;
+
+  private queue() {
+    if (this.closing) throw new Error('Sync producer is shutting down.');
+    if (!this.producer) {
+      const connection = new IORedis(process.env.REDIS_URL ?? 'redis://localhost:6379', {
+        maxRetriesPerRequest: 1,
+      });
+      this.producerConnection = connection;
+      connection.on('error', () =>
+        console.error(JSON.stringify({ event: 'sync_producer_redis_error' })),
+      );
+      try {
+        this.producer = new Queue('photo-sync', { connection });
+        this.producer.on('error', () =>
+          console.error(JSON.stringify({ event: 'sync_producer_error' })),
+        );
+      } catch (error) {
+        connection.disconnect();
+        this.producerConnection = undefined;
+        throw error;
+      }
+    }
+    return this.producer;
+  }
+
+  onModuleDestroy() {
+    this.closing ??= (async () => {
+      try {
+        await this.producer?.close();
+      } finally {
+        // BullMQ does not own an externally supplied Redis client.
+        this.producerConnection?.disconnect();
+      }
+    })();
+    return this.closing;
+  }
+
   constructor(
     @Inject(PrismaService)
     private readonly prisma: PrismaService,
@@ -86,7 +119,7 @@ export class SyncService {
       }
     }
     try {
-      await queue().add(
+      await this.queue().add(
         'scan',
         { syncRunId: run.id },
         { ...jobOptions, jobId: syncJobId(source.id, run.id) },
