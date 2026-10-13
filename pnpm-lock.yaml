@@ -134,7 +134,7 @@ importers:
         specifier: ^9.20.1
         version: 9.39.5(jiti@2.7.0)
       jsdom:
-        specifier: ^30.0.1
+        specifier: 30.0.1
         version: 30.0.1(@noble/hashes@1.8.0)
       tailwindcss:
         specifier: ^4.0.6

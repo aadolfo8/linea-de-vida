@@ -17,6 +17,7 @@ import {
 async function bootstrap() {
   const config = loadRuntimeConfig();
   const app = await NestFactory.create(AppModule, { bodyParser: false });
+  app.enableShutdownHooks();
   app.getHttpAdapter().getInstance().set('trust proxy', 1);
   app.setGlobalPrefix('');
   app.getHttpAdapter().getInstance().disable('x-powered-by');

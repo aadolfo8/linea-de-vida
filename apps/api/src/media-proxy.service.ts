@@ -173,8 +173,19 @@ export class MediaProxyService {
               controller.signal,
             ),
         controller.signal,
+        (media) => media.stream.destroy(),
       );
-      if (controller.signal.aborted) return;
+      if (controller.signal.aborted) {
+        media.stream.destroy();
+        return;
+      }
+      if (variant === 'thumbnail') {
+        contentType = normalizeMimeType(media.contentType);
+        if (!BROWSER_IMAGE_TYPES.has(contentType)) {
+          media.stream.destroy();
+          throw new DriveRequestError(502, 'Drive returned an unsupported thumbnail type.');
+        }
+      }
       this.headers(response, contentType, variant === 'thumbnail');
       const collector =
         variant === 'thumbnail'
@@ -261,11 +272,22 @@ function boundedNumber(
   return Number.isInteger(value) && value >= minimum && value <= maximum ? value : fallback;
 }
 
-function withAbort<T>(operation: Promise<T>, signal: AbortSignal) {
-  if (signal.aborted) return Promise.reject(new Error('Media request aborted.'));
+function withAbort<T>(operation: Promise<T>, signal: AbortSignal, dispose: (value: T) => void) {
   return new Promise<T>((resolve, reject) => {
     const abort = () => reject(new Error('Media request aborted.'));
     signal.addEventListener('abort', abort, { once: true });
-    operation.then(resolve, reject).finally(() => signal.removeEventListener('abort', abort));
+    if (signal.aborted) abort();
+    operation.then(
+      (value) => {
+        signal.removeEventListener('abort', abort);
+        // The transport can finish after cancellation has already rejected this wait.
+        if (signal.aborted) dispose(value);
+        else resolve(value);
+      },
+      (error) => {
+        signal.removeEventListener('abort', abort);
+        reject(error);
+      },
+    );
   });
 }

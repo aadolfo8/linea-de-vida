@@ -21,6 +21,7 @@ import {
   type Source,
 } from '../../lib/api';
 import { mediaUrl } from '../../lib/media';
+import { removePhotosFromArchive } from '../../lib/photo-removal';
 import styles from './settings.module.css';
 
 type RuleScope = 'DIRECT_ONLY' | 'FALLBACK_DESCENDANTS' | 'ALL_DESCENDANTS';
@@ -75,6 +76,7 @@ type BusyAction =
   | 'create-source'
   | 'sync'
   | 'remove-photos'
+  | 'refresh-photos'
   | 'folder-date'
   | 'manual-date'
   | 'remove-rule'
@@ -240,7 +242,7 @@ function Settings({ sessionConnection }: { sessionConnection: Connection | null 
   const pendingViewRef = useRef(pendingView);
   const archiveRequestRef = useRef<AbortController | null>(null);
   const photoRequestRef = useRef<AbortController | null>(null);
-
+  const removing = useRef(false);
   const busy = busyAction !== null;
   const activeSources = sources.filter((source) => source.status === 'ACTIVE');
   const activeSource =
@@ -316,7 +318,7 @@ function Settings({ sessionConnection }: { sessionConnection: Connection | null 
   const announce = (message: string, tone: Notice['tone'] = 'info') => setNotice({ message, tone });
 
   const reviewPendingPhotos = () => {
-    if (!activeSource) return;
+    if (!activeSource || busy) return;
     void loadPending(activeSource.id)
       .then(() => document.getElementById('photos-workspace')?.scrollIntoView({ block: 'start' }))
       .catch((error) =>
@@ -401,6 +403,7 @@ function Settings({ sessionConnection }: { sessionConnection: Connection | null 
     filter: string,
     cursor?: string,
     append = false,
+    retained: IndexedPhoto[] = [],
   ) => {
     photoRequestRef.current?.abort();
     const controller = new AbortController();
@@ -420,9 +423,13 @@ function Settings({ sessionConnection }: { sessionConnection: Connection | null 
         photoFilterRef.current !== filter
       )
         return;
-      setPhotos((current) => (append ? [...current, ...page.items] : page.items));
+      setPhotos((current) => [
+        ...new Map(
+          [...(append ? current : retained), ...page.items].map((photo) => [photo.id, photo]),
+        ).values(),
+      ]);
       setPhotoCursor(page.nextCursor);
-      if (!append) setSelectedPhotos(new Set());
+      if (!append) setSelectedPhotos(new Set(retained.map((photo) => photo.id)));
     } finally {
       if (photoRequestRef.current === controller) {
         photoRequestRef.current = null;
@@ -430,8 +437,12 @@ function Settings({ sessionConnection }: { sessionConnection: Connection | null 
       }
     }
   };
-
-  const loadPending = async (sourceId: string, cursor?: string, append = false) => {
+  const loadPending = async (
+    sourceId: string,
+    cursor?: string,
+    append = false,
+    retained: IndexedPhoto[] = [],
+  ) => {
     photoRequestRef.current?.abort();
     const controller = new AbortController();
     photoRequestRef.current = controller;
@@ -440,9 +451,9 @@ function Settings({ sessionConnection }: { sessionConnection: Connection | null 
     setPendingView(true);
     setPhotoFilter('UNCLASSIFIED');
     if (!append) {
-      setPhotos([]);
+      setPhotos(retained);
       setPhotoCursor(null);
-      setSelectedPhotos(new Set());
+      setSelectedPhotos(new Set(retained.map((photo) => photo.id)));
     }
     setLoadingPhotos(true);
     try {
@@ -457,7 +468,11 @@ function Settings({ sessionConnection }: { sessionConnection: Connection | null 
         !pendingViewRef.current
       )
         return;
-      setPhotos((current) => (append ? [...current, ...page.items] : page.items));
+      setPhotos((current) => [
+        ...new Map(
+          [...(append ? current : retained), ...page.items].map((photo) => [photo.id, photo]),
+        ).values(),
+      ]);
       setPhotoCursor(page.nextCursor);
     } finally {
       if (photoRequestRef.current === controller) {
@@ -695,30 +710,54 @@ function Settings({ sessionConnection }: { sessionConnection: Connection | null 
   };
 
   const removeSelected = async () => {
-    if (!selectedPhotos.size) return;
-    const count = selectedPhotos.size;
+    if (removing.current || busy || !selectedPhotos.size) return;
+    removing.current = true;
+    photoRequestRef.current?.abort();
+    photoRequestRef.current = null;
+    setLoadingPhotos(false);
     setBusyAction('remove-photos');
+    setConfirmRemovePhotos(false);
     try {
-      for (const photoId of selectedPhotos)
-        await apiJson<void>(settingsEndpoint.photo(photoId), { method: 'DELETE' });
-      if (activeSource && pendingView) await loadPending(activeSource.id);
-      else if (activeSource && selectedFolderId)
-        await loadPhotos(activeSource.id, selectedFolderId, photoFilter);
-      if (activeSource) await loadArchive(activeSource.id);
-      setSelectedPhotos(new Set());
-      setConfirmRemovePhotos(false);
+      const result = await removePhotosFromArchive([...selectedPhotos]);
+      const retained = photos.filter((photo) => result.pending.has(photo.id));
+      setPhotos((current) => current.filter((photo) => !result.completed.has(photo.id)));
+      setSelectedPhotos(result.pending);
+      // Offset cursors from before removal no longer describe the current collection.
+      setPhotoCursor(null);
+      const summary = `${result.removed} fotos retiradas; ${result.pending.size} pendientes. Drive no se modificó.`;
       announce(
-        `${pluralize(count, 'foto retirada', 'fotos retiradas')} del archivo. Drive no se modificó.`,
-        'success',
+        result.error
+          ? errorCopy(result.error, summary)
+          : `${summary}${result.pending.size ? ' Reintenta las pendientes.' : ''}`,
       );
+      try {
+        await refreshPhotoView(retained);
+        if (activeSource) await loadArchive(activeSource.id);
+      } catch {
+        announce(
+          `${summary} No se pudo actualizar la vista. Usa «Actualizar fotos»; las pendientes siguen seleccionadas.`,
+        );
+      }
+    } finally {
+      removing.current = false;
+      setBusyAction(null);
+    }
+  };
+
+  const refreshPhotoView = async (retained: IndexedPhoto[]) => {
+    if (!activeSource) return;
+    if (pendingView) await loadPending(activeSource.id, undefined, false, retained);
+    else if (selectedFolderId)
+      await loadPhotos(activeSource.id, selectedFolderId, photoFilter, undefined, false, retained);
+  };
+
+  const refreshPhotos = async () => {
+    if (busy || !activeSource || (!pendingView && !selectedFolderId)) return;
+    setBusyAction('refresh-photos');
+    try {
+      await refreshPhotoView(photos.filter((photo) => selectedPhotos.has(photo.id)));
     } catch (error) {
-      announce(
-        errorCopy(
-          error,
-          'No se pudieron retirar todas las fotos. Revisa la selección y reintenta.',
-        ),
-        'error',
-      );
+      announce(errorCopy(error, 'No se pudieron actualizar las fotos.'), 'error');
     } finally {
       setBusyAction(null);
     }
@@ -865,6 +904,7 @@ function Settings({ sessionConnection }: { sessionConnection: Connection | null 
     });
 
   const openFolder = (folderIdValue: string) => {
+    if (busy) return;
     if (selectedFolderIdRef.current === folderIdValue && !pendingViewRef.current) return;
     photoRequestRef.current?.abort();
     photoRequestRef.current = null;
@@ -879,6 +919,7 @@ function Settings({ sessionConnection }: { sessionConnection: Connection | null 
   };
 
   const handleTreeKeyDown = (event: KeyboardEvent<HTMLElement>, folder: IndexedFolder) => {
+    if (busy) return;
     const tree = event.currentTarget.closest('[role="tree"]');
     if (!tree) return;
     const rows = Array.from(tree.querySelectorAll<HTMLElement>('[data-tree-row="true"]'));
@@ -965,7 +1006,7 @@ function Settings({ sessionConnection }: { sessionConnection: Connection | null 
             type="button"
             className={styles.taskPrimary}
             onClick={reviewPendingPhotos}
-            disabled={loadingArchive || loadingPhotos}
+            disabled={busy || loadingArchive || loadingPhotos}
           >
             Revisar {summary.unclassified.toLocaleString('es-ES')} fotos sin fecha
           </button>
@@ -1411,7 +1452,7 @@ function Settings({ sessionConnection }: { sessionConnection: Connection | null 
                   type="button"
                   className={styles.secondaryButton}
                   onClick={() => void loadPending(activeSource.id)}
-                  disabled={loadingArchive || loadingPhotos}
+                  disabled={busy || loadingArchive || loadingPhotos}
                 >
                   Revisar {summary.unclassified.toLocaleString('es-ES')} sin fecha
                 </button>
@@ -1466,7 +1507,7 @@ function Settings({ sessionConnection }: { sessionConnection: Connection | null 
                   type="button"
                   className={`${styles.pendingTreeRow} ${pendingView ? styles.currentFolder : ''}`}
                   onClick={() => void loadPending(activeSource.id)}
-                  disabled={loadingArchive || loadingPhotos}
+                  disabled={busy || loadingArchive || loadingPhotos}
                 >
                   <svg viewBox="0 0 20 20" aria-hidden="true">
                     <circle cx="10" cy="10" r="7" />
@@ -1494,10 +1535,12 @@ function Settings({ sessionConnection }: { sessionConnection: Connection | null 
                       tabIndex={folder.id === treeTabStopId ? 0 : -1}
                       aria-level={folderRelations.depthById.get(folder.id) ?? 1}
                       aria-selected={current}
+                      aria-disabled={busy}
                       aria-expanded={hasChildren ? !collapsed : undefined}
                       data-tree-row="true"
                       data-folder-id={folder.id}
                       onClick={(event) => {
+                        if (busy) return;
                         const target = event.target;
                         if (
                           hasChildren &&
@@ -1565,6 +1608,7 @@ function Settings({ sessionConnection }: { sessionConnection: Connection | null 
                       type="button"
                       className={styles.secondaryButton}
                       onClick={() => openFolder(selectedFolder.id)}
+                      disabled={busy}
                     >
                       Volver a {selectedFolder.name}
                     </button>
@@ -1673,7 +1717,7 @@ function Settings({ sessionConnection }: { sessionConnection: Connection | null 
                       setLoadingPhotos(true);
                       setPhotoFilter(event.target.value);
                     }}
-                    disabled={loadingArchive || loadingPhotos}
+                    disabled={busy || loadingArchive || loadingPhotos}
                   >
                     <option value="ALL">Todas las fotografías</option>
                     <option value="UNCLASSIFIED">Sin fecha suficiente</option>
@@ -1721,6 +1765,7 @@ function Settings({ sessionConnection }: { sessionConnection: Connection | null 
                             checked={selected}
                             onChange={() => togglePhoto(photo.id)}
                             disabled={
+                              busy ||
                               loadingArchive ||
                               loadingPhotos ||
                               (!selected && selectedPhotos.size >= MANUAL_DATE_BULK_LIMIT)
@@ -1755,6 +1800,7 @@ function Settings({ sessionConnection }: { sessionConnection: Connection | null 
                             type="button"
                             className={styles.photoFolderLink}
                             onClick={() => openFolder(photo.folderId!)}
+                            disabled={busy}
                           >
                             Abrir su carpeta
                           </button>
@@ -1807,6 +1853,16 @@ function Settings({ sessionConnection }: { sessionConnection: Connection | null 
                   </div>
                 </div>
               )}
+              <div className={styles.buttonRow}>
+                <button
+                  type="button"
+                  className={styles.secondaryButton}
+                  disabled={busy || loadingArchive || (!pendingView && !selectedFolderId)}
+                  onClick={() => void refreshPhotos()}
+                >
+                  Actualizar fotos
+                </button>
+              </div>
 
               {confirmRemovePhotos && selectedPhotos.size > 0 && (
                 <div
@@ -1933,17 +1989,25 @@ function Settings({ sessionConnection }: { sessionConnection: Connection | null 
                   type="button"
                   className={styles.loadMoreButton}
                   onClick={() =>
-                    void (pendingView
-                      ? loadPending(activeSource.id, photoCursor, true)
-                      : selectedFolderId
-                        ? loadPhotos(
-                            activeSource.id,
-                            selectedFolderId,
-                            photoFilter,
-                            photoCursor,
-                            true,
-                          )
-                        : Promise.resolve())
+                    void (
+                      pendingView
+                        ? loadPending(activeSource.id, photoCursor, true)
+                        : selectedFolderId
+                          ? loadPhotos(
+                              activeSource.id,
+                              selectedFolderId,
+                              photoFilter,
+                              photoCursor,
+                              true,
+                            )
+                          : Promise.resolve()
+                    ).catch((error) => {
+                      if (!isAbortError(error))
+                        announce(
+                          errorCopy(error, 'No se pudieron cargar más fotos. Reintenta.'),
+                          'error',
+                        );
+                    })
                   }
                   disabled={busy || loadingPhotos}
                 >

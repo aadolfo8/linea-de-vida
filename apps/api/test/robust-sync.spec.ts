@@ -45,6 +45,13 @@ function fixture(pages: Record<string, { items: DriveItem[]; nextCursor?: string
         exclusions.has(where.userId_driveFileId.driveFileId) ? { id: 'excluded' } : null,
     },
     indexedFolder: {
+      findFirst: async ({ where }: any) =>
+        [...folders.values()].find(
+          (folder) =>
+            folder.id === where.id &&
+            folder.userId === where.userId &&
+            folder.sourceId === where.sourceId,
+        ) ?? null,
       findUnique: async ({ where }: any) =>
         folders.get(where.userId_driveFolderId.driveFolderId) ?? null,
       upsert: async ({ where, create, update }: any) => {
@@ -116,6 +123,351 @@ function fixture(pages: Record<string, { items: DriveItem[]; nextCursor?: string
 }
 
 describe('robust sync', () => {
+  it.each([
+    ['DIRECT_ONLY', false],
+    ['FALLBACK_DESCENDANTS', false],
+    ['ALL_DESCENDANTS', false],
+    ['DIRECT_ONLY', true],
+    ['FALLBACK_DESCENDANTS', true],
+    ['ALL_DESCENDANTS', true],
+  ] as const)('applies folder scope %s with resumed checkpoint: %s', async (scope, resumed) => {
+    const f = fixture({
+      'root:': {
+        items: [
+          image('direct'),
+          {
+            id: 'child',
+            name: 'Child',
+            mimeType: 'application/vnd.google-apps.folder',
+            parents: ['root'],
+          },
+        ],
+      },
+      'child:': {
+        items: [image('unknown'), { ...image('dated'), imageTime: '2010-06-15T12:00:00Z' }],
+      },
+    });
+    const ruleDate = new Date('1998-01-01T00:00:00Z');
+    f.folders.set('root', {
+      id: 'root',
+      userId: 'owner',
+      sourceId: 'source',
+      parentId: null,
+      dateRule: { dateValue: ruleDate, precision: 'YEAR', scope },
+    });
+    if (resumed) {
+      f.run.checkpoint = {
+        pendingFolders: [
+          { id: 'child', parentDriveFolderId: 'root', path: ['Family archive', 'Child'] },
+        ],
+        seenFolders: ['root'],
+      };
+    }
+    await f.service.execute('run');
+    expect(f.run.status).toBe('SUCCEEDED');
+    if (!resumed)
+      expect(f.photos.get('direct')).toMatchObject({
+        effectiveDateValue: ruleDate,
+        effectiveDatePrecision: 'YEAR',
+        effectiveDateSource: 'FOLDER_RULE',
+      });
+    expect(f.photos.get('unknown')).toMatchObject(
+      scope === 'DIRECT_ONLY'
+        ? {
+            effectiveDateValue: null,
+            effectiveDatePrecision: 'UNKNOWN',
+            effectiveDateSource: 'NONE',
+          }
+        : {
+            effectiveDateValue: ruleDate,
+            effectiveDatePrecision: 'YEAR',
+            effectiveDateSource: 'FOLDER_RULE',
+          },
+    );
+    expect(f.photos.get('dated')).toMatchObject(
+      scope === 'ALL_DESCENDANTS'
+        ? {
+            effectiveDateValue: ruleDate,
+            effectiveDatePrecision: 'YEAR',
+            effectiveDateSource: 'FOLDER_RULE',
+          }
+        : {
+            effectiveDateValue: f.photos.get('dated').detectedDate,
+            effectiveDatePrecision: f.photos.get('dated').detectedPrecision,
+            effectiveDateSource: 'DRIVE_IMAGE_METADATA',
+          },
+    );
+  });
+
+  it.each([
+    ['owner', 'source', true],
+    ['other-owner', 'source', false],
+    ['owner', 'other-source', false],
+  ])('resolves past a direct-only parent within %s/%s', async (userId, sourceId, inherits) => {
+    const f = fixture({ 'child:': { items: [image('a')] } });
+    const ruleDate = new Date('1998-07-01T00:00:00Z');
+    f.folders.set('root', {
+      id: 'root',
+      userId,
+      sourceId,
+      parentId: null,
+      dateRule: { dateValue: ruleDate, precision: 'MONTH', scope: 'FALLBACK_DESCENDANTS' },
+    });
+    f.folders.set('parent', {
+      id: 'parent',
+      userId: 'owner',
+      sourceId: 'source',
+      parentId: 'root',
+      dateRule: {
+        dateValue: new Date('2001-01-01T00:00:00Z'),
+        precision: 'YEAR',
+        scope: 'DIRECT_ONLY',
+      },
+    });
+    f.run.checkpoint = {
+      pendingFolders: [
+        { id: 'child', parentDriveFolderId: 'parent', path: ['Archive', 'Parent', 'Child'] },
+      ],
+      seenFolders: ['root', 'parent'],
+    };
+    await f.service.execute('run');
+    expect(f.run.status).toBe('SUCCEEDED');
+    expect(f.photos.get('a')).toMatchObject(
+      inherits
+        ? {
+            effectiveDateValue: ruleDate,
+            effectiveDatePrecision: 'MONTH',
+            effectiveDateSource: 'FOLDER_RULE',
+          }
+        : {
+            effectiveDateValue: null,
+            effectiveDatePrecision: 'UNKNOWN',
+            effectiveDateSource: 'NONE',
+          },
+    );
+  });
+
+  const sidecar = (id: string, name = 'a.jpg.json'): DriveItem => ({
+    id,
+    name,
+    mimeType: 'application/json',
+    parents: [],
+  });
+  const metadataStream = () => ({
+    stream: Readable.from(
+      JSON.stringify({ title: 'a.jpg', photoTakenTime: { timestamp: '946684800' } }),
+    ),
+    contentType: 'application/json',
+  });
+
+  it.each([true, false])('matches Takeout across pages (photo first: %s)', async (photoFirst) => {
+    const f = fixture({
+      'root:': { items: [photoFirst ? image('a') : sidecar('json')], nextCursor: 'next' },
+      'root:next': { items: [photoFirst ? sidecar('json') : image('a')] },
+    });
+    f.run.source.type = 'GOOGLE_TAKEOUT';
+    f.drive.getContentStream = async () => metadataStream();
+    await f.service.execute('run');
+    expect(f.photos.get('a')).toMatchObject({
+      takeoutMatchStatus: 'TAKEOUT_MATCHED',
+      detectedSource: 'TAKEOUT',
+      detectedDate: new Date('2000-01-01T00:00:00.000Z'),
+    });
+    expect(f.run).toMatchObject({
+      status: 'SUCCEEDED',
+      foundCount: 1,
+      indexedCount: 1,
+      processedCount: 1,
+    });
+  });
+
+  it('detects ambiguous sidecars on separate pages rather than choosing the first', async () => {
+    const f = fixture({
+      'root:': { items: [image('a'), sidecar('json-1')], nextCursor: 'next' },
+      'root:next': { items: [sidecar('json-2')] },
+    });
+    f.run.source.type = 'GOOGLE_TAKEOUT';
+    f.drive.getContentStream = async () => metadataStream();
+    await f.service.execute('run');
+    expect(f.photos.get('a').takeoutMatchStatus).toBe('TAKEOUT_AMBIGUOUS');
+    expect(f.run.status).toBe('PARTIAL');
+  });
+
+  it('resumes metadata collection after a transient failure without skipping the folder', async () => {
+    const f = fixture({ 'root:': { items: [] } });
+    f.run.source.type = 'GOOGLE_TAKEOUT';
+    let failing = true;
+    let jsonReads = 0;
+    f.drive.getContentStream = async () => {
+      jsonReads++;
+      return metadataStream();
+    };
+    f.drive.listChildren = async (_: any, _folder: string, cursor?: string) => {
+      if (cursor && failing) throw new DriveRequestError(503, 'temporary', 0);
+      return cursor ? { items: [image('a')] } : { items: [sidecar('json')], nextCursor: 'next' };
+    };
+    await expect(f.service.execute('run')).rejects.toThrow('temporary');
+    expect(f.photos.size).toBe(0);
+    // Emulate a new worker reading persisted JSON, not shared object references.
+    f.run.checkpoint = JSON.parse(JSON.stringify(f.run.checkpoint));
+    failing = false;
+    await new SyncService(f.prisma, f.drive, new PhotoDateResolver()).execute('run');
+    expect(jsonReads).toBe(1);
+    expect(f.photos.get('a').takeoutMatchStatus).toBe('TAKEOUT_MATCHED');
+    expect(f.run).toMatchObject({ status: 'SUCCEEDED', indexedCount: 1, foundCount: 1 });
+  });
+
+  it('keeps prior metadata warnings partial after resuming and does not reconcile missing files', async () => {
+    const f = fixture({ 'root:': { items: [] } });
+    f.run.source.type = 'GOOGLE_TAKEOUT';
+    f.photos.set('old', {
+      id: 'old',
+      sourceId: 'source',
+      status: 'ACTIVE',
+      lastSeenSyncRunId: 'previous',
+    });
+    let failing = true;
+    f.drive.getContentStream = async () => ({
+      stream: Readable.from('{bad'),
+      contentType: 'application/json',
+    });
+    f.drive.listChildren = async (_: any, _folder: string, cursor?: string) => {
+      if (cursor && failing) throw new DriveRequestError(503, 'temporary', 0);
+      return cursor ? { items: [image('a')] } : { items: [sidecar('bad')], nextCursor: 'next' };
+    };
+    await expect(f.service.execute('run')).rejects.toThrow('temporary');
+    f.run.checkpoint = JSON.parse(JSON.stringify(f.run.checkpoint));
+    failing = false;
+    await f.service.execute('run');
+    expect(f.run).toMatchObject({ status: 'PARTIAL', issueCount: 1 });
+    expect(f.photos.get('old').status).toBe('ACTIVE');
+  });
+
+  it('never matches metadata from a different folder', async () => {
+    const f = fixture({
+      'root:': {
+        items: [
+          sidecar('json'),
+          {
+            id: 'child',
+            name: 'Child',
+            mimeType: 'application/vnd.google-apps.folder',
+            parents: ['root'],
+          },
+        ],
+      },
+      'child:': { items: [image('a')] },
+    });
+    f.run.source.type = 'GOOGLE_TAKEOUT';
+    f.drive.getContentStream = async () => metadataStream();
+    await f.service.execute('run');
+    expect(f.photos.get('a').takeoutMatchStatus).toBe('TAKEOUT_NOT_FOUND');
+  });
+
+  it('stops safely at the metadata budget without matching an incomplete folder', async () => {
+    const f = fixture({ 'root:': { items: [sidecar('json'), image('a')] } });
+    f.run.source.type = 'GOOGLE_TAKEOUT';
+    f.run.checkpoint = {
+      pendingFolders: [
+        {
+          id: 'root',
+          path: ['Family archive'],
+          takeout: {
+            candidates: [],
+            complete: false,
+            bytes: 8 * 1024 * 1024,
+          },
+        },
+      ],
+      seenFolders: [],
+    };
+    f.drive.getContentStream = async () => metadataStream();
+    await f.service.execute('run');
+    expect(f.run.status).toBe('PARTIAL');
+    expect(f.photos.size).toBe(0);
+    expect(f.issues[0].code).toBe('LIMIT_REACHED');
+  });
+
+  it('retries sidecar transport failures without recording malformed JSON or losing candidates', async () => {
+    const f = fixture({ 'root:': { items: [image('a'), sidecar('json')] } });
+    f.run.source.type = 'GOOGLE_TAKEOUT';
+    let failing = true;
+    f.drive.getContentStream = async () => {
+      if (failing) throw new DriveRequestError(503, 'temporary', 0);
+      return metadataStream();
+    };
+    await expect(f.service.execute('run')).rejects.toThrow('temporary');
+    expect(f.issues).toHaveLength(0);
+    expect(f.photos.size).toBe(0);
+    f.run.checkpoint = JSON.parse(JSON.stringify(f.run.checkpoint));
+    failing = false;
+    await f.service.execute('run');
+    expect(f.photos.get('a').takeoutMatchStatus).toBe('TAKEOUT_MATCHED');
+    expect(f.run).toMatchObject({ status: 'SUCCEEDED', issueCount: 0, indexedCount: 1 });
+  });
+
+  it('preserves the metadata page when a sidecar stream breaks and resumes with all candidates', async () => {
+    const f = fixture({
+      'root:': { items: [sidecar('first', 'b.jpg.json')], nextCursor: 'next' },
+      'root:next': { items: [sidecar('second'), image('a')] },
+    });
+    f.run.source.type = 'GOOGLE_TAKEOUT';
+    f.photos.set('old', {
+      id: 'old',
+      sourceId: 'source',
+      status: 'ACTIVE',
+      lastSeenSyncRunId: 'previous',
+    });
+    let failing = true;
+    const reads: Record<string, number> = {};
+    const streams: Readable[] = [];
+    (f.drive as DriveAdapter).getContentStream = async (_connection, id) => {
+      reads[id] = (reads[id] ?? 0) + 1;
+      if (id !== 'second' || !failing) return metadataStream();
+      const stream = Readable.from(
+        (async function* () {
+          yield '{"title":"a.jpg",';
+          throw new Error('Connection reset while reading the body');
+        })(),
+      );
+      streams.push(stream);
+      return { stream, contentType: 'application/json' };
+    };
+    await expect(f.service.execute('run')).rejects.toMatchObject({ status: 503 });
+    expect(reads).toEqual({ first: 1, second: 3 });
+    expect(streams.every((stream) => stream.destroyed)).toBe(true);
+    expect(f.issues).toHaveLength(0);
+    expect(f.photos.has('a')).toBe(false);
+    expect(f.photos.get('old').status).toBe('ACTIVE');
+    f.run.checkpoint = JSON.parse(JSON.stringify(f.run.checkpoint));
+    expect(f.run.checkpoint.pendingFolders[0].takeout).toMatchObject({
+      cursor: 'next',
+      complete: false,
+      candidates: [{ fileName: 'b.jpg.json' }],
+    });
+    failing = false;
+    await new SyncService(f.prisma, f.drive, new PhotoDateResolver()).execute('run');
+    expect(reads).toEqual({ first: 1, second: 4 });
+    expect(f.photos.get('a').takeoutMatchStatus).toBe('TAKEOUT_MATCHED');
+    expect(f.run).toMatchObject({ status: 'SUCCEEDED', issueCount: 0, indexedCount: 1 });
+  });
+
+  it('keeps oversized sidecars invalid rather than retrying them as transport failures', async () => {
+    const f = fixture({ 'root:': { items: [sidecar('large'), image('a')] } });
+    f.run.source.type = 'GOOGLE_TAKEOUT';
+    let reads = 0;
+    const stream = Readable.from(Buffer.alloc(1024 * 1024 + 1));
+    f.drive.getContentStream = async () => {
+      reads++;
+      return { stream, contentType: 'application/json' };
+    };
+    await f.service.execute('run');
+    expect(reads).toBe(1);
+    expect(stream.destroyed).toBe(true);
+    expect(f.issues).toMatchObject([{ code: 'INVALID_TAKEOUT_JSON' }]);
+    expect(f.run.status).toBe('PARTIAL');
+  });
+
   it('processes every paginated item and reconciles only after a complete successful scan', async () => {
     const f = fixture({
       'root:': { items: [image('a')], nextCursor: 'next' },
