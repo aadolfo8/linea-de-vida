@@ -96,6 +96,8 @@ En Ajustes, la selección en vivo de Drive está separada del archivo indexado. 
 
 La retirada por lotes recibe `{ "photoIds": ["id"] }` y devuelve `results` con `REMOVED`, `ABSENT` o `FAILED` por ID único. `ABSENT` significa que la foto no está en el archivo del usuario: no distingue entre un ID inexistente y uno ajeno. Cada retirada conserva la transacción de exclusión y borrado local; un fallo no revierte las retiradas anteriores. Drive no se modifica.
 
+Ajustes envía bloques de hasta 50, mantiene pendientes los fallos o resultados no confirmados y permite reintentar tras perder una respuesta. Después de retirar fotos se descarta el cursor anterior y se actualiza la primera página conservando las pendientes.
+
 ## Medios y compatibilidad
 
 Las miniaturas se obtienen mediante `thumbnailLink` de Drive y se descargan autenticadas exclusivamente desde el backend; el navegador nunca recibe ese enlace temporal. Solo se aceptan destinos HTTPS bajo `googleusercontent.com`, sin credenciales en la URL ni puertos alternativos, y no se siguen redirecciones. El proxy valida el MIME de la miniatura recibida (que puede diferir del original). Si Drive no ofrece una miniatura o devuelve un contenido incompatible, la petición falla sin descargar el original como alternativa; el visor conserva su acceso independiente a `content`.

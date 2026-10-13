@@ -1,6 +1,6 @@
 'use client';
 
-import { FormEvent, useEffect, useMemo, useState } from 'react';
+import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { ArchiveNav } from '../components/ArchiveNav';
 import { ProtectedSurface } from '../components/ProtectedSurface';
 import {
@@ -13,6 +13,7 @@ import {
   type Source,
 } from '../../lib/api';
 import { mediaUrl } from '../../lib/media';
+import { removePhotosFromArchive } from '../../lib/photo-removal';
 import styles from './settings.module.css';
 
 type DriveFolder = { id: string; name: string; parents: string[] };
@@ -81,6 +82,8 @@ function Settings({ sessionConnection }: { sessionConnection: Connection | null 
   const [dateYear, setDateYear] = useState('');
   const [dateMonth, setDateMonth] = useState('');
   const [confirmDate, setConfirmDate] = useState(false);
+  const photoRequest = useRef(0);
+  const removing = useRef(false);
   const activeSource = sources.find((source) => source.status === 'ACTIVE') ?? null;
   const selectedFolder = folders.find((folder) => folder.id === selectedFolderId) ?? null;
   const descendantCount = useMemo(
@@ -111,13 +114,24 @@ function Settings({ sessionConnection }: { sessionConnection: Connection | null 
     setHistory((await apiJson<{ items: SyncRun[] }>(settingsEndpoint.history(sourceId))).items);
     if (!selectedFolderId && all.length) setSelectedFolderId(all[0].id);
   };
-  const loadPhotos = async (folderIdValue: string, cursor?: string, append = false) => {
+  const loadPhotos = async (
+    folderIdValue: string,
+    cursor?: string,
+    append = false,
+    retained: IndexedPhoto[] = [],
+  ) => {
+    const request = ++photoRequest.current;
     const page = await apiJson<{ items: IndexedPhoto[]; nextCursor: string | null }>(
       settingsEndpoint.folderPhotos(folderIdValue, cursor),
     );
-    setPhotos((current) => (append ? [...current, ...page.items] : page.items));
+    if (request !== photoRequest.current) return;
+    setPhotos((current) => [
+      ...new Map(
+        [...(append ? current : retained), ...page.items].map((photo) => [photo.id, photo]),
+      ).values(),
+    ]);
     setPhotoCursor(page.nextCursor);
-    if (!append) setSelectedPhotos(new Set());
+    if (!append) setSelectedPhotos(new Set(retained.map((photo) => photo.id)));
   };
 
   useEffect(() => {
@@ -137,12 +151,21 @@ function Settings({ sessionConnection }: { sessionConnection: Connection | null 
   }, [activeSource?.id]);
   useEffect(() => {
     if (!selectedFolderId) {
+      photoRequest.current++;
       setPhotos([]);
+      setSelectedPhotos(new Set());
+      setPhotoCursor(null);
       return;
     }
+    setPhotos([]);
+    setSelectedPhotos(new Set());
+    setPhotoCursor(null);
     void loadPhotos(selectedFolderId).catch((error) =>
       setNotice(errorCopy(error, 'No se pudieron cargar las fotos de esta carpeta.')),
     );
+    return () => {
+      photoRequest.current++;
+    };
   }, [selectedFolderId]);
   useEffect(() => {
     if (!run || ['SUCCEEDED', 'PARTIAL', 'FAILED', 'CANCELLED'].includes(run.status)) return;
@@ -216,6 +239,7 @@ function Settings({ sessionConnection }: { sessionConnection: Connection | null 
     }
   };
   const removeSelected = async () => {
+    if (removing.current) return;
     if (
       !selectedPhotos.size ||
       !window.confirm(
@@ -223,17 +247,32 @@ function Settings({ sessionConnection }: { sessionConnection: Connection | null 
       )
     )
       return;
+    removing.current = true;
+    photoRequest.current++;
     setBusy(true);
     try {
-      for (const photoId of selectedPhotos)
-        await apiJson<void>(settingsEndpoint.photo(photoId), { method: 'DELETE' });
-      if (selectedFolderId) await loadPhotos(selectedFolderId);
-      if (activeSource) await loadArchive(activeSource.id);
-      setNotice(`${selectedPhotos.size} fotos se quitaron de este archivo. Drive no se modificó.`);
-      setSelectedPhotos(new Set());
-    } catch (error) {
-      setNotice(errorCopy(error, 'No se pudieron quitar todas las fotos seleccionadas.'));
+      const result = await removePhotosFromArchive([...selectedPhotos]);
+      const retained = photos.filter((photo) => result.pending.has(photo.id));
+      setPhotos((current) => current.filter((photo) => !result.completed.has(photo.id)));
+      setSelectedPhotos(result.pending);
+      // Offset cursors from before removal no longer describe the current collection.
+      setPhotoCursor(null);
+      const summary = `${result.removed} fotos retiradas; ${result.pending.size} pendientes. Drive no se modificó.`;
+      setNotice(
+        result.error
+          ? errorCopy(result.error, summary)
+          : `${summary}${result.pending.size ? ' Reintenta las pendientes.' : ''}`,
+      );
+      try {
+        if (selectedFolderId) await loadPhotos(selectedFolderId, undefined, false, retained);
+        if (activeSource) await loadArchive(activeSource.id);
+      } catch {
+        setNotice(
+          `${summary} No se pudo actualizar la vista. Usa «Actualizar fotos»; las pendientes siguen seleccionadas.`,
+        );
+      }
     } finally {
+      removing.current = false;
       setBusy(false);
     }
   };
@@ -407,6 +446,7 @@ function Settings({ sessionConnection }: { sessionConnection: Connection | null 
               {folders.map((folder) => (
                 <button
                   key={folder.id}
+                  disabled={busy}
                   className={folder.id === selectedFolderId ? styles.currentFolder : ''}
                   onClick={() => setSelectedFolderId(folder.id)}
                   style={{
@@ -449,6 +489,7 @@ function Settings({ sessionConnection }: { sessionConnection: Connection | null 
                     >
                       <input
                         type="checkbox"
+                        disabled={busy}
                         checked={selectedPhotos.has(photo.id)}
                         onChange={() =>
                           setSelectedPhotos((current) => {
@@ -467,6 +508,25 @@ function Settings({ sessionConnection }: { sessionConnection: Connection | null 
                 </div>
               )}
               <div className={styles.photoActions}>
+                <button
+                  disabled={busy || !selectedFolderId}
+                  onClick={() => {
+                    if (!selectedFolderId || busy) return;
+                    setBusy(true);
+                    void loadPhotos(
+                      selectedFolderId,
+                      undefined,
+                      false,
+                      photos.filter((photo) => selectedPhotos.has(photo.id)),
+                    )
+                      .catch((error) =>
+                        setNotice(errorCopy(error, 'No se pudieron actualizar las fotos.')),
+                      )
+                      .finally(() => setBusy(false));
+                  }}
+                >
+                  Actualizar fotos
+                </button>
                 <button
                   className={styles.danger}
                   onClick={() => void removeSelected()}
