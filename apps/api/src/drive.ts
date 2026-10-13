@@ -43,10 +43,7 @@ export abstract class DriveAdapter {
 }
 const FOLDER = 'application/vnd.google-apps.folder';
 export class GoogleDriveProvider implements DriveAdapter {
-  private client(connection: {
-    refreshTokenCiphertext: string | null;
-    status?: string;
-  }): drive_v3.Drive {
+  private authClient(connection: { refreshTokenCiphertext: string | null; status?: string }) {
     if (connection.status && connection.status !== 'ACTIVE')
       throw new Error('Drive connection is not active.');
     const auth = new google.auth.OAuth2(
@@ -59,7 +56,10 @@ export class GoogleDriveProvider implements DriveAdapter {
         ? decryptSecret(connection.refreshTokenCiphertext)
         : undefined,
     });
-    return google.drive({ version: 'v3', auth });
+    return auth;
+  }
+  private client(connection: { refreshTokenCiphertext: string | null }): drive_v3.Drive {
+    return google.drive({ version: 'v3', auth: this.authClient(connection) });
   }
   async listChildren(
     connection: { refreshTokenCiphertext: string | null },
@@ -133,7 +133,46 @@ export class GoogleDriveProvider implements DriveAdapter {
     fileId: string,
     signal?: AbortSignal,
   ) {
-    return this.stream(connection, fileId, signal);
+    try {
+      signal?.throwIfAborted();
+      const auth = this.authClient(connection);
+      const metadata = await google
+        .drive({ version: 'v3', auth })
+        .files.get({ fileId, fields: 'thumbnailLink' }, { signal });
+      signal?.throwIfAborted();
+      if (!metadata.data.thumbnailLink)
+        throw new DriveRequestError(404, 'Drive thumbnail is unavailable.');
+      const url = new URL(metadata.data.thumbnailLink);
+      // Only send OAuth credentials to Google's image hosts, never follow redirects.
+      if (
+        url.protocol !== 'https:' ||
+        !url.hostname.endsWith('.googleusercontent.com') ||
+        url.username ||
+        url.password ||
+        url.port
+      )
+        throw new DriveRequestError(502, 'Drive thumbnail URL was not accepted.');
+      const result = await auth.request<Readable>({
+        url: url.href,
+        method: 'GET',
+        responseType: 'stream',
+        maxRedirects: 0,
+        signal,
+      });
+      return {
+        stream: result.data,
+        contentType: String(result.headers['content-type'] ?? 'application/octet-stream'),
+        contentLength: Number(result.headers['content-length']) || undefined,
+      };
+    } catch (error) {
+      if (signal?.aborted) throw error;
+      if (error instanceof DriveRequestError) throw error;
+      const underlying = error as { response?: { status?: number }; code?: number };
+      throw new DriveRequestError(
+        underlying.response?.status ?? underlying.code ?? 503,
+        'Drive thumbnail request failed.',
+      );
+    }
   }
   async getContentStream(
     connection: { refreshTokenCiphertext: string | null },

@@ -95,6 +95,8 @@ En Ajustes, la selección en vivo de Drive está separada del archivo indexado. 
 
 ## Medios y compatibilidad
 
+Las miniaturas se obtienen mediante `thumbnailLink` de Drive y se descargan autenticadas exclusivamente desde el backend; el navegador nunca recibe ese enlace temporal. Solo se aceptan destinos HTTPS bajo `googleusercontent.com`, sin credenciales en la URL ni puertos alternativos, y no se siguen redirecciones. El proxy valida el MIME de la miniatura recibida (que puede diferir del original). Si Drive no ofrece una miniatura o devuelve un contenido incompatible, la petición falla sin descargar el original como alternativa; el visor conserva su acceso independiente a `content`.
+
 Los originales se transmiten por streaming, con cancelación al abortar el cliente y timeout acotado por `MEDIA_PROXY_TIMEOUT_MS`; no se almacenan ni se cargan completos en memoria. Los thumbnails pueden usar únicamente una caché **en memoria**, privada, temporal y deshabilitada por defecto en desarrollo (`MEDIA_THUMBNAIL_CACHE_ENABLED=false`). Sus claves son hashes, su TTL y límites de entradas/tamaño se configuran en `.env`; no guarda originales, tokens, URLs de Drive ni metadatos privados. Si la caché falla o excede límites, se omite sin bloquear la respuesta.
 
 JPEG, PNG y WebP se muestran por el proxy de thumbnail. HEIC/HEIF continúan indexados y se pueden descargar desde `content`, pero no se convierten: la UI informa el límite de navegador. No hay CDN pública ni caché persistente.

@@ -1,0 +1,119 @@
+import { Readable } from 'node:stream';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+const transport = vi.hoisted(() => ({ get: vi.fn(), request: vi.fn(), credentials: vi.fn() }));
+vi.mock('googleapis', () => ({
+  google: {
+    auth: {
+      OAuth2: class {
+        setCredentials = transport.credentials;
+        request = transport.request;
+      },
+    },
+    drive: () => ({ files: { get: transport.get } }),
+  },
+}));
+
+import { GoogleDriveProvider } from '../src/drive';
+
+describe('Google Drive media transport', () => {
+  const connection = { refreshTokenCiphertext: null };
+  const thumbnailLink = 'https://lh3.googleusercontent.com/private-thumbnail';
+  beforeEach(() => {
+    vi.resetAllMocks();
+    transport.get.mockResolvedValue({ data: { thumbnailLink } });
+    transport.request.mockResolvedValue({
+      data: Readable.from('small-thumbnail'),
+      headers: { 'content-type': 'image/jpeg', 'content-length': '15' },
+    });
+  });
+  afterEach(() => vi.restoreAllMocks());
+
+  it('requests a private thumbnail instead of downloading original media', async () => {
+    const signal = new AbortController().signal;
+    const media = await new GoogleDriveProvider().getThumbnailStream(connection, 'photo', signal);
+    expect(transport.get).toHaveBeenCalledExactlyOnceWith(
+      { fileId: 'photo', fields: 'thumbnailLink' },
+      { signal },
+    );
+    expect(transport.request).toHaveBeenCalledExactlyOnceWith({
+      url: thumbnailLink,
+      method: 'GET',
+      responseType: 'stream',
+      maxRedirects: 0,
+      signal,
+    });
+    expect(media.contentType).toBe('image/jpeg');
+    expect(media.contentLength).toBe(15);
+    let body = '';
+    for await (const chunk of media.stream) body += chunk;
+    expect(body).toBe('small-thumbnail');
+  });
+
+  it('does not fall back to the original when no thumbnail exists', async () => {
+    transport.get.mockResolvedValue({ data: {} });
+    await expect(
+      new GoogleDriveProvider().getThumbnailStream(connection, 'photo'),
+    ).rejects.toMatchObject({ status: 404 });
+    expect(transport.get).toHaveBeenCalledTimes(1);
+    expect(transport.request).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    'http://lh3.googleusercontent.com/image',
+    'https://googleusercontent.com.evil.test/image',
+    'https://localhost/image',
+    'https://user:password@lh3.googleusercontent.com/image',
+    'https://lh3.googleusercontent.com:8443/image',
+  ])('rejects unsafe thumbnail URL %s before sending credentials', async (url) => {
+    transport.get.mockResolvedValue({ data: { thumbnailLink: url } });
+    await expect(
+      new GoogleDriveProvider().getThumbnailStream(connection, 'photo'),
+    ).rejects.toMatchObject({ status: 502 });
+    expect(transport.request).not.toHaveBeenCalled();
+  });
+
+  it('preserves upstream failure status without exposing the private URL', async () => {
+    transport.request.mockRejectedValue({ response: { status: 403 }, message: thumbnailLink });
+    await expect(
+      new GoogleDriveProvider().getThumbnailStream(connection, 'photo'),
+    ).rejects.toMatchObject({ status: 403, message: 'Drive thumbnail request failed.' });
+  });
+
+  it('does not start requests when already aborted', async () => {
+    const controller = new AbortController();
+    controller.abort();
+    await expect(
+      new GoogleDriveProvider().getThumbnailStream(connection, 'photo', controller.signal),
+    ).rejects.toThrow();
+    expect(transport.get).not.toHaveBeenCalled();
+    expect(transport.request).not.toHaveBeenCalled();
+  });
+
+  it('does not download a thumbnail if cancelled while resolving metadata', async () => {
+    const controller = new AbortController();
+    transport.get.mockImplementation(async () => {
+      controller.abort();
+      return { data: { thumbnailLink } };
+    });
+    await expect(
+      new GoogleDriveProvider().getThumbnailStream(connection, 'photo', controller.signal),
+    ).rejects.toThrow();
+    expect(transport.request).not.toHaveBeenCalled();
+  });
+
+  it('keeps original downloads on the original media endpoint', async () => {
+    transport.get.mockResolvedValue({
+      data: Readable.from('original'),
+      headers: { 'content-type': 'image/png' },
+    });
+    const signal = new AbortController().signal;
+    const media = await new GoogleDriveProvider().getContentStream(connection, 'photo', signal);
+    expect(transport.get).toHaveBeenCalledExactlyOnceWith(
+      { fileId: 'photo', alt: 'media' },
+      { responseType: 'stream', signal },
+    );
+    expect(media.contentType).toBe('image/png');
+    expect(transport.request).not.toHaveBeenCalled();
+  });
+});

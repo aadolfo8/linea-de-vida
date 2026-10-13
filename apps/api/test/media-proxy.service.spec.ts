@@ -66,6 +66,27 @@ function service(photo: any, drive = new FakeDrive()) {
 }
 
 describe('media proxy', () => {
+  it('uses the actual thumbnail MIME rather than the original photo MIME', async () => {
+    const { service: proxy } = service(ownerPhoto({ mimeType: 'image/png' }));
+    const response = new ResponseMock();
+    await proxy.thumbnail('owner', 'photo-owner', request(), response as any);
+    expect(response.headers.get('Content-Type')).toBe('image/jpeg');
+    expect(response.body()).toBe('thumbnail-stream');
+  });
+
+  it('rejects non-image thumbnail responses before sending headers or bytes', async () => {
+    const { service: proxy, drive } = service(ownerPhoto());
+    const stream = Readable.from('<html>not an image</html>');
+    drive.getThumbnailStream = async () => ({ stream, contentType: 'text/html' });
+    const response = new ResponseMock();
+    await expect(
+      proxy.thumbnail('owner', 'photo-owner', request(), response as any),
+    ).rejects.toMatchObject({ status: 503 });
+    expect(response.body()).toBe('');
+    expect(response.headers.has('Content-Type')).toBe(false);
+    expect(stream.destroyed).toBe(true);
+  });
+
   it.each(['thumbnail', 'content'] as const)(
     'denies horizontal %s access before Drive',
     async (variant) => {
@@ -159,6 +180,32 @@ describe('media proxy', () => {
     else process.env.MEDIA_THUMBNAIL_CACHE_ENABLED = previous;
     vi.useRealTimers();
   });
+
+  it.each(['thumbnail', 'content'] as const)(
+    'destroys a late %s stream after the client has aborted',
+    async (variant) => {
+      const { service: proxy, drive } = service(ownerPhoto());
+      const stream = new Readable({ read() {} });
+      let complete!: (media: { stream: Readable; contentType: string }) => void;
+      const operation = new Promise<{ stream: Readable; contentType: string }>((resolve) => {
+        complete = resolve;
+      });
+      const download = vi.fn(() => operation);
+      if (variant === 'thumbnail') drive.getThumbnailStream = download;
+      else drive.getContentStream = download;
+      const client = request();
+      const response = new ResponseMock();
+      const pending = proxy[variant]('owner', 'photo-owner', client, response as any);
+      await vi.waitFor(() => expect(download).toHaveBeenCalledOnce());
+      client.emit('aborted');
+      await pending;
+      complete({ stream, contentType: 'image/jpeg' });
+      await operation;
+      expect(stream.destroyed).toBe(true);
+      expect(response.body()).toBe('');
+      expect(response.headers.has('Content-Type')).toBe(false);
+    },
+  );
 
   it('destroys a slow Drive stream when the client aborts', async () => {
     const { service: proxy, drive } = service(ownerPhoto());
