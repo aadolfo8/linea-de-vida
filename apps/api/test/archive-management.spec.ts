@@ -78,6 +78,53 @@ function controllerFixture() {
 }
 
 describe('indexed archive management', () => {
+  it('removes a batch and makes retries safe without disclosing foreign IDs', async () => {
+    const f = controllerFixture();
+    expect(await f.controller.removePhotos('owner', { photoIds: ['photo-1', 'photo-1'] })).toEqual({
+      results: [{ id: 'photo-1', status: 'REMOVED' }],
+    });
+    expect(await f.controller.removePhotos('owner', { photoIds: ['photo-1'] })).toEqual({
+      results: [{ id: 'photo-1', status: 'ABSENT' }],
+    });
+    expect(await f.controller.removePhotos('other', { photoIds: ['photo-2', 'unknown'] })).toEqual({
+      results: [
+        { id: 'photo-2', status: 'ABSENT' },
+        { id: 'unknown', status: 'ABSENT' },
+      ],
+    });
+    expect(f.photos.some((photo) => photo.id === 'photo-2')).toBe(true);
+    expect(f.exclusions).toHaveLength(1);
+  });
+
+  it('reports per-item failure and retries only the unfinished item', async () => {
+    const f = controllerFixture();
+    f.prisma.photoExclusion.upsert.mockRejectedValueOnce(new Error('temporary database failure'));
+    expect(await f.controller.removePhotos('owner', { photoIds: ['photo-1', 'photo-2'] })).toEqual({
+      results: [
+        { id: 'photo-1', status: 'FAILED' },
+        { id: 'photo-2', status: 'REMOVED' },
+      ],
+    });
+    expect(f.photos.map((photo) => photo.id)).toEqual(['photo-1']);
+    expect(await f.controller.removePhotos('owner', { photoIds: ['photo-1', 'photo-2'] })).toEqual({
+      results: [
+        { id: 'photo-1', status: 'REMOVED' },
+        { id: 'photo-2', status: 'ABSENT' },
+      ],
+    });
+  });
+
+  it.each([undefined, null, [], [''], [42], Array(51).fill('photo-1'), ['x'.repeat(201)]])(
+    'validates batch input before mutations: %j',
+    async (photoIds) => {
+      const f = controllerFixture();
+      await expect(f.controller.removePhotos('owner', { photoIds })).rejects.toMatchObject({
+        status: 400,
+      });
+      expect(f.prisma.photo.delete).not.toHaveBeenCalled();
+    },
+  );
+
   it('applies a recursive MONTH override only to the owned folder and descendants', async () => {
     const fixture = controllerFixture();
     await expect(

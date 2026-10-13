@@ -84,6 +84,7 @@ Para backup PostgreSQL, ejecuta desde un host autorizado `pg_dump --format=custo
 | `DELETE /v1/photos/:id/manual-date`                              | Elimina el override y restaura la detección.                            |
 | `PUT /v1/photos/manual-date-overrides`                           | Aplica una fecha a un lote propio de hasta 50 fotos.                    |
 | `DELETE /v1/photos/:id`                                          | Retira una foto del archivo local y crea su exclusión de sync.          |
+| `POST /v1/photo-removals`                                        | Retira hasta 50 fotos por lote y devuelve un resultado por ID.          |
 | `GET /v1/photos/:id/thumbnail`                                   | Proxy privado de JPEG/PNG/WebP; HEIC/HEIF devuelve fallback `415`.      |
 | `GET /v1/photos/:id/content`                                     | Proxy streaming privado del original soportado; HEIC/HEIF se descarga.  |
 
@@ -92,6 +93,8 @@ Todas las rutas salvo health/callback requieren sesión firmada en cookie `httpO
 Las rutas de gestión verifican que fuente, carpeta y foto pertenezcan al usuario de sesión. La edición de carpeta acepta únicamente precisión `YEAR` o `MONTH`, exige `recursive: true` y actualiza la carpeta seleccionada y todos sus descendientes dentro de una transacción. Retirar una foto elimina solo el registro local y crea la exclusión correspondiente; nunca solicita una escritura o eliminación en Drive. Los filtros diarios calculan el límite superior con aritmética UTC de calendario, incluido el cambio de mes y año.
 
 En Ajustes, la selección en vivo de Drive está separada del archivo indexado. El navegador muestra fuente, jerarquía, breadcrumb, conteos, estado, historial y fotos paginadas con su precisión; permite seleccionar fotos para retirarlas solo del archivo local. La edición de año o año/mes exige una confirmación explícita que identifica la carpeta seleccionada y aplica el cambio a todas sus subcarpetas.
+
+La retirada por lotes recibe `{ "photoIds": ["id"] }` y devuelve `results` con `REMOVED`, `ABSENT` o `FAILED` por ID único. `ABSENT` significa que la foto no está en el archivo del usuario: no distingue entre un ID inexistente y uno ajeno. Cada retirada conserva la transacción de exclusión y borrado local; un fallo no revierte las retiradas anteriores. Drive no se modifica.
 
 ## Medios y compatibilidad
 
