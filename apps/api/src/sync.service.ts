@@ -341,10 +341,6 @@ export class SyncService {
       counts.indexed++;
       return true;
     };
-    const inheritedRules = new Map<
-      string,
-      { dateValue: Date; precision: DatePrecision; scope: FolderDateRuleScope } | null
-    >();
     try {
       while (checkpoint.pendingFolders.length) {
         const folder = checkpoint.pendingFolders[0]!;
@@ -386,6 +382,20 @@ export class SyncService {
           },
           include: { dateRule: true },
         });
+        let folderRule = indexedFolder.dateRule ?? null;
+        let ancestorId = parent?.id ?? null;
+        const visited = new Set([indexedFolder.id]);
+        // A resumed checkpoint may never revisit its ancestors in this process.
+        while (!folderRule && ancestorId && !visited.has(ancestorId)) {
+          visited.add(ancestorId);
+          const ancestor = await this.prisma.indexedFolder.findFirst({
+            where: { id: ancestorId, userId: run.source.userId, sourceId: run.source.id },
+            include: { dateRule: true },
+          });
+          if (!ancestor) break;
+          if (ancestor.dateRule?.scope !== 'DIRECT_ONLY') folderRule = ancestor.dateRule;
+          ancestorId = ancestor.parentId;
+        }
         // Collect metadata across the entire folder before matching any image page.
         // Only the current folder carries this bounded, resumable metadata checkpoint.
         if (run.source.type === 'GOOGLE_TAKEOUT') {
@@ -402,10 +412,7 @@ export class SyncService {
               /\.json$/i.test(entry.name),
             )) {
               const text = await this.retry(async () => {
-                const media = await this.drive.getContentStream(
-                  run.source.connection,
-                  sidecar.id,
-                );
+                const media = await this.drive.getContentStream(run.source.connection, sidecar.id);
                 const chunks: Buffer[] = [];
                 let size = 0;
                 try {
