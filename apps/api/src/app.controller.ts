@@ -1135,6 +1135,34 @@ export class AppController {
     await this.manualDates.remove(userId, id);
   }
   @UseGuards(SessionGuard, CsrfGuard)
+  @Post('photo-removals')
+  @HttpCode(HttpStatus.OK)
+  async removePhotos(@CurrentUserId() userId: string, @Body() body: { photoIds?: unknown }) {
+    const ids = body?.photoIds;
+    if (
+      !Array.isArray(ids) ||
+      ids.length < 1 ||
+      ids.length > 50 ||
+      ids.some((id) => typeof id !== 'string' || !id.trim() || id.length > 200)
+    )
+      throw new BadRequestException({
+        code: 'INVALID_PHOTO_BATCH',
+        message: 'Provide 1–50 photo IDs.',
+      });
+    const results: Array<{ id: string; status: 'REMOVED' | 'ABSENT' | 'FAILED' }> = [];
+    for (const id of new Set<string>(ids)) {
+      try {
+        await this.deletePhoto(userId, id);
+        results.push({ id, status: 'REMOVED' });
+      } catch (error) {
+        // ABSENT means absent from this user's archive, not globally absent.
+        // Never disclose whether another user owns the supplied ID.
+        results.push({ id, status: error instanceof NotFoundException ? 'ABSENT' : 'FAILED' });
+      }
+    }
+    return { results };
+  }
+  @UseGuards(SessionGuard, CsrfGuard)
   @Delete('photos/:id')
   @HttpCode(HttpStatus.NO_CONTENT)
   async deletePhoto(@CurrentUserId() userId: string, @Param('id') id: string) {
