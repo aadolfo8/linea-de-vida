@@ -12,6 +12,7 @@ import { PrismaService } from '../src/prisma.service';
 import { SyncService } from '../src/sync.service';
 import { ManualDateService, validateManualDate } from '../src/manual-date.service';
 import { MediaProxyService } from '../src/media-proxy.service';
+import { FolderDateRuleService } from '../src/folder-date-rule.service';
 
 describe('Phase 1 HTTP contracts', () => {
   let app: INestApplication;
@@ -69,6 +70,7 @@ describe('Phase 1 HTTP contracts', () => {
     },
     $transaction: async (operation: (value: typeof prisma) => unknown) => operation(prisma),
     $queryRawUnsafe: async (query: string, ...args: unknown[]) => {
+      if (query.includes('MIN(EXTRACT(YEAR')) return [{ firstYear: 2023, lastYear: 2024 }];
       if (query.includes('AS year'))
         return [
           { year: 2024, photoCount: 2n },
@@ -196,6 +198,10 @@ describe('Phase 1 HTTP contracts', () => {
           { provide: PrismaService, useValue: prisma },
           { provide: SyncService, useValue: sync },
           { provide: ManualDateService, useValue: manualDates },
+          {
+            provide: FolderDateRuleService,
+            useValue: { set: async () => ({}), remove: async () => ({}) },
+          },
           MediaProxyService,
           {
             provide: DriveAdapter,
@@ -379,97 +385,6 @@ describe('Phase 1 HTTP contracts', () => {
     await request(app.getHttpServer()).get('/v1/photos?precision=UNKNOWN').expect(200);
     await request(app.getHttpServer()).get('/v1/photos?year=2024&month=3').expect(400);
     await request(app.getHttpServer()).get('/v1/photos?precision=UNKNOWN&year=2024').expect(400);
-  });
-
-  it('serves a user-isolated, keyset-cursor chronological feed without duplicate photos', async () => {
-    const originalFindMany = prisma.photo.findMany;
-    const first = [
-      {
-        id: 'photo-c',
-        userId: 'owner',
-        fileName: 'c.jpg',
-        mimeType: 'image/jpeg',
-        detectedDate: new Date('2024-03-03T00:00:00.000Z'),
-        detectedPrecision: 'DAY',
-        detectedSource: 'EXIF',
-        effectiveDateValue: new Date('2024-03-03T00:00:00.000Z'),
-        effectiveDatePrecision: 'DAY',
-        override: null,
-      },
-      {
-        id: 'photo-b',
-        userId: 'owner',
-        fileName: 'b.jpg',
-        mimeType: 'image/jpeg',
-        detectedDate: new Date('2024-03-02T00:00:00.000Z'),
-        detectedPrecision: 'DAY',
-        detectedSource: 'EXIF',
-        effectiveDateValue: new Date('2024-03-02T00:00:00.000Z'),
-        effectiveDatePrecision: 'DAY',
-        override: null,
-      },
-      {
-        id: 'photo-a',
-        userId: 'owner',
-        fileName: 'a.jpg',
-        mimeType: 'image/jpeg',
-        detectedDate: new Date('2024-01-01T00:00:00.000Z'),
-        detectedPrecision: 'YEAR',
-        detectedSource: 'FOLDER',
-        effectiveDateValue: new Date('2024-01-01T00:00:00.000Z'),
-        effectiveDatePrecision: 'YEAR',
-        override: null,
-      },
-    ];
-    const calls: any[] = [];
-    prisma.photo.findMany = async (args: any) => {
-      calls.push(args);
-      return args.where.OR ? [first[2]] : first;
-    };
-    try {
-      await createApp();
-      const pageOne = await request(app.getHttpServer())
-        .get('/v1/timeline/feed?limit=2')
-        .expect(200)
-        .expect(({ body }) => {
-          expect(body.items.map((photo: any) => photo.id)).toEqual(['photo-c', 'photo-b']);
-          expect(body.items[0]).toMatchObject({
-            thumbnailUrl: '/v1/photos/photo-c/thumbnail',
-            period: { year: 2024, month: 3, key: '2024-03' },
-          });
-          expect(body.nextCursor).toBeTruthy();
-        });
-      const pageTwo = await request(app.getHttpServer())
-        .get(`/v1/timeline/feed?limit=2&cursor=${pageOne.body.nextCursor}`)
-        .expect(200);
-      expect(pageTwo.body.items.map((photo: any) => photo.id)).toEqual(['photo-a']);
-      expect(
-        new Set([...pageOne.body.items, ...pageTwo.body.items].map((photo: any) => photo.id)).size,
-      ).toBe(3);
-      expect(pageTwo.body.items[0].period).toMatchObject({ year: 2024, month: null });
-      expect(calls).toHaveLength(2);
-      expect(calls[0].where).toMatchObject({ userId: 'owner', status: 'ACTIVE' });
-      expect(calls[1].where.OR).toBeTruthy();
-      await request(app.getHttpServer()).get('/v1/timeline/feed?cursor=invalid').expect(400);
-    } finally {
-      prisma.photo.findMany = originalFindMany;
-    }
-  });
-
-  it('scopes feed reads to the current user before returning metadata', async () => {
-    const originalFindMany = prisma.photo.findMany;
-    let where: any;
-    prisma.photo.findMany = async (args: any) => {
-      where = args.where;
-      return [];
-    };
-    try {
-      await createApp('other');
-      await request(app.getHttpServer()).get('/v1/timeline/feed').expect(200);
-      expect(where).toMatchObject({ userId: 'other', status: 'ACTIVE' });
-    } finally {
-      prisma.photo.findMany = originalFindMany;
-    }
   });
 
   it('rejects a callback with an invalid or consumed state', async () => {

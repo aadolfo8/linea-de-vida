@@ -3,13 +3,19 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 
-export function ArchiveNav({ name }: { name?: string | null }) {
+export function ArchiveNav({
+  name,
+  timelinePath = '/timeline',
+}: {
+  name?: string | null;
+  timelinePath?: string;
+}) {
   const pathname = usePathname();
   return (
     <header className="archive-nav">
       <Link
         className="archive-mark"
-        href="/timeline"
+        href={timelinePath}
         aria-label="Línea de vida, ir a la cronología"
       >
         Línea de vida
@@ -17,8 +23,10 @@ export function ArchiveNav({ name }: { name?: string | null }) {
       <nav aria-label="Navegación principal">
         <Link
           data-cursor="route"
-          href="/timeline"
-          aria-current={pathname === '/timeline' ? 'page' : undefined}
+          href={timelinePath}
+          aria-current={
+            pathname === '/timeline' || pathname.startsWith('/timeline/') ? 'page' : undefined
+          }
         >
           Cronología
         </Link>
