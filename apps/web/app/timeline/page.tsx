@@ -1,18 +1,10 @@
-'use client';
+import { TimelineRoute } from '../components/TimelineRoute';
 
-import { ArchiveNav } from '../components/ArchiveNav';
-import { ProtectedSurface } from '../components/ProtectedSurface';
-import { TimelineExperience } from '../components/TimelineExperience';
-
-export default function TimelinePage() {
-  return (
-    <ProtectedSurface>
-      {(session) => (
-        <>
-          <ArchiveNav name={session.user.displayName} />
-          <TimelineExperience />
-        </>
-      )}
-    </ProtectedSurface>
-  );
+export default async function TimelinePage({
+  searchParams,
+}: {
+  searchParams: Promise<{ view?: string | string[] }>;
+}) {
+  const { view } = await searchParams;
+  return <TimelineRoute view={view === 'editorial' ? 'editorial' : 'immersive'} />;
 }

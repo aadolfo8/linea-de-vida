@@ -1,5 +1,5 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import { DatePrecision, DateSource } from '@prisma/client';
+import { DatePrecision, DateSource, FolderDateRuleScope } from '@prisma/client';
 import { PrismaService } from './prisma.service';
 
 export const MANUAL_DATE_BULK_LIMIT = 50;
@@ -22,7 +22,15 @@ type DateEvidence = {
   detectedDate: Date | null;
   detectedPrecision: DatePrecision;
   detectedSource: DateSource;
+  effectiveDateValue?: Date | null;
+  effectiveDatePrecision?: DatePrecision;
+  effectiveDateSource?: DateSource;
   override?: { dateValue: Date; precision: DatePrecision } | null;
+  folderRule?: {
+    dateValue: Date;
+    precision: DatePrecision;
+    scope: FolderDateRuleScope;
+  } | null;
 };
 
 const invalid = (code: string, message: string): never => {
@@ -78,6 +86,27 @@ export function effectiveDate(evidence: DateEvidence) {
       precision: evidence.override.precision,
       origin: 'MANUAL' as const,
     };
+  if (
+    evidence.folderRule &&
+    (evidence.folderRule.scope === 'ALL_DESCENDANTS' ||
+      !evidence.detectedDate ||
+      evidence.detectedSource === 'FOLDER')
+  )
+    return {
+      value: evidence.folderRule.dateValue,
+      precision: evidence.folderRule.precision,
+      origin: 'FOLDER_RULE' as const,
+    };
+  if (
+    evidence.effectiveDateSource === 'FOLDER_RULE' &&
+    evidence.effectiveDateValue &&
+    evidence.effectiveDatePrecision
+  )
+    return {
+      value: evidence.effectiveDateValue,
+      precision: evidence.effectiveDatePrecision,
+      origin: 'FOLDER_RULE' as const,
+    };
   return {
     value: evidence.detectedDate,
     precision: evidence.detectedDate ? evidence.detectedPrecision : 'UNKNOWN',
@@ -131,6 +160,7 @@ export class ManualDateService {
               data: {
                 effectiveDateValue: manual.dateValue,
                 effectiveDatePrecision: manual.precision,
+                effectiveDateSource: 'MANUAL',
               },
             }),
           ]),
@@ -148,12 +178,34 @@ export class ManualDateService {
       const photo = await tx.photo.findFirst({ where: { id: photoId, userId } });
       if (!photo)
         throw new NotFoundException({ code: 'PHOTO_NOT_FOUND', message: 'Photo not found.' });
+      const folders = photo.folderId
+        ? await tx.indexedFolder.findMany({
+            where: { userId, sourceId: photo.sourceId },
+            include: { dateRule: true },
+          })
+        : [];
+      const byId = new Map(folders.map((folder) => [folder.id, folder]));
+      let currentId = photo.folderId;
+      let direct = true;
+      let folderRule = null;
+      while (currentId) {
+        const folder = byId.get(currentId);
+        if (!folder) break;
+        if (folder.dateRule && (direct || folder.dateRule.scope !== 'DIRECT_ONLY')) {
+          folderRule = folder.dateRule;
+          break;
+        }
+        direct = false;
+        currentId = folder.parentId;
+      }
+      const restored = effectiveDate({ ...photo, folderRule, override: null });
       await tx.manualDateOverride.deleteMany({ where: { photoId: photo.id } });
       return tx.photo.update({
         where: { id: photo.id },
         data: {
-          effectiveDateValue: photo.detectedDate,
-          effectiveDatePrecision: photo.detectedDate ? photo.detectedPrecision : 'UNKNOWN',
+          effectiveDateValue: restored.value,
+          effectiveDatePrecision: restored.precision,
+          effectiveDateSource: restored.origin,
         },
         include: { override: true },
       });

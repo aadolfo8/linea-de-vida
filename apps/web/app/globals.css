@@ -1,13 +1,29 @@
 @import 'tailwindcss';
+:root {
+  --map-ink: #0c2935;
+  --map-paper: #f1efe8;
+  --map-surface: #fbfaf6;
+  --map-panel: #e5eeea;
+  --map-route: #1d7780;
+  --map-route-soft: #a8d9d1;
+  --map-active: #e96b4d;
+  --map-line: #afc2bd;
+  --map-muted: #435d64;
+  --map-danger: #963f32;
+  --map-focus: #0c2935;
+  color-scheme: light;
+}
 * {
   box-sizing: border-box;
 }
 html {
   scroll-behavior: smooth;
+  background: var(--map-paper);
 }
 body {
   margin: 0;
-  background: #0b0e0b;
+  background: var(--map-paper);
+  color: var(--map-ink);
   font-family: ui-sans-serif, system-ui, sans-serif;
 }
 button,
@@ -26,41 +42,38 @@ button:disabled {
   z-index: 100;
   top: 0;
   left: 0;
-  width: 14px;
-  height: 14px;
-  border: 1px solid #d9ff3f;
+  width: 52px;
+  height: 52px;
+  visibility: hidden;
+  border: 0;
   border-radius: 50%;
+  opacity: 0;
   pointer-events: none;
   mix-blend-mode: difference;
   transition:
-    width 160ms ease,
-    height 160ms ease,
-    margin 160ms ease,
-    background 160ms ease;
+    opacity 120ms ease,
+    visibility 120ms ease;
 }
 .context-cursor span {
   position: absolute;
   inset: 0;
   display: grid;
-  color: #0b0e0b;
+  color: var(--map-ink);
   font-size: 9px;
   font-weight: 800;
   letter-spacing: 0.06em;
   place-items: center;
   text-transform: uppercase;
 }
-.context-cursor--photo,
-.context-cursor--route,
-.context-cursor--action {
-  width: 52px;
-  height: 52px;
-  margin: -19px 0 0 -19px;
-  background: #d9ff3f;
+.context-cursor--visible {
+  visibility: visible;
+  background: var(--map-active);
+  opacity: 1;
 }
 button:focus-visible,
 a:focus-visible,
 input:focus-visible {
-  outline: 3px solid #d9ff3f;
+  outline: 3px solid var(--map-active);
   outline-offset: 3px;
 }
 .archive-nav {
@@ -73,9 +86,9 @@ input:focus-visible {
   align-items: center;
   gap: 24px;
   padding: 0 5vw;
-  background: #0b0e0b;
-  color: #d9ddd2;
-  border-bottom: 1px solid #354035;
+  background: var(--map-paper);
+  color: var(--map-ink);
+  border-bottom: 1px solid var(--map-line);
 }
 .archive-nav a {
   min-height: 44px;
@@ -85,7 +98,7 @@ input:focus-visible {
   text-decoration: none;
 }
 .archive-nav a:hover {
-  color: #d9ff3f;
+  color: var(--map-route);
 }
 .archive-mark {
   font-size: 0.8rem;
@@ -99,11 +112,53 @@ input:focus-visible {
 }
 .archive-nav nav a {
   padding: 0 12px;
-  color: #aab1a5;
+  color: var(--map-muted);
 }
 .archive-nav nav a[aria-current='page'] {
-  color: #0b0e0b;
-  background: #d9ff3f;
+  color: var(--map-ink);
+  background: var(--map-route-soft);
+}
+body:has(.experience),
+body:has(.timeline-editorial-shell) {
+  background: var(--map-paper);
+}
+body:has(.experience) .archive-nav,
+body:has(.timeline-editorial-shell) .archive-nav {
+  background: var(--map-paper);
+  color: var(--map-ink);
+  border-bottom-color: var(--map-line);
+}
+.timeline-immersive-shell[data-route-depth='month'] .archive-nav,
+.timeline-editorial-shell[data-route-depth='month'] .archive-nav {
+  position: relative;
+  top: auto;
+}
+body:has(.experience) .archive-nav a:hover,
+body:has(.timeline-editorial-shell) .archive-nav a:hover {
+  color: var(--map-route);
+}
+body:has(.experience) .archive-nav nav a,
+body:has(.timeline-editorial-shell) .archive-nav nav a {
+  color: var(--map-muted);
+}
+body:has(.experience) .archive-nav nav a[aria-current='page'],
+body:has(.timeline-editorial-shell) .archive-nav nav a[aria-current='page'] {
+  background: var(--map-route-soft);
+  color: var(--map-ink);
+}
+body:has(.experience) .session-status,
+body:has(.timeline-editorial-shell) .session-status {
+  color: var(--map-muted);
+}
+body:has(.experience) .session-status span,
+body:has(.timeline-editorial-shell) .session-status span {
+  background: var(--map-route);
+}
+body:has(.experience) button:focus-visible,
+body:has(.experience) a:focus-visible,
+body:has(.timeline-editorial-shell) button:focus-visible,
+body:has(.timeline-editorial-shell) a:focus-visible {
+  outline-color: var(--map-active);
 }
 .session-status {
   justify-self: end;
@@ -111,22 +166,26 @@ input:focus-visible {
   align-items: center;
   gap: 8px;
   margin: 0;
-  color: #aab1a5;
+  color: var(--map-muted);
   font-size: 0.82rem;
 }
 .session-status span {
   width: 8px;
   height: 8px;
-  background: #d9ff3f;
+  background: var(--map-route);
   border-radius: 50%;
 }
 .route-pending {
-  min-height: 100vh;
+  min-height: 100dvh;
   display: grid;
   padding: 24px;
-  background: #0b0e0b;
-  color: #d9ddd2;
+  background: var(--map-paper);
+  color: var(--map-ink);
   place-items: center;
+}
+.route-pending button {
+  min-width: 44px;
+  min-height: 44px;
 }
 @media (max-width: 680px) {
   .archive-nav {
@@ -141,7 +200,7 @@ input:focus-visible {
     justify-content: space-between;
   }
   .archive-nav nav a {
-    min-height: 42px;
+    min-height: 44px;
   }
   .session-status {
     display: none;

@@ -17,7 +17,7 @@ import {
   ServiceUnavailableException,
   UseGuards,
 } from '@nestjs/common';
-import { PhotoSourceStatus } from '@prisma/client';
+import { DateSource, FolderDateRuleScope, PhotoSourceStatus } from '@prisma/client';
 import { Request, Response } from 'express';
 import { decryptSecret, encryptSecret } from './crypto';
 import { CsrfGuard, CurrentUserId, SessionGuard } from './auth';
@@ -33,6 +33,7 @@ import {
   validateManualDate,
 } from './manual-date.service';
 import { loadRuntimeConfig } from './production';
+import { FolderDateRuleService } from './folder-date-rule.service';
 
 @Controller('v1')
 export class AppController {
@@ -44,6 +45,7 @@ export class AppController {
     @Inject(OAuthStateService) private readonly states: OAuthStateService,
     @Inject(ManualDateService) private readonly manualDates: ManualDateService,
     @Inject(MediaProxyService) private readonly media: MediaProxyService,
+    @Inject(FolderDateRuleService) private readonly folderDates: FolderDateRuleService,
   ) {}
   private loginRedirectUri() {
     return (
@@ -69,28 +71,38 @@ export class AppController {
       throw new BadRequestException({ code: 'INVALID_CURSOR', message: 'The cursor is invalid.' });
     }
   }
-  private feedCursor(date: Date | null, id: string) {
-    return Buffer.from(
-      JSON.stringify({ scope: 'timeline-feed', date: date?.toISOString() ?? null, id }),
-    ).toString('base64url');
+  private keysetCursor(scope: string, date: Date | null, id: string) {
+    return Buffer.from(JSON.stringify({ scope, date: date?.toISOString() ?? null, id })).toString(
+      'base64url',
+    );
   }
-  private parseFeedCursor(cursor?: string) {
+  private timelineCursor(scope: string, cursor?: string) {
     if (!cursor) return null;
     try {
       const value = JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8')) as {
         scope?: string;
-        date?: string | null;
+        date?: string;
         id?: string;
       };
-      if (value.scope !== 'timeline-feed' || typeof value.id !== 'string')
-        throw new Error('invalid');
-      if (value.date === null) return { date: null, id: value.id };
       const date = new Date(value.date ?? '');
-      if (Number.isNaN(date.getTime())) throw new Error('invalid');
+      if (value.scope !== scope || typeof value.id !== 'string' || Number.isNaN(date.getTime()))
+        throw new Error('invalid');
       return { date, id: value.id };
     } catch {
       throw new BadRequestException({ code: 'INVALID_CURSOR', message: 'The cursor is invalid.' });
     }
+  }
+  private compactPhoto(photo: any) {
+    return {
+      id: photo.id,
+      fileName: photo.fileName,
+      mimeType: photo.mimeType,
+      thumbnailUrl: `/v1/photos/${photo.id}/thumbnail`,
+      effectiveDate: {
+        value: photo.effectiveDateValue,
+        precision: photo.effectiveDatePrecision,
+      },
+    };
   }
   private year(value: string) {
     const year = Number(value);
@@ -467,18 +479,12 @@ export class AppController {
         code: 'FOLDER_NOT_FOUND',
         message: 'The selected Drive folder is unavailable.',
       });
-    const existing = await this.prisma.photoSource.count({ where: { userId, status: 'ACTIVE' } });
-    if (existing)
-      throw new BadRequestException({
-        code: 'ONE_SOURCE_LIMIT',
-        message: 'Phase 1 accepts one active photo source.',
-      });
     return this.prisma.photoSource.create({
       data: {
         userId,
         oauthConnectionId: connection.id,
         driveFolderId: body.driveFolderId,
-        name: folder.name.slice(0, 200),
+        name: body.name.trim().slice(0, 200),
         type: body.type ?? 'GENERIC',
         status: PhotoSourceStatus.ACTIVE,
       },
@@ -554,17 +560,43 @@ export class AppController {
       throw new NotFoundException({ code: 'SOURCE_NOT_FOUND', message: 'Photo source not found.' });
     const scope = `indexed-folders:${sourceId}`;
     const { limit, offset } = this.page(cursor, rawLimit, scope);
-    const records = await this.prisma.indexedFolder.findMany({
-      where: { sourceId, userId },
-      orderBy: [{ path: 'asc' }, { id: 'asc' }],
-      skip: offset,
-      take: limit + 1,
-      include: { _count: { select: { photos: { where: { status: 'ACTIVE' } } } } },
-    });
+    const [records, totals, pending] = await Promise.all([
+      this.prisma.indexedFolder.findMany({
+        where: { sourceId, userId },
+        orderBy: [{ path: 'asc' }, { id: 'asc' }],
+        skip: offset,
+        take: limit + 1,
+        include: {
+          dateRule: true,
+          _count: { select: { photos: { where: { status: 'ACTIVE' } } } },
+        },
+      }),
+      this.prisma.photo.groupBy({
+        by: ['folderId'],
+        where: { sourceId, userId, status: 'ACTIVE', folderId: { not: null } },
+        _count: { _all: true },
+      }),
+      this.prisma.photo.groupBy({
+        by: ['folderId'],
+        where: {
+          sourceId,
+          userId,
+          status: 'ACTIVE',
+          folderId: { not: null },
+          effectiveDateValue: null,
+        },
+        _count: { _all: true },
+      }),
+    ]);
+    const totalsByFolder = new Map(totals.map((group) => [group.folderId!, group._count._all]));
+    const pendingByFolder = new Map(pending.map((group) => [group.folderId!, group._count._all]));
     return {
       items: records.slice(0, limit).map(({ _count, ...folder }) => ({
         ...folder,
         photoCount: _count.photos,
+        classifiedPhotoCount:
+          (totalsByFolder.get(folder.id) ?? 0) - (pendingByFolder.get(folder.id) ?? 0),
+        unclassifiedPhotoCount: pendingByFolder.get(folder.id) ?? 0,
       })),
       nextCursor: records.length > limit ? this.cursor(scope, offset + limit) : null,
     };
@@ -574,6 +606,7 @@ export class AppController {
     @Param('id') folderId: string,
     @Query('cursor') cursor?: string,
     @Query('limit') rawLimit?: string,
+    @Query('classification') classification?: string,
   ) {
     const folder = await this.prisma.indexedFolder.findFirst({ where: { id: folderId, userId } });
     if (!folder)
@@ -583,8 +616,22 @@ export class AppController {
       });
     const scope = `indexed-folder-photos:${folderId}`;
     const { limit, offset } = this.page(cursor, rawLimit, scope);
+    const classificationWhere =
+      classification === 'UNCLASSIFIED'
+        ? { effectiveDateValue: null }
+        : classification === 'MANUAL'
+          ? { effectiveDateSource: 'MANUAL' as const }
+          : classification === 'FOLDER'
+            ? { effectiveDateSource: 'FOLDER_RULE' as const }
+            : classification === 'AUTOMATIC'
+              ? {
+                  effectiveDateSource: {
+                    in: ['EXIF', 'DRIVE_IMAGE_METADATA', 'TAKEOUT', 'FOLDER'] as DateSource[],
+                  },
+                }
+              : {};
     const records = await this.prisma.photo.findMany({
-      where: { userId, folderId, status: 'ACTIVE' },
+      where: { userId, folderId, status: 'ACTIVE', ...classificationWhere },
       orderBy: [{ fileName: 'asc' }, { id: 'asc' }],
       skip: offset,
       take: limit + 1,
@@ -601,66 +648,84 @@ export class AppController {
   @UseGuards(SessionGuard, CsrfGuard) @Put('indexed-folders/:id/date-override') async setFolderDate(
     @CurrentUserId() userId: string,
     @Param('id') folderId: string,
-    @Body() body: ManualDateInput & { recursive?: unknown },
+    @Body() body: ManualDateInput & { scope?: unknown },
   ) {
-    if (body?.recursive !== true)
-      throw new BadRequestException({
-        code: 'RECURSIVE_SCOPE_REQUIRED',
-        message: 'Confirm that the selected folder and all descendants must be updated.',
-      });
     if (body.precision !== 'YEAR' && body.precision !== 'MONTH')
       throw new BadRequestException({
         code: 'INVALID_PRECISION',
-        message: 'Folder overrides support YEAR or MONTH precision.',
+        message: 'Folder rules support YEAR or MONTH precision.',
       });
     const manual = validateManualDate(body);
-    const selected = await this.prisma.indexedFolder.findFirst({ where: { id: folderId, userId } });
-    if (!selected)
-      throw new NotFoundException({
-        code: 'FOLDER_NOT_FOUND',
-        message: 'Indexed folder not found.',
-      });
-    const folders = await this.prisma.indexedFolder.findMany({
-      where: { userId, sourceId: selected.sourceId, status: 'ACTIVE' },
-      select: { id: true, parentId: true },
-    });
-    const descendantIds = [selected.id];
-    for (let offset = 0; offset < descendantIds.length; offset++)
-      for (const folder of folders)
-        if (folder.parentId === descendantIds[offset] && !descendantIds.includes(folder.id))
-          descendantIds.push(folder.id);
-    const photos = await this.prisma.photo.findMany({
-      where: { userId, folderId: { in: descendantIds }, status: 'ACTIVE' },
-      select: { id: true },
-    });
-    const maximum = Math.max(1, Number(process.env.FOLDER_DATE_OVERRIDE_MAX ?? 10_000));
-    if (photos.length > maximum)
+    const scope = body.scope ?? 'FALLBACK_DESCENDANTS';
+    if (!Object.values(FolderDateRuleScope).includes(scope as FolderDateRuleScope))
       throw new BadRequestException({
-        code: 'FOLDER_DATE_LIMIT_EXCEEDED',
-        message: `This folder contains more than the defensive limit of ${maximum} active photos.`,
+        code: 'INVALID_FOLDER_RULE_SCOPE',
+        message: 'The folder rule scope is invalid.',
       });
-    await this.prisma.$transaction(
-      async (tx) => {
-        for (let offset = 0; offset < photos.length; offset += 250) {
-          for (const photo of photos.slice(offset, offset + 250)) {
-            await tx.manualDateOverride.upsert({
-              where: { photoId: photo.id },
-              create: { photoId: photo.id, ...manual },
-              update: manual,
-            });
-            await tx.photo.update({
-              where: { id: photo.id },
-              data: {
-                effectiveDateValue: manual.dateValue,
-                effectiveDatePrecision: manual.precision,
-              },
-            });
-          }
-        }
-      },
-      { maxWait: 10_000, timeout: 60_000 },
-    );
-    return { affectedCount: photos.length };
+    return this.folderDates.set(userId, folderId, {
+      dateValue: manual.dateValue,
+      precision: manual.precision,
+      scope: scope as FolderDateRuleScope,
+    });
+  }
+  @UseGuards(SessionGuard, CsrfGuard)
+  @Delete('indexed-folders/:id/date-override')
+  async removeFolderDate(@CurrentUserId() userId: string, @Param('id') folderId: string) {
+    return this.folderDates.remove(userId, folderId);
+  }
+  @UseGuards(SessionGuard)
+  @Get('photo-sources/:id/classification-summary')
+  async classificationSummary(@CurrentUserId() userId: string, @Param('id') sourceId: string) {
+    const source = await this.prisma.photoSource.findFirst({ where: { id: sourceId, userId } });
+    if (!source)
+      throw new NotFoundException({ code: 'SOURCE_NOT_FOUND', message: 'Photo source not found.' });
+    const groups = await this.prisma.photo.groupBy({
+      by: ['effectiveDateSource'],
+      where: { sourceId, userId, status: 'ACTIVE' },
+      _count: { _all: true },
+    });
+    const count = (sources: string[]) =>
+      groups
+        .filter((group) => sources.includes(group.effectiveDateSource))
+        .reduce((total, group) => total + group._count._all, 0);
+    const unclassified = await this.prisma.photo.count({
+      where: { sourceId, userId, status: 'ACTIVE', effectiveDateValue: null },
+    });
+    return {
+      total:
+        count(['EXIF', 'DRIVE_IMAGE_METADATA', 'TAKEOUT', 'FOLDER', 'FOLDER_RULE', 'MANUAL']) +
+        unclassified,
+      automatic: count(['EXIF', 'DRIVE_IMAGE_METADATA', 'TAKEOUT', 'FOLDER']),
+      folder: count(['FOLDER_RULE']),
+      manual: count(['MANUAL']),
+      unclassified,
+    };
+  }
+  @UseGuards(SessionGuard) @Get('photo-sources/:id/pending-photos') async pendingPhotos(
+    @CurrentUserId() userId: string,
+    @Param('id') sourceId: string,
+    @Query('cursor') cursor?: string,
+    @Query('limit') rawLimit?: string,
+  ) {
+    const source = await this.prisma.photoSource.findFirst({ where: { id: sourceId, userId } });
+    if (!source)
+      throw new NotFoundException({ code: 'SOURCE_NOT_FOUND', message: 'Photo source not found.' });
+    const scope = `source-pending-photos:${sourceId}`;
+    const { limit, offset } = this.page(cursor, rawLimit, scope);
+    const records = await this.prisma.photo.findMany({
+      where: { sourceId, userId, status: 'ACTIVE', effectiveDateValue: null },
+      orderBy: [{ folderId: 'asc' }, { fileName: 'asc' }, { id: 'asc' }],
+      skip: offset,
+      take: limit + 1,
+      include: { override: true },
+    });
+    return {
+      items: records.slice(0, limit).map((photo) => ({
+        ...photoDateResponse(photo),
+        thumbnailUrl: `/v1/photos/${photo.id}/thumbnail`,
+      })),
+      nextCursor: records.length > limit ? this.cursor(scope, offset + limit) : null,
+    };
   }
   @UseGuards(SessionGuard) @Get('sync-runs/:id') async run(
     @CurrentUserId() userId: string,
@@ -692,26 +757,180 @@ export class AppController {
       nextCursor: records.length > limit ? this.cursor(`sync-issues:${id}`, offset + limit) : null,
     };
   }
-  @UseGuards(SessionGuard) @Get('timeline/years') async years(
+  @UseGuards(SessionGuard)
+  @Get('timeline/years')
+  async years(
     @CurrentUserId() userId: string,
     @Query('cursor') cursor?: string,
     @Query('limit') rawLimit?: string,
   ) {
-    const { limit, offset } = this.page(cursor, rawLimit, 'years');
-    const rows = await this.prisma.$queryRawUnsafe<{ year: number; photoCount: bigint }[]>(
+    const rows = await this.prisma.$queryRawUnsafe<
+      { firstYear: number | null; lastYear: number | null }[]
+    >(
+      `SELECT MIN(EXTRACT(YEAR FROM "effectiveDateValue")::int) AS "firstYear",
+              MAX(EXTRACT(YEAR FROM "effectiveDateValue")::int) AS "lastYear"
+       FROM "Photo" WHERE "userId" = $1 AND status = 'ACTIVE' AND "effectiveDateValue" IS NOT NULL`,
+      userId,
+    );
+    const firstYear = rows[0]?.firstYear;
+    const lastYear = rows[0]?.lastYear;
+    if (!firstYear || !lastYear)
+      return { firstYear: null, lastYear: null, latestYear: null, items: [] };
+    const counts = await this.prisma.$queryRawUnsafe<{ year: number; photoCount: bigint }[]>(
       `SELECT EXTRACT(YEAR FROM "effectiveDateValue")::int AS year, COUNT(*)::bigint AS "photoCount"
        FROM "Photo" WHERE "userId" = $1 AND status = 'ACTIVE' AND "effectiveDateValue" IS NOT NULL
-       GROUP BY 1 ORDER BY 1 DESC LIMIT $2 OFFSET $3`,
+       GROUP BY 1`,
       userId,
-      limit + 1,
-      offset,
     );
-    const page = rows
-      .slice(0, limit)
-      .map((row) => ({ ...row, photoCount: Number(row.photoCount) }));
+    const byYear = new Map(counts.map((row) => [row.year, Number(row.photoCount)]));
+    const { limit, offset } = this.page(cursor, rawLimit, 'years');
+    const items = Array.from({ length: lastYear - firstYear + 1 }, (_, index) => {
+      const year = lastYear - index;
+      return { year, photoCount: byYear.get(year) ?? 0 };
+    });
+    const paginated = cursor !== undefined || rawLimit !== undefined;
     return {
-      items: page,
-      nextCursor: rows.length > limit ? this.cursor('years', offset + limit) : null,
+      firstYear,
+      lastYear,
+      latestYear: lastYear,
+      items: items.slice(offset, offset + limit),
+      ...(paginated
+        ? {
+            nextCursor: offset + limit < items.length ? this.cursor('years', offset + limit) : null,
+          }
+        : {}),
+    };
+  }
+  @UseGuards(SessionGuard) @Get('timeline/years/:year') async yearSummary(
+    @CurrentUserId() userId: string,
+    @Param('year') year: string,
+  ) {
+    const parsedYear = this.year(year);
+    const start = new Date(Date.UTC(parsedYear, 0, 1));
+    const end = new Date(Date.UTC(parsedYear + 1, 0, 1));
+    const rows = await this.prisma.$queryRawUnsafe<
+      {
+        month: number;
+        photoCount: bigint;
+      }[]
+    >(
+      `SELECT EXTRACT(MONTH FROM "effectiveDateValue")::int AS month, COUNT(*)::bigint AS "photoCount"
+       FROM "Photo" WHERE "userId" = $1 AND status = 'ACTIVE'
+         AND "effectiveDateValue" >= $2 AND "effectiveDateValue" < $3
+         AND "effectiveDatePrecision" IN ('MONTH', 'DAY')
+       GROUP BY 1`,
+      userId,
+      start,
+      end,
+    );
+    const unknownRows = await this.prisma.$queryRawUnsafe<{ photoCount: bigint }[]>(
+      `SELECT COUNT(*)::bigint AS "photoCount" FROM "Photo"
+       WHERE "userId" = $1 AND status = 'ACTIVE'
+         AND "effectiveDateValue" >= $2 AND "effectiveDateValue" < $3
+         AND "effectiveDatePrecision" = 'YEAR'`,
+      userId,
+      start,
+      end,
+    );
+    const previewIds = await this.prisma.$queryRawUnsafe<{ id: string }[]>(
+      `WITH ordered AS (
+         SELECT id, "effectiveDateValue", NTILE(8) OVER (ORDER BY "effectiveDateValue" DESC, id DESC) AS bucket
+         FROM "Photo" WHERE "userId" = $1 AND status = 'ACTIVE'
+           AND "effectiveDateValue" >= $2 AND "effectiveDateValue" < $3
+       ) SELECT DISTINCT ON (bucket) id FROM ordered ORDER BY bucket, "effectiveDateValue" DESC, id DESC`,
+      userId,
+      start,
+      end,
+    );
+    const records = previewIds.length
+      ? await this.prisma.photo.findMany({
+          where: { userId, id: { in: previewIds.map((row) => row.id) } },
+          include: { override: true },
+        })
+      : [];
+    const byId = new Map(records.map((photo) => [photo.id, photo]));
+    const months = new Map(rows.map((row) => [row.month, Number(row.photoCount)]));
+    const unknownMonthCount = Number(unknownRows[0]?.photoCount ?? 0);
+    const total = [...months.values()].reduce((sum, count) => sum + count, 0) + unknownMonthCount;
+    return {
+      year: parsedYear,
+      total,
+      months: Array.from({ length: 12 }, (_, index) => ({
+        month: index + 1,
+        photoCount: months.get(index + 1) ?? 0,
+      })),
+      unknownMonthCount,
+      previews: previewIds
+        .map((row) => byId.get(row.id))
+        .filter(Boolean)
+        .map((photo) => this.compactPhoto(photo)),
+    };
+  }
+  @UseGuards(SessionGuard) @Get('timeline/years/:year/months/:month/photos') async monthPhotos(
+    @CurrentUserId() userId: string,
+    @Param('year') year: string,
+    @Param('month') month: string,
+    @Query('cursor') cursor?: string,
+    @Query('limit') rawLimit?: string,
+  ) {
+    const parsedYear = this.year(year);
+    const parsedMonth = this.month(month);
+    return this.timelinePhotos(userId, parsedYear, parsedMonth, cursor, rawLimit, false);
+  }
+  @UseGuards(SessionGuard)
+  @Get('timeline/years/:year/unknown-month/photos')
+  async unknownMonthPhotos(
+    @CurrentUserId() userId: string,
+    @Param('year') year: string,
+    @Query('cursor') cursor?: string,
+    @Query('limit') rawLimit?: string,
+  ) {
+    return this.timelinePhotos(userId, this.year(year), null, cursor, rawLimit, true);
+  }
+  private async timelinePhotos(
+    userId: string,
+    year: number,
+    month: number | null,
+    cursor: string | undefined,
+    rawLimit: string | undefined,
+    unknownMonth: boolean,
+  ) {
+    const limit = Math.min(100, Math.max(1, Number(rawLimit ?? 30) || 30));
+    const scope = `timeline-photos:${year}:${unknownMonth ? 'unknown-month' : month}`;
+    const after = this.timelineCursor(scope, cursor);
+    const start = unknownMonth
+      ? new Date(Date.UTC(year, 0, 1))
+      : new Date(Date.UTC(year, month! - 1, 1));
+    const end = unknownMonth
+      ? new Date(Date.UTC(year + 1, 0, 1))
+      : new Date(Date.UTC(year, month!, 1));
+    const records = await this.prisma.photo.findMany({
+      where: {
+        userId,
+        status: 'ACTIVE',
+        effectiveDateValue: { gte: start, lt: end },
+        effectiveDatePrecision: unknownMonth ? 'YEAR' : { in: ['MONTH', 'DAY'] },
+        ...(after
+          ? {
+              OR: [
+                { effectiveDateValue: { lt: after.date } },
+                { effectiveDateValue: after.date, id: { lt: after.id } },
+              ],
+            }
+          : {}),
+      },
+      orderBy: [{ effectiveDateValue: 'desc' }, { id: 'desc' }],
+      take: limit + 1,
+      include: { override: true },
+    });
+    const items = records.slice(0, limit).map((photo) => this.compactPhoto(photo));
+    const last = records[limit - 1];
+    return {
+      items,
+      nextCursor:
+        records.length > limit && last
+          ? this.keysetCursor(scope, last.effectiveDateValue!, last.id)
+          : null,
     };
   }
   @UseGuards(SessionGuard) @Get('timeline/years/:year/months') async months(
@@ -794,66 +1013,6 @@ export class AppController {
       userId,
     );
     return { photoCount: Number(rows[0]?.photoCount ?? 0) };
-  }
-  @UseGuards(SessionGuard) @Get('timeline/feed') async feed(
-    @CurrentUserId() userId: string,
-    @Query('cursor') cursor?: string,
-    @Query('limit') rawLimit?: string,
-  ) {
-    const limit = Math.min(100, Math.max(1, Number(rawLimit ?? 30) || 30));
-    const after = this.parseFeedCursor(cursor);
-    const records = await this.prisma.photo.findMany({
-      where: {
-        userId,
-        status: 'ACTIVE',
-        ...(after
-          ? after.date
-            ? {
-                OR: [
-                  { effectiveDateValue: { lt: after.date } },
-                  { effectiveDateValue: after.date, id: { lt: after.id } },
-                  { effectiveDateValue: null },
-                ],
-              }
-            : { effectiveDateValue: null, id: { lt: after.id } }
-          : {}),
-      },
-      orderBy: [{ effectiveDateValue: { sort: 'desc', nulls: 'last' } }, { id: 'desc' }],
-      take: limit + 1,
-      include: { override: true },
-    });
-    const items = records.slice(0, limit).map((photo) => {
-      const response = photoDateResponse(photo);
-      const value = response.effectiveDate.value;
-      const date = value ? new Date(value) : null;
-      const year = date ? date.getUTCFullYear() : null;
-      // A technical anchor for YEAR precision must never become an invented January group.
-      const month =
-        date && response.effectiveDate.precision !== 'YEAR' ? date.getUTCMonth() + 1 : null;
-      return {
-        ...response,
-        thumbnailUrl: `/v1/photos/${photo.id}/thumbnail`,
-        period: {
-          year,
-          month,
-          key:
-            year === null
-              ? 'unknown'
-              : `${year}-${month === null ? 'partial' : String(month).padStart(2, '0')}`,
-        },
-      };
-    });
-    const last = items.at(-1);
-    return {
-      items,
-      nextCursor:
-        records.length > limit && last
-          ? this.feedCursor(
-              last.effectiveDate.value ? new Date(last.effectiveDate.value) : null,
-              last.id,
-            )
-          : null,
-    };
   }
   @UseGuards(SessionGuard) @Get('photos') async photos(
     @CurrentUserId() userId: string,
