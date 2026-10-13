@@ -1,6 +1,14 @@
 'use client';
 
-import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  type CSSProperties,
+  type FormEvent,
+  type KeyboardEvent,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { ArchiveNav } from '../components/ArchiveNav';
 import { ProtectedSurface } from '../components/ProtectedSurface';
 import {
@@ -68,6 +76,7 @@ type BusyAction =
   | 'create-source'
   | 'sync'
   | 'remove-photos'
+  | 'refresh-photos'
   | 'folder-date'
   | 'manual-date'
   | 'remove-rule'
@@ -223,9 +232,21 @@ function Settings({ sessionConnection }: { sessionConnection: Connection | null 
   const [dateError, setDateError] = useState('');
   const [ruleScope, setRuleScope] = useState<RuleScope>('DIRECT_ONLY');
   const [confirmDate, setConfirmDate] = useState(false);
-  const photoRequest = useRef(0);
+  const [manualYear, setManualYear] = useState('');
+  const [manualMonth, setManualMonth] = useState('');
+  const [manualError, setManualError] = useState('');
+  const [manualEditorOpen, setManualEditorOpen] = useState(false);
+  const activeSourceIdRef = useRef<string | null>(null);
+  const selectedFolderIdRef = useRef<string | null>(null);
+  const photoFilterRef = useRef(photoFilter);
+  const pendingViewRef = useRef(pendingView);
+  const archiveRequestRef = useRef<AbortController | null>(null);
+  const photoRequestRef = useRef<AbortController | null>(null);
   const removing = useRef(false);
-  const activeSource = sources.find((source) => source.status === 'ACTIVE') ?? null;
+  const busy = busyAction !== null;
+  const activeSources = sources.filter((source) => source.status === 'ACTIVE');
+  const activeSource =
+    activeSources.find((source) => source.id === selectedSourceId) ?? activeSources[0] ?? null;
   const selectedFolder = folders.find((folder) => folder.id === selectedFolderId) ?? null;
 
   const folderRelations = useMemo(() => {
@@ -297,7 +318,7 @@ function Settings({ sessionConnection }: { sessionConnection: Connection | null 
   const announce = (message: string, tone: Notice['tone'] = 'info') => setNotice({ message, tone });
 
   const reviewPendingPhotos = () => {
-    if (!activeSource) return;
+    if (!activeSource || busy) return;
     void loadPending(activeSource.id)
       .then(() => document.getElementById('photos-workspace')?.scrollIntoView({ block: 'start' }))
       .catch((error) =>
@@ -382,6 +403,7 @@ function Settings({ sessionConnection }: { sessionConnection: Connection | null 
     filter: string,
     cursor?: string,
     append = false,
+    retained: IndexedPhoto[] = [],
   ) => {
     photoRequestRef.current?.abort();
     const controller = new AbortController();
@@ -401,9 +423,13 @@ function Settings({ sessionConnection }: { sessionConnection: Connection | null 
         photoFilterRef.current !== filter
       )
         return;
-      setPhotos((current) => (append ? [...current, ...page.items] : page.items));
+      setPhotos((current) => [
+        ...new Map(
+          [...(append ? current : retained), ...page.items].map((photo) => [photo.id, photo]),
+        ).values(),
+      ]);
       setPhotoCursor(page.nextCursor);
-      if (!append) setSelectedPhotos(new Set());
+      if (!append) setSelectedPhotos(new Set(retained.map((photo) => photo.id)));
     } finally {
       if (photoRequestRef.current === controller) {
         photoRequestRef.current = null;
@@ -411,24 +437,49 @@ function Settings({ sessionConnection }: { sessionConnection: Connection | null 
       }
     }
   };
-  const loadPhotos = async (
-    folderIdValue: string,
+  const loadPending = async (
+    sourceId: string,
     cursor?: string,
     append = false,
     retained: IndexedPhoto[] = [],
   ) => {
-    const request = ++photoRequest.current;
-    const page = await apiJson<{ items: IndexedPhoto[]; nextCursor: string | null }>(
-      settingsEndpoint.folderPhotos(folderIdValue, cursor),
-    );
-    if (request !== photoRequest.current) return;
-    setPhotos((current) => [
-      ...new Map(
-        [...(append ? current : retained), ...page.items].map((photo) => [photo.id, photo]),
-      ).values(),
-    ]);
-    setPhotoCursor(page.nextCursor);
-    if (!append) setSelectedPhotos(new Set(retained.map((photo) => photo.id)));
+    photoRequestRef.current?.abort();
+    const controller = new AbortController();
+    photoRequestRef.current = controller;
+    pendingViewRef.current = true;
+    photoFilterRef.current = 'UNCLASSIFIED';
+    setPendingView(true);
+    setPhotoFilter('UNCLASSIFIED');
+    if (!append) {
+      setPhotos(retained);
+      setPhotoCursor(null);
+      setSelectedPhotos(new Set(retained.map((photo) => photo.id)));
+    }
+    setLoadingPhotos(true);
+    try {
+      const page = await apiJson<{ items: IndexedPhoto[]; nextCursor: string | null }>(
+        settingsEndpoint.pendingPhotos(sourceId, cursor),
+        { signal: controller.signal },
+      );
+      if (
+        controller.signal.aborted ||
+        photoRequestRef.current !== controller ||
+        activeSourceIdRef.current !== sourceId ||
+        !pendingViewRef.current
+      )
+        return;
+      setPhotos((current) => [
+        ...new Map(
+          [...(append ? current : retained), ...page.items].map((photo) => [photo.id, photo]),
+        ).values(),
+      ]);
+      setPhotoCursor(page.nextCursor);
+    } finally {
+      if (photoRequestRef.current === controller) {
+        photoRequestRef.current = null;
+        setLoadingPhotos(false);
+      }
+    }
   };
 
   useEffect(() => {
@@ -478,22 +529,45 @@ function Settings({ sessionConnection }: { sessionConnection: Connection | null 
   }, [activeSource?.id]);
 
   useEffect(() => {
-    if (!selectedFolderId) {
-      photoRequest.current++;
+    const sourceId = activeSource?.id;
+    if (!sourceId || !selectedFolderId) {
       setPhotos([]);
-      setSelectedPhotos(new Set());
-      setPhotoCursor(null);
       return;
     }
-    setPhotos([]);
-    setSelectedPhotos(new Set());
-    setPhotoCursor(null);
-    void loadPhotos(selectedFolderId).catch((error) =>
-      setNotice(errorCopy(error, 'No se pudieron cargar las fotos de esta carpeta.')),
-    );
-    return () => {
-      photoRequest.current++;
-    };
+    if (pendingView) return;
+    const folderIdValue = selectedFolderId;
+    const filter = photoFilter;
+    selectedFolderIdRef.current = folderIdValue;
+    photoFilterRef.current = filter;
+    void loadPhotos(sourceId, folderIdValue, filter).catch((error) => {
+      if (
+        !isAbortError(error) &&
+        activeSourceIdRef.current === sourceId &&
+        selectedFolderIdRef.current === folderIdValue
+      )
+        announce(
+          errorCopy(error, 'No se pudieron cargar las fotos de esta carpeta. Reintenta.'),
+          'error',
+        );
+    });
+  }, [activeSource?.id, selectedFolderId, photoFilter, pendingView]);
+
+  useEffect(() => {
+    if (!selectedFolder) return;
+    const rule = selectedFolder.dateRule;
+    if (rule) {
+      const date = new Date(rule.dateValue);
+      setDateYear(String(date.getUTCFullYear()));
+      setDateMonth(rule.precision === 'MONTH' ? String(date.getUTCMonth() + 1) : '');
+      setRuleScope(rule.scope);
+    } else {
+      setDateYear('');
+      setDateMonth('');
+      setRuleScope('DIRECT_ONLY');
+    }
+    setDateError('');
+    setConfirmDate(false);
+    setConfirmRemoveRule(false);
   }, [selectedFolderId]);
 
   useEffect(() => {
@@ -636,17 +710,13 @@ function Settings({ sessionConnection }: { sessionConnection: Connection | null 
   };
 
   const removeSelected = async () => {
-    if (removing.current) return;
-    if (
-      !selectedPhotos.size ||
-      !window.confirm(
-        `¿Quitar ${selectedPhotos.size} fotos de este archivo? No se eliminarán de Drive.`,
-      )
-    )
-      return;
+    if (removing.current || busy || !selectedPhotos.size) return;
     removing.current = true;
-    photoRequest.current++;
-    setBusy(true);
+    photoRequestRef.current?.abort();
+    photoRequestRef.current = null;
+    setLoadingPhotos(false);
+    setBusyAction('remove-photos');
+    setConfirmRemovePhotos(false);
     try {
       const result = await removePhotosFromArchive([...selectedPhotos]);
       const retained = photos.filter((photo) => result.pending.has(photo.id));
@@ -655,22 +725,41 @@ function Settings({ sessionConnection }: { sessionConnection: Connection | null 
       // Offset cursors from before removal no longer describe the current collection.
       setPhotoCursor(null);
       const summary = `${result.removed} fotos retiradas; ${result.pending.size} pendientes. Drive no se modificó.`;
-      setNotice(
+      announce(
         result.error
           ? errorCopy(result.error, summary)
           : `${summary}${result.pending.size ? ' Reintenta las pendientes.' : ''}`,
       );
       try {
-        if (selectedFolderId) await loadPhotos(selectedFolderId, undefined, false, retained);
+        await refreshPhotoView(retained);
         if (activeSource) await loadArchive(activeSource.id);
       } catch {
-        setNotice(
+        announce(
           `${summary} No se pudo actualizar la vista. Usa «Actualizar fotos»; las pendientes siguen seleccionadas.`,
         );
       }
     } finally {
       removing.current = false;
-      setBusy(false);
+      setBusyAction(null);
+    }
+  };
+
+  const refreshPhotoView = async (retained: IndexedPhoto[]) => {
+    if (!activeSource) return;
+    if (pendingView) await loadPending(activeSource.id, undefined, false, retained);
+    else if (selectedFolderId)
+      await loadPhotos(activeSource.id, selectedFolderId, photoFilter, undefined, false, retained);
+  };
+
+  const refreshPhotos = async () => {
+    if (busy || !activeSource || (!pendingView && !selectedFolderId)) return;
+    setBusyAction('refresh-photos');
+    try {
+      await refreshPhotoView(photos.filter((photo) => selectedPhotos.has(photo.id)));
+    } catch (error) {
+      announce(errorCopy(error, 'No se pudieron actualizar las fotos.'), 'error');
+    } finally {
+      setBusyAction(null);
     }
   };
 
@@ -815,6 +904,7 @@ function Settings({ sessionConnection }: { sessionConnection: Connection | null 
     });
 
   const openFolder = (folderIdValue: string) => {
+    if (busy) return;
     if (selectedFolderIdRef.current === folderIdValue && !pendingViewRef.current) return;
     photoRequestRef.current?.abort();
     photoRequestRef.current = null;
@@ -829,6 +919,7 @@ function Settings({ sessionConnection }: { sessionConnection: Connection | null 
   };
 
   const handleTreeKeyDown = (event: KeyboardEvent<HTMLElement>, folder: IndexedFolder) => {
+    if (busy) return;
     const tree = event.currentTarget.closest('[role="tree"]');
     if (!tree) return;
     const rows = Array.from(tree.querySelectorAll<HTMLElement>('[data-tree-row="true"]'));
@@ -915,7 +1006,7 @@ function Settings({ sessionConnection }: { sessionConnection: Connection | null 
             type="button"
             className={styles.taskPrimary}
             onClick={reviewPendingPhotos}
-            disabled={loadingArchive || loadingPhotos}
+            disabled={busy || loadingArchive || loadingPhotos}
           >
             Revisar {summary.unclassified.toLocaleString('es-ES')} fotos sin fecha
           </button>
@@ -1361,7 +1452,7 @@ function Settings({ sessionConnection }: { sessionConnection: Connection | null 
                   type="button"
                   className={styles.secondaryButton}
                   onClick={() => void loadPending(activeSource.id)}
-                  disabled={loadingArchive || loadingPhotos}
+                  disabled={busy || loadingArchive || loadingPhotos}
                 >
                   Revisar {summary.unclassified.toLocaleString('es-ES')} sin fecha
                 </button>
@@ -1413,13 +1504,10 @@ function Settings({ sessionConnection }: { sessionConnection: Connection | null 
               </div>
               {summary && summary.unclassified > 0 && (
                 <button
-                  key={folder.id}
-                  disabled={busy}
-                  className={folder.id === selectedFolderId ? styles.currentFolder : ''}
-                  onClick={() => setSelectedFolderId(folder.id)}
-                  style={{
-                    paddingInlineStart: `${12 + Math.max(0, folder.path.length - 1) * 16}px`,
-                  }}
+                  type="button"
+                  className={`${styles.pendingTreeRow} ${pendingView ? styles.currentFolder : ''}`}
+                  onClick={() => void loadPending(activeSource.id)}
+                  disabled={busy || loadingArchive || loadingPhotos}
                 >
                   <svg viewBox="0 0 20 20" aria-hidden="true">
                     <circle cx="10" cy="10" r="7" />
@@ -1447,10 +1535,12 @@ function Settings({ sessionConnection }: { sessionConnection: Connection | null 
                       tabIndex={folder.id === treeTabStopId ? 0 : -1}
                       aria-level={folderRelations.depthById.get(folder.id) ?? 1}
                       aria-selected={current}
+                      aria-disabled={busy}
                       aria-expanded={hasChildren ? !collapsed : undefined}
                       data-tree-row="true"
                       data-folder-id={folder.id}
                       onClick={(event) => {
+                        if (busy) return;
                         const target = event.target;
                         if (
                           hasChildren &&
@@ -1518,6 +1608,7 @@ function Settings({ sessionConnection }: { sessionConnection: Connection | null 
                       type="button"
                       className={styles.secondaryButton}
                       onClick={() => openFolder(selectedFolder.id)}
+                      disabled={busy}
                     >
                       Volver a {selectedFolder.name}
                     </button>
@@ -1626,7 +1717,7 @@ function Settings({ sessionConnection }: { sessionConnection: Connection | null 
                       setLoadingPhotos(true);
                       setPhotoFilter(event.target.value);
                     }}
-                    disabled={loadingArchive || loadingPhotos}
+                    disabled={busy || loadingArchive || loadingPhotos}
                   >
                     <option value="ALL">Todas las fotografías</option>
                     <option value="UNCLASSIFIED">Sin fecha suficiente</option>
@@ -1674,6 +1765,7 @@ function Settings({ sessionConnection }: { sessionConnection: Connection | null 
                             checked={selected}
                             onChange={() => togglePhoto(photo.id)}
                             disabled={
+                              busy ||
                               loadingArchive ||
                               loadingPhotos ||
                               (!selected && selectedPhotos.size >= MANUAL_DATE_BULK_LIMIT)
@@ -1708,6 +1800,7 @@ function Settings({ sessionConnection }: { sessionConnection: Connection | null 
                             type="button"
                             className={styles.photoFolderLink}
                             onClick={() => openFolder(photo.folderId!)}
+                            disabled={busy}
                           >
                             Abrir su carpeta
                           </button>
@@ -1737,50 +1830,45 @@ function Settings({ sessionConnection }: { sessionConnection: Connection | null 
                       onClick={selectVisiblePhotos}
                       disabled={busy || loadingArchive || loadingPhotos}
                     >
-                      <input
-                        type="checkbox"
-                        disabled={busy}
-                        checked={selectedPhotos.has(photo.id)}
-                        onChange={() =>
-                          setSelectedPhotos((current) => {
-                            const next = new Set(current);
-                            if (next.has(photo.id)) next.delete(photo.id);
-                            else next.add(photo.id);
-                            return next;
-                          })
-                        }
-                      />
-                      <img src={mediaUrl(api, photo.thumbnailUrl)} alt="" loading="lazy" />
-                      <span>{photo.fileName}</span>
-                      <small>{photo.effectiveDate.precision}</small>
-                    </label>
-                  ))}
+                      {allVisiblePhotosSelected || selectedPhotos.size >= MANUAL_DATE_BULK_LIMIT
+                        ? 'Cancelar selección'
+                        : 'Seleccionar las visibles'}
+                    </button>
+                    <button
+                      type="button"
+                      className={styles.primaryButton}
+                      onClick={() => setManualEditorOpen(true)}
+                      disabled={busy || loadingArchive || !selectedPhotos.size}
+                    >
+                      Corregir fecha
+                    </button>
+                    <button
+                      type="button"
+                      className={styles.textDangerButton}
+                      onClick={() => setConfirmRemovePhotos(true)}
+                      disabled={busy || loadingArchive || !selectedPhotos.size}
+                    >
+                      Quitar del archivo
+                    </button>
+                  </div>
                 </div>
               )}
-              <div className={styles.photoActions}>
+              <div className={styles.buttonRow}>
                 <button
-                  disabled={busy || !selectedFolderId}
-                  onClick={() => {
-                    if (!selectedFolderId || busy) return;
-                    setBusy(true);
-                    void loadPhotos(
-                      selectedFolderId,
-                      undefined,
-                      false,
-                      photos.filter((photo) => selectedPhotos.has(photo.id)),
-                    )
-                      .catch((error) =>
-                        setNotice(errorCopy(error, 'No se pudieron actualizar las fotos.')),
-                      )
-                      .finally(() => setBusy(false));
-                  }}
+                  type="button"
+                  className={styles.secondaryButton}
+                  disabled={busy || loadingArchive || (!pendingView && !selectedFolderId)}
+                  onClick={() => void refreshPhotos()}
                 >
                   Actualizar fotos
                 </button>
-                <button
-                  className={styles.danger}
-                  onClick={() => void removeSelected()}
-                  disabled={busy || !selectedPhotos.size}
+              </div>
+
+              {confirmRemovePhotos && selectedPhotos.size > 0 && (
+                <div
+                  className={styles.confirmationPanel}
+                  role="group"
+                  aria-labelledby="remove-photos-title"
                 >
                   <div>
                     <h3 id="remove-photos-title">
@@ -1901,17 +1989,25 @@ function Settings({ sessionConnection }: { sessionConnection: Connection | null 
                   type="button"
                   className={styles.loadMoreButton}
                   onClick={() =>
-                    void (pendingView
-                      ? loadPending(activeSource.id, photoCursor, true)
-                      : selectedFolderId
-                        ? loadPhotos(
-                            activeSource.id,
-                            selectedFolderId,
-                            photoFilter,
-                            photoCursor,
-                            true,
-                          )
-                        : Promise.resolve())
+                    void (
+                      pendingView
+                        ? loadPending(activeSource.id, photoCursor, true)
+                        : selectedFolderId
+                          ? loadPhotos(
+                              activeSource.id,
+                              selectedFolderId,
+                              photoFilter,
+                              photoCursor,
+                              true,
+                            )
+                          : Promise.resolve()
+                    ).catch((error) => {
+                      if (!isAbortError(error))
+                        announce(
+                          errorCopy(error, 'No se pudieron cargar más fotos. Reintenta.'),
+                          'error',
+                        );
+                    })
                   }
                   disabled={busy || loadingPhotos}
                 >
