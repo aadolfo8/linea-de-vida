@@ -18,6 +18,7 @@ import { PhotoDateResolver } from './date-resolver';
 import { PrismaService } from './prisma.service';
 import { TakeoutMatcher, TakeoutMetadata, TakeoutMetadataParser } from './takeout';
 import { effectiveDate } from './manual-date.service';
+import { photoDimensions } from './photo-dimensions';
 
 const jobOptions: JobsOptions = {
   attempts: 3,
@@ -282,6 +283,7 @@ export class SyncService {
           'Takeout metadata match was ambiguous.',
           item.id,
         );
+      const dimensions = photoDimensions(item.imageWidth, item.imageHeight);
       const detected = this.dates.resolve({
         driveImageTime: item.imageTime,
         takeoutPhotoTakenTime: match.metadata?.photoTakenTime
@@ -306,6 +308,7 @@ export class SyncService {
           folderId: indexedFolderId,
           fileName: item.name,
           mimeType: item.mimeType,
+          imageMetadata: dimensions ?? existing?.imageMetadata ?? undefined,
           status: PhotoStatus.ACTIVE,
           lastSeenSyncRunId: run.id,
           detectedDate: detected.value,

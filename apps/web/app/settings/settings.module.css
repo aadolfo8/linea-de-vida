@@ -428,6 +428,32 @@
   color: var(--muted);
 }
 
+.inactiveSourceList {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.inactiveSourceList li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+  border-block-end: 1px solid var(--line);
+  padding-block: 12px;
+}
+
+.inactiveSourceList li strong {
+  flex: 1 1 200px;
+}
+
+.inactiveSourceList li > span {
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
 .buttonRow {
   display: flex;
   flex-wrap: wrap;

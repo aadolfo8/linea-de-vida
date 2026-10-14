@@ -42,12 +42,23 @@
   border-top: 1px solid #cbd0c7;
 }
 
-.dialog footer strong {
+.dialog footer .caption {
   min-width: 0;
+  display: grid;
+  gap: 0.2rem;
+}
+
+.dialog footer .caption strong {
   overflow: hidden;
   font-size: 0.9rem;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.dialog footer .caption span {
+  color: #566156;
+  font-size: 0.76rem;
+  font-variant-numeric: tabular-nums;
 }
 
 .dialog button {
@@ -78,9 +89,25 @@
   outline-offset: 3px;
 }
 
-.dialog footer div {
+.dialog footer .controls {
   display: flex;
+  align-items: center;
   gap: 0.5rem;
+}
+
+.download {
+  display: inline-flex;
+  min-height: 44px;
+  align-items: center;
+  padding-inline: 0.75rem;
+  color: inherit;
+  font-size: 0.8rem;
+  text-underline-offset: 0.2em;
+}
+
+.download:focus-visible {
+  outline: 3px solid var(--viewer-accent);
+  outline-offset: 3px;
 }
 
 .dialog svg {

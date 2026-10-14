@@ -74,6 +74,18 @@ describe('media proxy', () => {
     expect(response.body()).toBe('thumbnail-stream');
   });
 
+  it.each(['image/heic', 'image/heif'])(
+    'uses Drive-converted browser thumbnails for %s originals',
+    async (mimeType) => {
+      const { service: proxy, drive } = service(ownerPhoto({ mimeType }));
+      const response = new ResponseMock();
+      await proxy.thumbnail('owner', 'photo-owner', request(), response as any);
+      expect(drive.thumbnailCalls).toBe(1);
+      expect(response.headers.get('Content-Type')).toBe('image/jpeg');
+      expect(response.body()).toBe('thumbnail-stream');
+    },
+  );
+
   it('rejects non-image thumbnail responses before sending headers or bytes', async () => {
     const { service: proxy, drive } = service(ownerPhoto());
     const stream = Readable.from('<html>not an image</html>');
@@ -107,15 +119,16 @@ describe('media proxy', () => {
     expect(drive.contentCalls).toBe(1);
   });
 
-  it('keeps HEIC downloadable but gives its thumbnail an accessible compatibility error', async () => {
+  it('shows a browser thumbnail for HEIC and keeps its original downloadable', async () => {
     const { service: proxy, drive } = service(ownerPhoto({ mimeType: 'image/heic' }));
-    await expect(
-      proxy.thumbnail('owner', 'photo-owner', request(), new ResponseMock() as any),
-    ).rejects.toMatchObject({ status: 415 });
+    const thumbnail = new ResponseMock();
+    await proxy.thumbnail('owner', 'photo-owner', request(), thumbnail as any);
+    expect(thumbnail.headers.get('Content-Type')).toBe('image/jpeg');
+    expect(thumbnail.body()).toBe('thumbnail-stream');
     const response = new ResponseMock();
     await proxy.content('owner', 'photo-owner', request(), response as any);
     expect(response.headers.get('Content-Disposition')).toBe('attachment');
-    expect(drive.thumbnailCalls).toBe(0);
+    expect(drive.thumbnailCalls).toBe(1);
   });
 
   it('maps revoked Drive access and missing photos without requesting media', async () => {

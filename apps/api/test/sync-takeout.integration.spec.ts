@@ -76,12 +76,16 @@ describe('Takeout sync integration', () => {
     expect(created).toHaveLength(2);
     expect(created.find((photo) => photo.driveFileId === 'photo')).toMatchObject({
       detectedSource: 'TAKEOUT',
+      detectedPrecision: 'DAY',
+      effectiveDatePrecision: 'DAY',
       takeoutMatchStatus: 'TAKEOUT_MATCHED',
       gpsLatitude: 40,
     });
     expect(created.find((photo) => photo.driveFileId === 'no-json')).toMatchObject({
       takeoutMatchStatus: 'TAKEOUT_NOT_FOUND',
       detectedSource: 'NONE',
+      detectedPrecision: 'UNKNOWN',
+      effectiveDatePrecision: 'UNKNOWN',
     });
     expect(issues).toContainEqual(
       expect.objectContaining({ code: 'INVALID_TAKEOUT_JSON', driveFileId: 'broken' }),

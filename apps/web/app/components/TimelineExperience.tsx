@@ -9,6 +9,7 @@ import {
   isCurrentTimelineRequest,
   monthLabel,
   parseTimelineRoute,
+  photoAspectRatio,
   shouldStartTimelineRequest,
   timelineHref,
   type TimelinePhoto,
@@ -438,6 +439,7 @@ function MonthGallery({
               key={photo.id}
               photo={photo}
               variation={index}
+              aspectRatio={photoAspectRatio(photo)}
               onOpen={() => onOpen({ photos, index })}
             />
           ))}
@@ -468,22 +470,22 @@ function MonthGallery({
 function PhotoTile({
   photo,
   variation,
+  aspectRatio,
   onOpen,
 }: {
   photo: Photo;
   variation: number;
+  aspectRatio?: number;
   onOpen: () => void;
 }) {
   const [failed, setFailed] = useState(false);
-  const unsupported = /^image\/(heic|heif)$/i.test(photo.mimeType);
   return (
-    <article className={`${styles.photo} ${styles[`photo${variation % 6}`]}`}>
+    <article
+      className={`${styles.photo} ${styles[`photo${variation % 6}`]}`}
+      style={aspectRatio ? { aspectRatio } : undefined}
+    >
       <button onClick={onOpen} aria-label={`Abrir ${photo.fileName}`}>
-        {unsupported ? (
-          <span className={styles.fallback}>
-            HEIC/HEIF se conserva, pero este navegador no puede previsualizarlo.
-          </span>
-        ) : failed ? (
+        {failed ? (
           <span className={styles.fallback}>
             No se pudo cargar la miniatura. Abre para reintentar.
           </span>
