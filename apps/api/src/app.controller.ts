@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   Body,
+  ConflictException,
   Controller,
   Get,
   Delete,
@@ -34,6 +35,8 @@ import {
 } from './manual-date.service';
 import { loadRuntimeConfig } from './production';
 import { FolderDateRuleService } from './folder-date-rule.service';
+import { findOverlappingFolderSource, FolderAncestryUnavailable } from './folder-source-overlap';
+import { readPhotoDimensions } from './photo-dimensions';
 
 @Controller('v1')
 export class AppController {
@@ -93,11 +96,13 @@ export class AppController {
     }
   }
   private compactPhoto(photo: any) {
+    const dimensions = readPhotoDimensions(photo.imageMetadata);
     return {
       id: photo.id,
       fileName: photo.fileName,
       mimeType: photo.mimeType,
       thumbnailUrl: `/v1/photos/${photo.id}/thumbnail`,
+      ...(dimensions ? { dimensions } : {}),
       effectiveDate: {
         value: photo.effectiveDateValue,
         precision: photo.effectiveDatePrecision,
@@ -246,7 +251,7 @@ export class AppController {
           displayName: identity.displayName,
         },
       });
-      await tx.oAuthConnection.upsert({
+      const connection = await tx.oAuthConnection.upsert({
         where: {
           userId_provider_googleAccountId: {
             userId: user.id,
@@ -266,6 +271,14 @@ export class AppController {
           grantedScopes: identity.scopes,
           refreshTokenCiphertext,
         },
+      });
+      await tx.photoSource.updateMany({
+        where: {
+          userId: user.id,
+          oauthConnectionId: connection.id,
+          status: 'DISCONNECTED',
+        },
+        data: { status: 'ACTIVE' },
       });
       return user;
     });
@@ -352,10 +365,12 @@ export class AppController {
         code: 'INVALID_OAUTH_STATE',
         message: 'The Drive authorization state was not accepted.',
       });
-    if (error)
+    if (error) {
+      response.clearCookie('lv_drive_state');
       return response.redirect(
-        `${process.env.WEB_ORIGIN ?? 'http://localhost:3000'}/?oauth=drive-denied`,
+        `${process.env.WEB_ORIGIN ?? 'http://localhost:3000'}/settings?oauth=drive-denied`,
       );
+    }
     const token = await this.oauth.exchange(
       code,
       process.env.GOOGLE_DRIVE_REDIRECT_URI!,
@@ -378,29 +393,37 @@ export class AppController {
         code: 'DRIVE_OFFLINE_ACCESS_REQUIRED',
         message: 'Google did not issue an offline refresh token. Re-authorize with consent.',
       });
-    await this.prisma.oAuthConnection.upsert({
-      where: {
-        userId_provider_googleAccountId: {
+    await this.prisma.$transaction(async (tx) => {
+      const connection = await tx.oAuthConnection.upsert({
+        where: {
+          userId_provider_googleAccountId: {
+            userId,
+            provider: 'google-drive',
+            googleAccountId: token.subject,
+          },
+        },
+        update: {
+          grantedScopes: scopes,
+          refreshTokenCiphertext,
+          status: 'ACTIVE',
+        },
+        create: {
           userId,
           provider: 'google-drive',
           googleAccountId: token.subject,
+          grantedScopes: scopes,
+          refreshTokenCiphertext,
         },
-      },
-      update: {
-        grantedScopes: scopes,
-        refreshTokenCiphertext,
-        status: 'ACTIVE',
-      },
-      create: {
-        userId,
-        provider: 'google-drive',
-        googleAccountId: token.subject,
-        grantedScopes: scopes,
-        refreshTokenCiphertext,
-      },
+      });
+      await tx.photoSource.updateMany({
+        where: { userId, oauthConnectionId: connection.id, status: 'DISCONNECTED' },
+        data: { status: 'ACTIVE' },
+      });
     });
     response.clearCookie('lv_drive_state');
-    response.redirect(process.env.WEB_ORIGIN ?? 'http://localhost:3000');
+    response.redirect(
+      `${process.env.WEB_ORIGIN ?? 'http://localhost:3000'}/settings?oauth=drive-connected`,
+    );
   }
   @UseGuards(SessionGuard)
   @Get('oauth-connections/:id/drive/folders/:folderId/children')
@@ -439,6 +462,31 @@ export class AppController {
       }),
       nextCursor: null,
     };
+  }
+  @UseGuards(SessionGuard, CsrfGuard)
+  @Delete('photo-sources/:id')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  async removeSource(@CurrentUserId() userId: string, @Param('id') sourceId: string) {
+    await this.prisma.$transaction(async (tx) => {
+      const source = await tx.photoSource.findFirst({ where: { id: sourceId, userId } });
+      if (!source)
+        throw new NotFoundException({
+          code: 'SOURCE_NOT_FOUND',
+          message: 'Photo source not found.',
+        });
+      const activeRun = await tx.syncRun.findFirst({
+        where: { photoSourceId: sourceId, status: { in: ['QUEUED', 'RUNNING'] } },
+        select: { id: true },
+      });
+      if (activeRun)
+        throw new ConflictException({
+          code: 'SOURCE_SYNC_ACTIVE',
+          message: 'Wait for the current source review to finish before removing it.',
+        });
+      await tx.photo.deleteMany({ where: { userId, sourceId } });
+      await tx.indexedFolder.deleteMany({ where: { userId, sourceId } });
+      await tx.photoSource.delete({ where: { id: sourceId } });
+    });
   }
   @UseGuards(SessionGuard, CsrfGuard) @Post('photo-sources') async createSource(
     @CurrentUserId() userId: string,
@@ -479,6 +527,35 @@ export class AppController {
         code: 'FOLDER_NOT_FOUND',
         message: 'The selected Drive folder is unavailable.',
       });
+    const existingSources = await this.prisma.photoSource.findMany({
+      where: { userId, oauthConnectionId: connection.id },
+      select: { driveFolderId: true },
+    });
+    if (existingSources.length) {
+      let overlap: string | null;
+      try {
+        overlap = await findOverlappingFolderSource(
+          connection,
+          body.driveFolderId,
+          existingSources.map((source) => source.driveFolderId),
+          this.drive,
+        );
+      } catch (error) {
+        if (!(error instanceof FolderAncestryUnavailable)) throw error;
+        throw new ConflictException({
+          code: 'FOLDER_OVERLAP_UNVERIFIED',
+          message:
+            'Drive folder relationships could not be verified. Check access to your existing folders and try again.',
+        });
+      }
+      if (overlap) {
+        throw new ConflictException({
+          code: 'FOLDER_SOURCE_OVERLAP',
+          message:
+            'This folder contains, or is contained by, another configured source. Use the existing source or choose a separate folder.',
+        });
+      }
+    }
     return this.prisma.photoSource.create({
       data: {
         userId,

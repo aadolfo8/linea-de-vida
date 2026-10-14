@@ -95,10 +95,16 @@ services:
       migrate:
         condition: service_completed_successfully
     healthcheck:
-      test: ['CMD', 'node', '-e', 'process.kill(1, 0)']
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "const fs = require('node:fs'); const { isWorkerHeartbeatHealthy, WORKER_HEALTH_FILE } = require('/app/apps/api/dist/src/worker-health.js'); let heartbeat; try { heartbeat = fs.readFileSync(WORKER_HEALTH_FILE, 'utf8'); } catch { process.exit(1); } process.exit(isWorkerHeartbeatHealthy(heartbeat, Date.now(), 1) ? 0 : 1)",
+        ]
       interval: 10s
       timeout: 5s
-      retries: 10
+      retries: 3
       start_period: 20s
     networks: [app]
 

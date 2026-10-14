@@ -135,17 +135,123 @@ describe('TimelinePhotoViewer effects', () => {
     expect(document.activeElement).toBe(returnTarget);
   });
 
-  it('uses immediate, non-dragging Embla navigation under reduced motion', async () => {
+  it('keeps drag available while removing transition duration under reduced motion', async () => {
     embla.reduceMotion = true;
     await act(async () =>
       root?.render(<TimelinePhotoViewer photos={photos} initialIndex={0} onClose={vi.fn()} />),
     );
 
-    expect(embla.options.at(-1)).toMatchObject({ duration: 0, watchDrag: false });
+    expect(embla.options.at(-1)).toMatchObject({ loop: false, duration: 0, watchDrag: true });
     const next = container.querySelector<HTMLButtonElement>('[aria-label="Foto siguiente"]')!;
     next.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     expect(embla.api.scrollNext).toHaveBeenCalledWith(true);
   });
+
+  it('shows HEIC through its thumbnail and offers the original download', async () => {
+    const heicPhoto = { ...photos[0], mimeType: 'image/heic', fileName: 'Memory.heic' };
+    await act(async () =>
+      root?.render(<TimelinePhotoViewer photos={[heicPhoto]} initialIndex={0} onClose={vi.fn()} />),
+    );
+
+    expect(container.querySelector('img')?.getAttribute('src')).toContain('/thumbnail');
+    expect(container.querySelector<HTMLAnchorElement>('footer a')?.getAttribute('href')).toContain(
+      '/content',
+    );
+    expect(container.textContent).toContain('Descargar original');
+    expect(container.textContent).toContain('1 de enero de 2026');
+  });
+
+  it('opens with previews and fetches the original only when requested', async () => {
+    await act(async () =>
+      root?.render(<TimelinePhotoViewer photos={photos} initialIndex={0} onClose={vi.fn()} />),
+    );
+
+    const images = [...container.querySelectorAll<HTMLImageElement>('img')];
+    expect(images[0]?.getAttribute('src')).toContain('/v1/photos/photo-1/thumbnail');
+    expect(images[1]?.getAttribute('src')).toContain('/v1/photos/photo-2/thumbnail');
+
+    await act(async () => button('Ver original').click());
+    expect(container.querySelector('img')?.getAttribute('src')).toContain(
+      '/v1/photos/photo-1/content',
+    );
+    expect(container.textContent).toContain('Volver a vista previa');
+  });
+
+  it('falls back from a failed original to its thumbnail and offers a bounded retry', async () => {
+    await act(async () =>
+      root?.render(<TimelinePhotoViewer photos={photos} initialIndex={0} onClose={vi.fn()} />),
+    );
+    await act(async () => button('Ver original').click());
+
+    const original = container.querySelector<HTMLImageElement>('img')!;
+    await act(async () => original.dispatchEvent(new Event('error')));
+    expect(container.querySelector('img')?.getAttribute('src')).toContain(
+      '/v1/photos/photo-1/thumbnail',
+    );
+    expect(container.textContent).toContain('Ver original');
+
+    const preview = container.querySelector<HTMLImageElement>('img')!;
+    await act(async () => preview.dispatchEvent(new Event('error')));
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain(
+      'No se pudo cargar la fotografía.',
+    );
+    await act(async () => button('Reintentar miniatura').click());
+    expect(container.querySelector('[role="alert"]')).toBeNull();
+    expect(container.querySelector('[role="status"]')?.textContent).toContain(
+      'Cargando fotografía',
+    );
+  });
+
+  it('does not wrap navigation at the edges of the loaded photos', async () => {
+    await act(async () =>
+      root?.render(
+        <TimelinePhotoViewer photos={[photos[0]!]} initialIndex={0} onClose={vi.fn()} />,
+      ),
+    );
+
+    expect(embla.options.at(-1)).toMatchObject({ loop: false });
+    expect(
+      container.querySelector<HTMLButtonElement>('[aria-label="Foto anterior"]')?.disabled,
+    ).toBe(true);
+    expect(
+      container.querySelector<HTMLButtonElement>('[aria-label="Foto siguiente"]')?.disabled,
+    ).toBe(true);
+    container
+      .querySelector('[role="dialog"]')
+      ?.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
+    expect(embla.api.scrollNext).not.toHaveBeenCalled();
+  });
+
+  it('loads the next gallery page at the end and then advances without wrapping', async () => {
+    const nextPhoto = { ...photos[0], id: 'photo-3', fileName: 'Third photo.jpg' };
+    const loadMore = vi.fn().mockResolvedValue({ items: [nextPhoto], nextCursor: null });
+    await act(async () =>
+      root?.render(
+        <TimelinePhotoViewer
+          photos={photos}
+          initialIndex={1}
+          loadMore={loadMore}
+          onClose={vi.fn()}
+        />,
+      ),
+    );
+
+    await act(async () => button('Cargar siguientes fotografías').click());
+    expect(loadMore).toHaveBeenCalledTimes(1);
+    expect(container.querySelector('[aria-live="polite"]')?.textContent).toContain('2 de 3');
+
+    await act(async () => button('Foto siguiente').click());
+    expect(embla.api.scrollNext).toHaveBeenCalledWith(false);
+  });
+
+  function button(label: string) {
+    const match = [...container.querySelectorAll('button')].find(
+      (element) =>
+        element.textContent?.includes(label) || element.getAttribute('aria-label')?.includes(label),
+    );
+    if (!match) throw new Error(`Button not found: ${label}`);
+    return match;
+  }
 
   it('renders carousel arrows with a 44px minimum target', async () => {
     await act(async () =>

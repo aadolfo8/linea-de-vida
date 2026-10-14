@@ -1,7 +1,12 @@
 import { Readable } from 'node:stream';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const transport = vi.hoisted(() => ({ get: vi.fn(), request: vi.fn(), credentials: vi.fn() }));
+const transport = vi.hoisted(() => ({
+  get: vi.fn(),
+  list: vi.fn(),
+  request: vi.fn(),
+  credentials: vi.fn(),
+}));
 vi.mock('googleapis', () => ({
   google: {
     auth: {
@@ -10,7 +15,7 @@ vi.mock('googleapis', () => ({
         request = transport.request;
       },
     },
-    drive: () => ({ files: { get: transport.get } }),
+    drive: () => ({ files: { get: transport.get, list: transport.list } }),
   },
 }));
 
@@ -48,6 +53,35 @@ describe('Google Drive media transport', () => {
     let body = '';
     for await (const chunk of media.stream) body += chunk;
     expect(body).toBe('small-thumbnail');
+  });
+
+  it('requests and maps image dimensions from Drive metadata', async () => {
+    transport.list.mockResolvedValue({
+      data: {
+        files: [
+          {
+            id: 'photo',
+            name: 'photo.heic',
+            mimeType: 'image/heic',
+            parents: ['folder'],
+            imageMediaMetadata: { width: 4032, height: 3024, time: '2024-01-02T03:04:05Z' },
+          },
+        ],
+      },
+    });
+
+    const page = await new GoogleDriveProvider().listChildren(connection, 'folder');
+
+    expect(transport.list).toHaveBeenCalledWith(
+      expect.objectContaining({
+        fields: expect.stringContaining('imageMediaMetadata(width,height,time)'),
+      }),
+    );
+    expect(page.items[0]).toMatchObject({
+      imageWidth: 4032,
+      imageHeight: 3024,
+      imageTime: '2024-01-02T03:04:05Z',
+    });
   });
 
   it('does not fall back to the original when no thumbnail exists', async () => {

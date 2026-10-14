@@ -3,7 +3,7 @@ import { INestApplication, NotFoundException, ServiceUnavailableException } from
 import { Test } from '@nestjs/testing';
 import cookieParser from 'cookie-parser';
 import request from 'supertest';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AppController } from '../src/app.controller';
 import { CsrfGuard, SessionGuard } from '../src/auth';
 import { DriveAdapter, MemoryDriveProvider } from '../src/drive';
@@ -181,7 +181,11 @@ describe('Phase 1 HTTP contracts', () => {
     },
   };
 
-  afterEach(async () => app?.close());
+  afterEach(async () => {
+    await app?.close();
+    vi.restoreAllMocks();
+    vi.unstubAllEnvs();
+  });
 
   async function createApp(
     userId = 'owner',
@@ -206,6 +210,14 @@ describe('Phase 1 HTTP contracts', () => {
           {
             provide: DriveAdapter,
             useValue: new MemoryDriveProvider({
+              root: [
+                {
+                  id: 'parent',
+                  name: 'Root',
+                  mimeType: 'application/vnd.google-apps.folder',
+                  parents: [],
+                },
+              ],
               parent: [
                 {
                   id: 'folder-a',
@@ -263,6 +275,20 @@ describe('Phase 1 HTTP contracts', () => {
       .post('/v1/photo-sources')
       .send({ oauthConnectionId: 'connection-other', driveFolderId: 'folder-a', name: 'Archive' })
       .expect(404);
+  });
+
+  it('rejects a Drive folder nested under an existing source', async () => {
+    vi.spyOn(prisma.photoSource, 'findMany').mockResolvedValueOnce([
+      { driveFolderId: 'parent' },
+    ] as never);
+    await createApp();
+    await request(app.getHttpServer())
+      .post('/v1/photo-sources')
+      .send({ oauthConnectionId: 'connection-owner', driveFolderId: 'folder-a', name: 'Nested' })
+      .expect(409)
+      .expect(({ body }) => {
+        expect(body.code).toBe('FOLDER_SOURCE_OVERLAP');
+      });
   });
 
   it('exposes bounded batch removal with CSRF enforcement and neutral absent results', async () => {
@@ -526,6 +552,121 @@ describe('Phase 1 HTTP contracts', () => {
       else process.env.TOKEN_ENCRYPTION_KEY = previousEncryptionKey;
     }
   });
+
+  it.each(['login', 'drive'])(
+    'recovers only matching disconnected sources through %s',
+    async (flow) => {
+      vi.stubEnv('GOOGLE_CLIENT_ID', 'test-client-id');
+      vi.stubEnv('GOOGLE_CLIENT_SECRET', 'test-client-secret');
+      vi.stubEnv('TOKEN_ENCRYPTION_KEY', Buffer.alloc(32, 7).toString('base64'));
+      const sources = [
+        {
+          id: 'recover',
+          userId: 'google-user',
+          oauthConnectionId: 'connection-google',
+          status: 'DISCONNECTED',
+        },
+        {
+          id: 'paused',
+          userId: 'google-user',
+          oauthConnectionId: 'connection-google',
+          status: 'PAUSED',
+        },
+        {
+          id: 'other-account',
+          userId: 'google-user',
+          oauthConnectionId: 'other-connection',
+          status: 'DISCONNECTED',
+        },
+        {
+          id: 'other-user',
+          userId: 'other-user',
+          oauthConnectionId: 'connection-google',
+          status: 'DISCONNECTED',
+        },
+      ];
+      const updates = vi
+        .spyOn(prisma.photoSource, 'updateMany')
+        .mockImplementation(async ({ where, data }: any) => {
+          const matching = sources.filter((source) =>
+            Object.entries(where).every(
+              ([key, value]) => source[key as keyof typeof source] === value,
+            ),
+          );
+          for (const source of matching) Object.assign(source, data);
+          return { count: matching.length };
+        });
+      const create = vi.spyOn(prisma.photoSource, 'create');
+      const enqueue = vi.spyOn(sync, 'enqueue');
+      await createApp('google-user', {
+        realOAuthState: true,
+        oauth: {
+          exchange: async () => ({
+            subject: 'google-subject-1',
+            email: 'person@example.test',
+            displayName: 'Person',
+            scopes: [
+              'openid',
+              'email',
+              'profile',
+              'https://www.googleapis.com/auth/drive.readonly',
+            ],
+            refreshToken: 'test-refresh-token',
+          }),
+        },
+      });
+      const client = request.agent(app.getHttpServer());
+      const authorize = async (path: string) => {
+        const response = await client.post(`${path}/authorize`).expect(201);
+        return new URL(response.body.authorizationUrl).searchParams.get('state');
+      };
+      if (flow === 'drive') {
+        const state = await authorize('/v1/auth/google');
+        await client.get(`/v1/auth/google/callback?state=${state}&code=code`).expect(302);
+        sources[0].status = 'DISCONNECTED';
+        updates.mockClear();
+      }
+      const path = flow === 'login' ? '/v1/auth/google' : '/v1/oauth/google/drive';
+      for (let attempt = 0; attempt < 2; attempt++) {
+        const state = await authorize(path);
+        const callback = await client.get(`${path}/callback?state=${state}&code=code`).expect(302);
+        if (flow === 'drive') {
+          const location = new URL(callback.headers.location);
+          expect(location.pathname).toBe('/settings');
+          expect(location.searchParams.get('oauth')).toBe('drive-connected');
+        }
+        expect(sources.map(({ id, status }) => [id, status])).toEqual([
+          ['recover', 'ACTIVE'],
+          ['paused', 'PAUSED'],
+          ['other-account', 'DISCONNECTED'],
+          ['other-user', 'DISCONNECTED'],
+        ]);
+      }
+      expect(updates).toHaveBeenCalledWith({
+        where: {
+          userId: 'google-user',
+          oauthConnectionId: 'connection-google',
+          status: 'DISCONNECTED',
+        },
+        data: { status: 'ACTIVE' },
+      });
+      expect(create).not.toHaveBeenCalled();
+      expect(enqueue).not.toHaveBeenCalled();
+      const state = await authorize(path);
+      updates.mockClear();
+      sources[0].status = 'DISCONNECTED';
+      const denied = await client
+        .get(`${path}/callback?state=${state}&error=access_denied`)
+        .expect(302);
+      if (flow === 'drive') {
+        const location = new URL(denied.headers.location);
+        expect(location.pathname).toBe('/settings');
+        expect(location.searchParams.get('oauth')).toBe('drive-denied');
+      }
+      expect(updates).not.toHaveBeenCalled();
+      expect(sources[0].status).toBe('DISCONNECTED');
+    },
+  );
 
   it.each([
     [
