@@ -84,6 +84,14 @@
   transform: translateY(1px);
 }
 
+.dialog button:disabled,
+.dialog button:disabled:hover {
+  cursor: not-allowed;
+  opacity: 0.42;
+  background: transparent;
+  color: var(--viewer-ink);
+}
+
 .dialog button:focus-visible {
   outline: 3px solid var(--viewer-accent);
   outline-offset: 3px;
@@ -131,6 +139,7 @@
 }
 
 .slide {
+  position: relative;
   min-width: 100%;
   min-height: 0;
   display: grid;
@@ -142,6 +151,66 @@
   max-width: 100%;
   max-height: min(68dvh, 45rem);
   object-fit: contain;
+}
+
+.imageStatus,
+.imageError {
+  position: absolute;
+  inset: auto 1rem 1rem;
+  width: fit-content;
+  max-width: calc(100% - 2rem);
+  margin-inline: auto;
+  border: 1px solid rgb(243 240 232 / 0.28);
+  border-radius: 0.65rem;
+  padding: 0.65rem 0.85rem;
+  background: rgb(21 26 22 / 0.92);
+  color: #f3f0e8;
+  text-align: center;
+}
+
+.imageStatus {
+  font-size: 0.85rem;
+}
+
+.imageError {
+  display: grid;
+  justify-items: center;
+  gap: 0.7rem;
+}
+
+.imageError p {
+  margin: 0;
+  font-size: 0.88rem;
+}
+
+.imageError button {
+  border-color: #b7d43b;
+  color: #f3f0e8;
+}
+
+@media (max-width: 42rem) {
+  .backdrop {
+    padding: 0.5rem;
+  }
+
+  .dialog {
+    max-height: calc(100dvh - 1rem);
+  }
+
+  .dialog header,
+  .dialog footer {
+    min-height: 3.5rem;
+    padding-inline: 0.75rem;
+  }
+
+  .dialog footer {
+    flex-wrap: wrap;
+  }
+
+  .dialog footer .controls {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

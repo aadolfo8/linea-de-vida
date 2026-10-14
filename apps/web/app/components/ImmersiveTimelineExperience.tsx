@@ -80,7 +80,11 @@ export function ImmersiveTimelineExperience() {
   const [visualMonth, setVisualMonth] = useState<string | null>(
     route.unknown ? 'sin-mes' : (route.month?.toString() ?? null),
   );
-  const [viewer, setViewer] = useState<{ photos: TimelinePhoto[]; index: number } | null>(null);
+  const [viewer, setViewer] = useState<{
+    photos: TimelinePhoto[];
+    index: number;
+    loadMore?: () => Promise<TimelinePhotoPage | null>;
+  } | null>(null);
   const resolvedYearSelection = resolveTimelineYearSelection(years, route.year, yearSelection);
   const selectedVisualYear = resolvedYearSelection.visualYear;
   const selectedSettledYear = resolvedYearSelection.settledYear;
@@ -406,6 +410,7 @@ export function ImmersiveTimelineExperience() {
         <TimelinePhotoViewer
           photos={viewer.photos}
           initialIndex={viewer.index}
+          loadMore={viewer.loadMore}
           onClose={() => setViewer(null)}
         />
       )}
@@ -420,7 +425,11 @@ function YearCollage({
 }: {
   summary: TimelineYearSummary | null;
   loading: boolean;
-  onOpen: (viewer: { photos: TimelinePhoto[]; index: number }) => void;
+  onOpen: (viewer: {
+    photos: TimelinePhoto[];
+    index: number;
+    loadMore?: () => Promise<TimelinePhotoPage | null>;
+  }) => void;
 }) {
   if (!summary) return <CollageSkeleton label={loading ? 'Cargando fotografías' : 'Sin resumen'} />;
   if (!summary.previews.length)
@@ -483,7 +492,11 @@ function ImmersiveMonthGallery({
   year: number;
   month: TimelineMonth;
   label: string;
-  onOpen: (viewer: { photos: TimelinePhoto[]; index: number }) => void;
+  onOpen: (viewer: {
+    photos: TimelinePhoto[];
+    index: number;
+    loadMore?: () => Promise<TimelinePhotoPage | null>;
+  }) => void;
 }) {
   const [photos, setPhotos] = useState<TimelinePhoto[]>([]);
   const [cursor, setCursor] = useState<string | null>(null);
@@ -493,6 +506,7 @@ function ImmersiveMonthGallery({
   const loading = useRef(false);
   const request = useRef(0);
   const controller = useRef<AbortController | null>(null);
+  const cursorRef = useRef<string | null>(null);
 
   const load = useCallback(
     async (next?: string | null, reset = false) => {
@@ -500,6 +514,7 @@ function ImmersiveMonthGallery({
         controller.current?.abort();
         request.current += 1;
         loading.current = false;
+        cursorRef.current = null;
       }
       if (
         !shouldStartTimelineRequest({
@@ -509,7 +524,7 @@ function ImmersiveMonthGallery({
           now: Date.now(),
         })
       )
-        return;
+        return null;
       const activeController = new AbortController();
       controller.current = activeController;
       const requestId = ++request.current;
@@ -524,7 +539,7 @@ function ImmersiveMonthGallery({
           `${path}?limit=30${next ? `&cursor=${encodeURIComponent(next)}` : ''}`,
           { signal: activeController.signal },
         );
-        if (!isCurrentTimelineRequest(requestId, request.current)) return;
+        if (!isCurrentTimelineRequest(requestId, request.current)) return null;
         setPhotos((current) =>
           next
             ? [
@@ -533,17 +548,20 @@ function ImmersiveMonthGallery({
               ]
             : page.items,
         );
+        cursorRef.current = page.nextCursor;
         setCursor(page.nextCursor);
         setState('ready');
+        return page;
       } catch (error) {
-        if (activeController.signal.aborted) return;
-        if (!isCurrentTimelineRequest(requestId, request.current)) return;
+        if (activeController.signal.aborted) return null;
+        if (!isCurrentTimelineRequest(requestId, request.current)) return null;
         if (error instanceof ApiError && error.status === 429) {
           const until = Date.now() + (error.retryAfterSeconds ?? 5) * 1000;
           cooldown.current = until;
           setCooldownUntil(until);
         }
         setState('error');
+        return null;
       } finally {
         if (isCurrentTimelineRequest(requestId, request.current)) loading.current = false;
       }
@@ -554,6 +572,7 @@ function ImmersiveMonthGallery({
   useEffect(() => {
     setPhotos([]);
     setCursor(null);
+    cursorRef.current = null;
     setCooldownUntil(0);
     cooldown.current = 0;
     void load(null, true);
@@ -610,7 +629,20 @@ function ImmersiveMonthGallery({
                   variation={index}
                   className={styles.galleryTile}
                   style={{ '--gallery-span': span } as CSSProperties}
-                  onOpen={() => onOpen({ photos, index })}
+                  onOpen={() =>
+                    onOpen({
+                      photos,
+                      index,
+                      ...(cursorRef.current
+                        ? {
+                            loadMore: () => {
+                              const next = cursorRef.current;
+                              return next ? load(next) : Promise.resolve(null);
+                            },
+                          }
+                        : {}),
+                    })
+                  }
                 />
               ))}
             </div>

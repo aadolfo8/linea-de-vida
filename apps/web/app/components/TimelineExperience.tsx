@@ -47,7 +47,11 @@ export function TimelineExperience({ view = 'editorial' }: { view?: TimelineView
   const [yearsError, setYearsError] = useState('');
   const [summaryError, setSummaryError] = useState('');
   const [settling, setSettling] = useState(false);
-  const [viewer, setViewer] = useState<{ photos: Photo[]; index: number } | null>(null);
+  const [viewer, setViewer] = useState<{
+    photos: Photo[];
+    index: number;
+    loadMore?: () => Promise<PhotoPage | null>;
+  } | null>(null);
   const yearsCache = useRef<Years | null>(null);
   const yearsRequest = useRef(0);
   const redirectedToYear = useRef<string | null>(null);
@@ -185,6 +189,7 @@ export function TimelineExperience({ view = 'editorial' }: { view?: TimelineView
         <TimelinePhotoViewer
           photos={viewer.photos}
           initialIndex={viewer.index}
+          loadMore={viewer.loadMore}
           onClose={() => setViewer(null)}
         />
       )}
@@ -275,7 +280,11 @@ function YearOverview({
 }: {
   summary: Summary;
   onSelectMonth: (month: number | 'sin-mes') => void;
-  onOpen: (value: { photos: Photo[]; index: number }) => void;
+  onOpen: (value: {
+    photos: Photo[];
+    index: number;
+    loadMore?: () => Promise<PhotoPage | null>;
+  }) => void;
 }) {
   return (
     <>
@@ -329,7 +338,11 @@ function MonthGallery({
   year: number;
   month: number | 'sin-mes';
   label: string;
-  onOpen: (value: { photos: Photo[]; index: number }) => void;
+  onOpen: (value: {
+    photos: Photo[];
+    index: number;
+    loadMore?: () => Promise<PhotoPage | null>;
+  }) => void;
 }) {
   const [photos, setPhotos] = useState<Photo[]>([]);
   const [cursor, setCursor] = useState<string | null>(null);
@@ -339,12 +352,14 @@ function MonthGallery({
   const loading = useRef(false);
   const request = useRef(0);
   const controller = useRef<AbortController | null>(null);
+  const cursorRef = useRef<string | null>(null);
   const load = useCallback(
     async (next?: string | null, reset = false) => {
       if (reset) {
         controller.current?.abort();
         request.current += 1;
         loading.current = false;
+        cursorRef.current = null;
       }
       if (
         !shouldStartTimelineRequest({
@@ -354,7 +369,7 @@ function MonthGallery({
           now: Date.now(),
         })
       )
-        return;
+        return null;
       const activeController = new AbortController();
       controller.current = activeController;
       const requestId = ++request.current;
@@ -369,7 +384,7 @@ function MonthGallery({
           `${path}?limit=30${next ? `&cursor=${encodeURIComponent(next)}` : ''}`,
           { signal: activeController.signal },
         );
-        if (!isCurrentTimelineRequest(requestId, request.current)) return;
+        if (!isCurrentTimelineRequest(requestId, request.current)) return null;
         setPhotos((current) =>
           next
             ? [
@@ -378,17 +393,20 @@ function MonthGallery({
               ]
             : page.items,
         );
+        cursorRef.current = page.nextCursor;
         setCursor(page.nextCursor);
         setState('ready');
+        return page;
       } catch (error) {
-        if (activeController.signal.aborted) return;
-        if (!isCurrentTimelineRequest(requestId, request.current)) return;
+        if (activeController.signal.aborted) return null;
+        if (!isCurrentTimelineRequest(requestId, request.current)) return null;
         if (error instanceof ApiError && error.status === 429) {
           const until = Date.now() + (error.retryAfterSeconds ?? 5) * 1000;
           cooldown.current = until;
           setCooldownUntil(until);
         }
         setState('error');
+        return null;
       } finally {
         if (isCurrentTimelineRequest(requestId, request.current)) loading.current = false;
       }
@@ -398,6 +416,7 @@ function MonthGallery({
   useEffect(() => {
     setPhotos([]);
     setCursor(null);
+    cursorRef.current = null;
     setCooldownUntil(0);
     cooldown.current = 0;
     setState('loading');
@@ -440,7 +459,20 @@ function MonthGallery({
               photo={photo}
               variation={index}
               aspectRatio={photoAspectRatio(photo)}
-              onOpen={() => onOpen({ photos, index })}
+              onOpen={() =>
+                onOpen({
+                  photos,
+                  index,
+                  ...(cursorRef.current
+                    ? {
+                        loadMore: () => {
+                          const next = cursorRef.current;
+                          return next ? load(next) : Promise.resolve(null);
+                        },
+                      }
+                    : {}),
+                })
+              }
             />
           ))}
         </div>
@@ -549,4 +581,4 @@ function GallerySkeleton() {
   );
 }
 
-export { galleryOriginalIndexes } from './TimelinePhotoViewer';
+export { galleryEagerIndexes } from './TimelinePhotoViewer';
