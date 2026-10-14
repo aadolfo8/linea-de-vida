@@ -1929,6 +1929,7 @@ function Settings({ sessionConnection }: { sessionConnection: Connection | null 
                             }
                             aria-describedby="selection-limit-hint"
                           />
+                          {/* eslint-disable-next-line @next/next/no-img-element -- Private media URLs rely on the browser's session cookies. */}
                           <img
                             src={mediaUrl(api, photo.thumbnailUrl)}
                             alt={`Vista previa de ${photo.fileName}`}

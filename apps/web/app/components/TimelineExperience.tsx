@@ -490,6 +490,7 @@ function PhotoTile({
             No se pudo cargar la miniatura. Abre para reintentar.
           </span>
         ) : (
+          /* eslint-disable-next-line @next/next/no-img-element -- Private media URLs rely on the browser's session cookies. */
           <img
             src={mediaUrl(api, photo.thumbnailUrl)}
             alt={photo.fileName}
