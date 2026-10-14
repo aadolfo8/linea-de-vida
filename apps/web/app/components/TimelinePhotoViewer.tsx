@@ -173,6 +173,7 @@ export function TimelinePhotoViewer({
             {photos.map((photo, photoIndex) => (
               <div className={styles.slide} key={photo.id}>
                 {galleryOriginalIndexes(index, photos.length).has(photoIndex) ? (
+                  /* eslint-disable-next-line @next/next/no-img-element -- Private media URLs rely on the browser's session cookies. */
                   <img
                     src={
                       /^image\/(heic|heif)$/i.test(photo.mimeType)
@@ -189,6 +190,7 @@ export function TimelinePhotoViewer({
                     }}
                   />
                 ) : (
+                  /* eslint-disable-next-line @next/next/no-img-element -- Private media URLs rely on the browser's session cookies. */
                   <img src={mediaUrl(api, photo.thumbnailUrl)} alt="" />
                 )}
               </div>
