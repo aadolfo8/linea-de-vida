@@ -1,4 +1,4 @@
-import { NotFoundException } from '@nestjs/common';
+import { ConflictException, NotFoundException } from '@nestjs/common';
 import { describe, expect, it, vi } from 'vitest';
 import { AppController } from '../src/app.controller';
 import { FolderDateRuleService } from '../src/folder-date-rule.service';
@@ -17,8 +17,10 @@ function controllerFixture() {
           ? { id: 'source', userId: 'owner' }
           : null,
       ),
+      delete: vi.fn(async () => ({ id: 'source' })),
     },
     syncRun: {
+      findFirst: vi.fn(async () => null),
       findMany: vi.fn(async () => [
         { id: 'run-2', photoSourceId: 'source' },
         { id: 'run-1', photoSourceId: 'source' },
@@ -36,6 +38,7 @@ function controllerFixture() {
         { id: 'grandchild', parentId: 'child' },
         { id: 'sibling', parentId: 'root' },
       ]),
+      deleteMany: vi.fn(async () => ({ count: 4 })),
     },
     folderDateRule: {
       upsert: vi.fn(async (args: any) => args.create),
@@ -60,6 +63,7 @@ function controllerFixture() {
         const index = photos.findIndex((photo) => photo.id === where.id);
         if (index >= 0) photos.splice(index, 1);
       }),
+      deleteMany: vi.fn(async () => ({ count: photos.length })),
     },
     photoExclusion: {
       upsert: vi.fn(async (args: any) => exclusions.push(args)),
@@ -81,6 +85,39 @@ function controllerFixture() {
 }
 
 describe('indexed archive management', () => {
+  it('removes only an owned, idle source and its local index', async () => {
+    const fixture = controllerFixture();
+    await expect(fixture.controller.removeSource('owner', 'source')).resolves.toBeUndefined();
+    expect(fixture.prisma.photo.deleteMany).toHaveBeenCalledWith({
+      where: { userId: 'owner', sourceId: 'source' },
+    });
+    expect(fixture.prisma.indexedFolder.deleteMany).toHaveBeenCalledWith({
+      where: { userId: 'owner', sourceId: 'source' },
+    });
+    expect(fixture.prisma.photoSource.delete).toHaveBeenCalledWith({ where: { id: 'source' } });
+    expect(fixture.exclusions).toHaveLength(0);
+  });
+
+  it('does not remove a source while a sync is queued or running', async () => {
+    const fixture = controllerFixture();
+    fixture.prisma.syncRun.findFirst.mockResolvedValueOnce({ id: 'active-run' });
+    await expect(fixture.controller.removeSource('owner', 'source')).rejects.toBeInstanceOf(
+      ConflictException,
+    );
+    expect(fixture.prisma.photo.deleteMany).not.toHaveBeenCalled();
+    expect(fixture.prisma.indexedFolder.deleteMany).not.toHaveBeenCalled();
+    expect(fixture.prisma.photoSource.delete).not.toHaveBeenCalled();
+  });
+
+  it('does not disclose or remove another user’s source', async () => {
+    const fixture = controllerFixture();
+    await expect(fixture.controller.removeSource('other', 'source')).rejects.toBeInstanceOf(
+      NotFoundException,
+    );
+    expect(fixture.prisma.photo.deleteMany).not.toHaveBeenCalled();
+    expect(fixture.prisma.photoSource.delete).not.toHaveBeenCalled();
+  });
+
   it('removes a batch and makes retries safe without disclosing foreign IDs', async () => {
     const f = controllerFixture();
     expect(await f.controller.removePhotos('owner', { photoIds: ['photo-1', 'photo-1'] })).toEqual({
@@ -273,12 +310,16 @@ describe('temporal timeline contracts', () => {
     prisma.$queryRawUnsafe
       .mockResolvedValueOnce([{ month: 7, photoCount: BigInt(2) }])
       .mockResolvedValueOnce([{ photoCount: BigInt(1) }])
-      .mockResolvedValueOnce([{ id: 'preview' }]);
+      .mockResolvedValueOnce([{ id: 'preview', imageMetadata: { width: 3000, height: 2000 } }]);
+    prisma.photo.findMany.mockResolvedValueOnce([
+      { ...record('preview', '2024-07-01'), imageMetadata: { width: 3000, height: 2000 } },
+    ]);
     const summary = await controller.yearSummary('owner', '2024');
     expect(summary.months).toHaveLength(12);
     expect(summary.months[6]).toEqual({ month: 7, photoCount: 2 });
     expect(summary.unknownMonthCount).toBe(1);
     expect(summary.previews[0].thumbnailUrl).toBe('/v1/photos/preview/thumbnail');
+    expect(summary.previews[0].dimensions).toEqual({ width: 3000, height: 2000 });
     expect(JSON.stringify(summary)).not.toContain('drive');
   });
 

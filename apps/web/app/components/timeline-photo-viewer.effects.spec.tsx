@@ -147,6 +147,20 @@ describe('TimelinePhotoViewer effects', () => {
     expect(embla.api.scrollNext).toHaveBeenCalledWith(true);
   });
 
+  it('shows HEIC through its thumbnail and offers the original download', async () => {
+    const heicPhoto = { ...photos[0], mimeType: 'image/heic', fileName: 'Memory.heic' };
+    await act(async () =>
+      root?.render(<TimelinePhotoViewer photos={[heicPhoto]} initialIndex={0} onClose={vi.fn()} />),
+    );
+
+    expect(container.querySelector('img')?.getAttribute('src')).toContain('/thumbnail');
+    expect(container.querySelector<HTMLAnchorElement>('footer a')?.getAttribute('href')).toContain(
+      '/content',
+    );
+    expect(container.textContent).toContain('Descargar original');
+    expect(container.textContent).toContain('1 de enero de 2026');
+  });
+
   it('renders carousel arrows with a 44px minimum target', async () => {
     await act(async () =>
       root?.render(

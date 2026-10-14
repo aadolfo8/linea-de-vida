@@ -5,7 +5,7 @@ import { useReducedMotion } from 'motion/react';
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { api } from '../../lib/api';
 import { mediaUrl } from '../../lib/media';
-import { wrappedFocusIndex, type TimelinePhoto } from './timeline-model';
+import { photoDateLabel, wrappedFocusIndex, type TimelinePhoto } from './timeline-model';
 import styles from './timeline-photo-viewer.module.css';
 
 const focusableSelector =
@@ -111,6 +111,7 @@ export function TimelinePhotoViewer({
 
   const selected = photos[index];
   if (!selected) return null;
+  const isDownloadOnly = /^image\/(heic|heif)$/i.test(selected.mimeType);
 
   const keyDown = (event: KeyboardEvent<HTMLElement>) => {
     if (event.key === 'Tab') {
@@ -173,10 +174,18 @@ export function TimelinePhotoViewer({
               <div className={styles.slide} key={photo.id}>
                 {galleryOriginalIndexes(index, photos.length).has(photoIndex) ? (
                   <img
-                    src={mediaUrl(api, `/v1/photos/${photo.id}/content`)}
+                    src={
+                      /^image\/(heic|heif)$/i.test(photo.mimeType)
+                        ? mediaUrl(api, photo.thumbnailUrl)
+                        : mediaUrl(api, `/v1/photos/${photo.id}/content`)
+                    }
                     alt={photo.fileName}
+                    width={photo.dimensions?.width}
+                    height={photo.dimensions?.height}
                     onError={(event) => {
-                      event.currentTarget.src = mediaUrl(api, photo.thumbnailUrl);
+                      const thumbnail = mediaUrl(api, photo.thumbnailUrl);
+                      if (event.currentTarget.getAttribute('src') !== thumbnail)
+                        event.currentTarget.src = thumbnail;
                     }}
                   />
                 ) : (
@@ -187,8 +196,19 @@ export function TimelinePhotoViewer({
           </div>
         </div>
         <footer>
-          <strong>{selected.fileName}</strong>
-          <div>
+          <div className={styles.caption}>
+            <strong>{selected.fileName}</strong>
+            <span>{photoDateLabel(selected)}</span>
+          </div>
+          <div className={styles.controls}>
+            {isDownloadOnly && (
+              <a
+                className={styles.download}
+                href={mediaUrl(api, `/v1/photos/${selected.id}/content`)}
+              >
+                Descargar original
+              </a>
+            )}
             <button aria-label="Foto anterior" onClick={() => embla?.scrollPrev(jump)}>
               <ArrowIcon direction="left" />
             </button>

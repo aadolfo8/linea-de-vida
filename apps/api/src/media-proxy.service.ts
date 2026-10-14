@@ -86,11 +86,12 @@ export class MediaProxyService {
   async thumbnail(userId: string, photoId: string, request: Request, response: Response) {
     const photo = await this.authorize(userId, photoId);
     const mimeType = normalizeMimeType(photo.mimeType);
-    if (!BROWSER_IMAGE_TYPES.has(mimeType)) {
+    const hasBrowserThumbnail = BROWSER_IMAGE_TYPES.has(mimeType);
+    const hasConvertibleDriveThumbnail = /^image\/(heic|heif)$/i.test(mimeType);
+    if (!hasBrowserThumbnail && !hasConvertibleDriveThumbnail) {
       throw new UnsupportedMediaTypeException({
-        code: 'HEIC_UNSUPPORTED',
-        message:
-          'This photo remains indexed. Download the original to view it in a compatible app.',
+        code: 'UNSUPPORTED_MEDIA',
+        message: 'This indexed file cannot be served as a browser thumbnail.',
       });
     }
     const cached = this.thumbnailCache.get(photo.id);

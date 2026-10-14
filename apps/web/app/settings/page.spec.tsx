@@ -43,6 +43,8 @@ describe('mounted archive removal', () => {
   let photos: ReturnType<typeof page>;
   let load: () => Promise<ReturnType<typeof page>>;
   let remove: () => Promise<unknown>;
+  let sourceRemoved: boolean;
+  let sourceStatus: string;
   const button = (text: string) => {
     const found = [...container.querySelectorAll('button')].find((node) =>
       node.textContent?.includes(text),
@@ -87,9 +89,17 @@ describe('mounted archive removal', () => {
     photos = page(['a', 'b'], 'old-cursor');
     load = async () => photos;
     remove = async () => ({ results: [] });
-    request.mockImplementation(async (path) => {
+    sourceRemoved = false;
+    sourceStatus = 'ACTIVE';
+    request.mockImplementation(async (path, init) => {
       if (path === '/photo-sources')
-        return { items: [{ id: 'source', status: 'ACTIVE', name: 'Archive' }] };
+        return {
+          items: sourceRemoved ? [] : [{ id: 'source', status: sourceStatus, name: 'Archive' }],
+        };
+      if (path === '/photo-sources/source' && init?.method === 'DELETE') {
+        sourceRemoved = true;
+        return undefined;
+      }
       if (path.includes('/indexed-folders?'))
         return {
           items: [
@@ -113,12 +123,15 @@ describe('mounted archive removal', () => {
       if (path.includes('/pending-photos?')) return load();
       if (path.startsWith('/indexed-folders/folder/photos?')) return load();
       if (path === '/photo-removals') return remove();
+      if (path === '/oauth/google/drive/authorize')
+        return { available: false, message: 'Google OAuth no está configurado.' };
       throw new Error(`Unexpected request: ${path}`);
     });
   });
   afterEach(async () => {
     await act(async () => root.unmount());
     container.remove();
+    window.history.replaceState(null, '', '/');
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
     vi.resetAllMocks();
@@ -139,6 +152,41 @@ describe('mounted archive removal', () => {
     expect(navigationLocked).toBe('true');
     expect(checkbox('a')!.checked).toBe(true);
     expect(checkbox('a')!.disabled).toBe(false);
+  });
+
+  it('offers reconnection from Settings and explains when OAuth is unavailable', async () => {
+    await mount();
+    await click(button('Conectar o reconectar Drive'));
+    expect(request).toHaveBeenCalledWith('/oauth/google/drive/authorize', { method: 'POST' });
+    expect(container.textContent).toContain('Google OAuth no está configurado.');
+  });
+
+  it('removes a selected source only after confirmation and states that Drive is untouched', async () => {
+    await mount();
+    await click(button('Quitar esta carpeta del archivo'));
+    expect(container.textContent).toContain('Los archivos originales seguirán intactos en Drive.');
+    await click(button('Quitar carpeta e índice'));
+    expect(request).toHaveBeenCalledWith('/photo-sources/source', { method: 'DELETE' });
+    expect(container.textContent).toContain('Drive no se ha modificado');
+    expect(container.textContent).toContain('Aún no hay una fuente de fotografías');
+  });
+
+  it('allows removing a disconnected source without reconnecting Drive', async () => {
+    sourceStatus = 'DISCONNECTED';
+    await mount();
+    expect(container.textContent).toContain('Fuentes guardadas no activas');
+    await click(button('Quitar del archivo'));
+    expect(container.textContent).toContain('Los archivos originales seguirán intactos en Drive.');
+    await click(button('Quitar carpeta e índice'));
+    expect(request).toHaveBeenCalledWith('/photo-sources/source', { method: 'DELETE' });
+    expect(container.textContent).toContain('Aún no hay una fuente de fotografías');
+  });
+
+  it('announces a successful Drive reconnect and removes the callback query', async () => {
+    window.history.replaceState(null, '', '/settings?oauth=drive-connected');
+    await mount();
+    expect(container.textContent).toContain('Drive se ha conectado.');
+    expect(window.location.search).toBe('');
   });
 
   it('retains only failures, drops the old cursor and ignores a late pre-removal page', async () => {

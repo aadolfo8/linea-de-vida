@@ -63,9 +63,11 @@ export function routeForSession(hasSession: boolean) {
 }
 
 export const settingsEndpoint = {
+  driveAuthorize: '/oauth/google/drive/authorize',
   folderChildren: (connectionId: string, folderId: string) =>
     `/oauth-connections/${connectionId}/drive/folders/${encodeURIComponent(folderId)}/children`,
   createSource: '/photo-sources',
+  removeSource: (sourceId: string) => `/photo-sources/${encodeURIComponent(sourceId)}`,
   sync: (sourceId: string) => `/photo-sources/${sourceId}/sync-runs`,
   run: (runId: string) => `/sync-runs/${runId}`,
   issues: (runId: string) => `/sync-runs/${runId}/issues?limit=30`,

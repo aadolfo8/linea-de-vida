@@ -25,17 +25,6 @@ import {
 } from './timeline-model';
 import styles from './immersive-timeline.module.css';
 
-const summaryCache = new Map<number, TimelineYearSummary>();
-
-function rememberSummary(summary: TimelineYearSummary) {
-  summaryCache.delete(summary.year);
-  summaryCache.set(summary.year, summary);
-  if (summaryCache.size > 6) {
-    const oldest = summaryCache.keys().next().value as number | undefined;
-    if (oldest !== undefined) summaryCache.delete(oldest);
-  }
-}
-
 function useYearSummary(year: number | null) {
   const [data, setData] = useState<TimelineYearSummary | null>(null);
   const [state, setState] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
@@ -49,13 +38,6 @@ function useYearSummary(year: number | null) {
       return;
     }
 
-    const cached = summaryCache.get(year);
-    if (cached) {
-      setData(cached);
-      setState('ready');
-      return;
-    }
-
     const controller = new AbortController();
     setData((current) => (current?.year === year ? current : null));
     setState('loading');
@@ -63,7 +45,6 @@ function useYearSummary(year: number | null) {
       apiJson<TimelineYearSummary>(`/timeline/years/${year}`, { signal: controller.signal })
         .then((summary) => {
           if (!isCurrentTimelineRequest(requestId, request.current)) return;
-          rememberSummary(summary);
           setData(summary);
           setState('ready');
         })
@@ -676,18 +657,13 @@ function ImmersivePhotoTile({
   onOpen: () => void;
 }) {
   const [failed, setFailed] = useState(false);
-  const unsupported = /^image\/(heic|heif)$/i.test(photo.mimeType);
   return (
     <article
       className={`${styles.photo} ${styles[`photo${variation % 6}`]} ${className}`}
       style={style}
     >
       <button onClick={onOpen} aria-label={`Abrir ${photo.fileName}`} data-cursor="photo">
-        {unsupported ? (
-          <span className={styles.photoFallback}>
-            HEIC/HEIF se conserva, pero este navegador no puede previsualizarlo.
-          </span>
-        ) : failed ? (
+        {failed ? (
           <span className={styles.photoFallback}>
             No se pudo cargar la miniatura. Abre para reintentar.
           </span>
