@@ -6,6 +6,9 @@ const mocks = vi.hoisted(() => ({
   disconnect: vi.fn(),
   contextClose: vi.fn(),
   failExhausted: vi.fn(),
+  clearHeartbeat: vi.fn(),
+  writeHeartbeat: vi.fn(),
+  ping: vi.fn(),
   getService: vi.fn(),
   redisCreated: vi.fn(),
   workerCreated: vi.fn(),
@@ -13,6 +16,11 @@ const mocks = vi.hoisted(() => ({
 }));
 vi.mock('../src/app.module', () => ({ AppModule: class {} }));
 vi.mock('../src/production', () => ({ loadRuntimeConfig: vi.fn() }));
+vi.mock('../src/worker-health', () => ({
+  clearWorkerHeartbeat: mocks.clearHeartbeat,
+  WORKER_HEALTH_INTERVAL_MS: 5_000,
+  writeWorkerHeartbeat: mocks.writeHeartbeat,
+}));
 vi.mock('@nestjs/core', () => ({
   NestFactory: {
     createApplicationContext: async () => ({
@@ -29,6 +37,7 @@ vi.mock('bullmq', () => ({
     on(event: string, handler: (...args: any[]) => void) {
       mocks.handlers.set(event, handler);
     }
+    isRunning = () => true;
     close = mocks.close;
     waitUntilReady = mocks.ready;
   },
@@ -39,6 +48,7 @@ vi.mock('ioredis', () => ({
       mocks.redisCreated(...args);
     }
     on = vi.fn();
+    ping = mocks.ping;
     disconnect = mocks.disconnect;
   },
 }));
@@ -54,6 +64,9 @@ describe('worker lifecycle', () => {
     mocks.close.mockResolvedValue(undefined);
     mocks.contextClose.mockResolvedValue(undefined);
     mocks.failExhausted.mockResolvedValue(undefined);
+    mocks.clearHeartbeat.mockResolvedValue(undefined);
+    mocks.writeHeartbeat.mockImplementation(async (ping: () => Promise<unknown>) => ping());
+    mocks.ping.mockResolvedValue('PONG');
     mocks.getService.mockReturnValue({ execute: vi.fn(), failExhausted: mocks.failExhausted });
     vi.spyOn(console, 'info').mockImplementation(() => {});
     vi.spyOn(console, 'error').mockImplementation(() => {});
@@ -75,6 +88,7 @@ describe('worker lifecycle', () => {
     runtime = await bootstrap();
     const stopping = runtime.shutdown();
     expect(runtime.shutdown()).toBe(stopping);
+    await vi.waitFor(() => expect(mocks.close).toHaveBeenCalledTimes(1));
     expect(mocks.disconnect).not.toHaveBeenCalled();
     expect(mocks.contextClose).not.toHaveBeenCalled();
     finish();

@@ -25,17 +25,6 @@ import {
 } from './timeline-model';
 import styles from './immersive-timeline.module.css';
 
-const summaryCache = new Map<number, TimelineYearSummary>();
-
-function rememberSummary(summary: TimelineYearSummary) {
-  summaryCache.delete(summary.year);
-  summaryCache.set(summary.year, summary);
-  if (summaryCache.size > 6) {
-    const oldest = summaryCache.keys().next().value as number | undefined;
-    if (oldest !== undefined) summaryCache.delete(oldest);
-  }
-}
-
 function useYearSummary(year: number | null) {
   const [data, setData] = useState<TimelineYearSummary | null>(null);
   const [state, setState] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
@@ -49,13 +38,6 @@ function useYearSummary(year: number | null) {
       return;
     }
 
-    const cached = summaryCache.get(year);
-    if (cached) {
-      setData(cached);
-      setState('ready');
-      return;
-    }
-
     const controller = new AbortController();
     setData((current) => (current?.year === year ? current : null));
     setState('loading');
@@ -63,7 +45,6 @@ function useYearSummary(year: number | null) {
       apiJson<TimelineYearSummary>(`/timeline/years/${year}`, { signal: controller.signal })
         .then((summary) => {
           if (!isCurrentTimelineRequest(requestId, request.current)) return;
-          rememberSummary(summary);
           setData(summary);
           setState('ready');
         })
@@ -99,7 +80,11 @@ export function ImmersiveTimelineExperience() {
   const [visualMonth, setVisualMonth] = useState<string | null>(
     route.unknown ? 'sin-mes' : (route.month?.toString() ?? null),
   );
-  const [viewer, setViewer] = useState<{ photos: TimelinePhoto[]; index: number } | null>(null);
+  const [viewer, setViewer] = useState<{
+    photos: TimelinePhoto[];
+    index: number;
+    loadMore?: () => Promise<TimelinePhotoPage | null>;
+  } | null>(null);
   const resolvedYearSelection = resolveTimelineYearSelection(years, route.year, yearSelection);
   const selectedVisualYear = resolvedYearSelection.visualYear;
   const selectedSettledYear = resolvedYearSelection.settledYear;
@@ -425,6 +410,7 @@ export function ImmersiveTimelineExperience() {
         <TimelinePhotoViewer
           photos={viewer.photos}
           initialIndex={viewer.index}
+          loadMore={viewer.loadMore}
           onClose={() => setViewer(null)}
         />
       )}
@@ -439,7 +425,11 @@ function YearCollage({
 }: {
   summary: TimelineYearSummary | null;
   loading: boolean;
-  onOpen: (viewer: { photos: TimelinePhoto[]; index: number }) => void;
+  onOpen: (viewer: {
+    photos: TimelinePhoto[];
+    index: number;
+    loadMore?: () => Promise<TimelinePhotoPage | null>;
+  }) => void;
 }) {
   if (!summary) return <CollageSkeleton label={loading ? 'Cargando fotografías' : 'Sin resumen'} />;
   if (!summary.previews.length)
@@ -502,7 +492,11 @@ function ImmersiveMonthGallery({
   year: number;
   month: TimelineMonth;
   label: string;
-  onOpen: (viewer: { photos: TimelinePhoto[]; index: number }) => void;
+  onOpen: (viewer: {
+    photos: TimelinePhoto[];
+    index: number;
+    loadMore?: () => Promise<TimelinePhotoPage | null>;
+  }) => void;
 }) {
   const [photos, setPhotos] = useState<TimelinePhoto[]>([]);
   const [cursor, setCursor] = useState<string | null>(null);
@@ -512,6 +506,7 @@ function ImmersiveMonthGallery({
   const loading = useRef(false);
   const request = useRef(0);
   const controller = useRef<AbortController | null>(null);
+  const cursorRef = useRef<string | null>(null);
 
   const load = useCallback(
     async (next?: string | null, reset = false) => {
@@ -519,6 +514,7 @@ function ImmersiveMonthGallery({
         controller.current?.abort();
         request.current += 1;
         loading.current = false;
+        cursorRef.current = null;
       }
       if (
         !shouldStartTimelineRequest({
@@ -528,7 +524,7 @@ function ImmersiveMonthGallery({
           now: Date.now(),
         })
       )
-        return;
+        return null;
       const activeController = new AbortController();
       controller.current = activeController;
       const requestId = ++request.current;
@@ -543,7 +539,7 @@ function ImmersiveMonthGallery({
           `${path}?limit=30${next ? `&cursor=${encodeURIComponent(next)}` : ''}`,
           { signal: activeController.signal },
         );
-        if (!isCurrentTimelineRequest(requestId, request.current)) return;
+        if (!isCurrentTimelineRequest(requestId, request.current)) return null;
         setPhotos((current) =>
           next
             ? [
@@ -552,17 +548,20 @@ function ImmersiveMonthGallery({
               ]
             : page.items,
         );
+        cursorRef.current = page.nextCursor;
         setCursor(page.nextCursor);
         setState('ready');
+        return page;
       } catch (error) {
-        if (activeController.signal.aborted) return;
-        if (!isCurrentTimelineRequest(requestId, request.current)) return;
+        if (activeController.signal.aborted) return null;
+        if (!isCurrentTimelineRequest(requestId, request.current)) return null;
         if (error instanceof ApiError && error.status === 429) {
           const until = Date.now() + (error.retryAfterSeconds ?? 5) * 1000;
           cooldown.current = until;
           setCooldownUntil(until);
         }
         setState('error');
+        return null;
       } finally {
         if (isCurrentTimelineRequest(requestId, request.current)) loading.current = false;
       }
@@ -573,6 +572,7 @@ function ImmersiveMonthGallery({
   useEffect(() => {
     setPhotos([]);
     setCursor(null);
+    cursorRef.current = null;
     setCooldownUntil(0);
     cooldown.current = 0;
     void load(null, true);
@@ -629,7 +629,20 @@ function ImmersiveMonthGallery({
                   variation={index}
                   className={styles.galleryTile}
                   style={{ '--gallery-span': span } as CSSProperties}
-                  onOpen={() => onOpen({ photos, index })}
+                  onOpen={() =>
+                    onOpen({
+                      photos,
+                      index,
+                      ...(cursorRef.current
+                        ? {
+                            loadMore: () => {
+                              const next = cursorRef.current;
+                              return next ? load(next) : Promise.resolve(null);
+                            },
+                          }
+                        : {}),
+                    })
+                  }
                 />
               ))}
             </div>
@@ -676,22 +689,18 @@ function ImmersivePhotoTile({
   onOpen: () => void;
 }) {
   const [failed, setFailed] = useState(false);
-  const unsupported = /^image\/(heic|heif)$/i.test(photo.mimeType);
   return (
     <article
       className={`${styles.photo} ${styles[`photo${variation % 6}`]} ${className}`}
       style={style}
     >
       <button onClick={onOpen} aria-label={`Abrir ${photo.fileName}`} data-cursor="photo">
-        {unsupported ? (
-          <span className={styles.photoFallback}>
-            HEIC/HEIF se conserva, pero este navegador no puede previsualizarlo.
-          </span>
-        ) : failed ? (
+        {failed ? (
           <span className={styles.photoFallback}>
             No se pudo cargar la miniatura. Abre para reintentar.
           </span>
         ) : (
+          /* eslint-disable-next-line @next/next/no-img-element -- Private media URLs rely on the browser's session cookies. */
           <img
             src={mediaUrl(api, photo.thumbnailUrl)}
             alt={photo.fileName}

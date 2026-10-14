@@ -22,6 +22,7 @@ import {
 } from '../../lib/api';
 import { mediaUrl } from '../../lib/media';
 import { removePhotosFromArchive } from '../../lib/photo-removal';
+import { visibleFolderTree } from './folder-tree';
 import styles from './settings.module.css';
 
 type RuleScope = 'DIRECT_ONLY' | 'FALLBACK_DESCENDANTS' | 'ALL_DESCENDANTS';
@@ -73,7 +74,9 @@ type SyncIssue = { id: string; details?: string; code?: string };
 type Notice = { message: string; tone: 'info' | 'success' | 'warning' | 'error' };
 type BusyAction =
   | 'browse'
+  | 'connect-drive'
   | 'create-source'
+  | 'remove-source'
   | 'sync'
   | 'remove-photos'
   | 'refresh-photos'
@@ -101,6 +104,12 @@ const pluralize = (count: number, singular: string, plural: string) =>
 const errorCopy = (error: unknown, fallback: string) => {
   if (!(error instanceof ApiError)) return fallback;
   const reference = error.requestId ? ` Referencia: ${error.requestId}.` : '';
+  if (error.code === 'FOLDER_SOURCE_OVERLAP')
+    return `Esa carpeta se solapa con otra fuente ya configurada. Elige una carpeta independiente.${reference}`;
+  if (error.code === 'FOLDER_OVERLAP_UNVERIFIED')
+    return `No se pudo comprobar si la carpeta se solapa con otra fuente. Revisa el acceso a tus carpetas e inténtalo de nuevo.${reference}`;
+  if (error.code === 'SOURCE_SYNC_ACTIVE')
+    return `La carpeta se está revisando ahora. Espera a que termine y vuelve a quitarla.${reference}`;
   if (error.status === 429)
     return `Se alcanzó el límite temporal. Reintenta en ${error.retryAfterSeconds ?? 'unos'} segundos.${reference}`;
   return `${fallback}${reference}`;
@@ -225,6 +234,7 @@ function Settings({ sessionConnection }: { sessionConnection: Connection | null 
   const [loadingArchive, setLoadingArchive] = useState(false);
   const [loadingPhotos, setLoadingPhotos] = useState(false);
   const [confirmDisconnect, setConfirmDisconnect] = useState(false);
+  const [confirmRemoveSourceId, setConfirmRemoveSourceId] = useState<string | null>(null);
   const [confirmRemovePhotos, setConfirmRemovePhotos] = useState(false);
   const [confirmRemoveRule, setConfirmRemoveRule] = useState(false);
   const [dateYear, setDateYear] = useState('');
@@ -247,6 +257,9 @@ function Settings({ sessionConnection }: { sessionConnection: Connection | null 
   const activeSources = sources.filter((source) => source.status === 'ACTIVE');
   const activeSource =
     activeSources.find((source) => source.id === selectedSourceId) ?? activeSources[0] ?? null;
+  const inactiveSources = sources.filter((source) => source.status !== 'ACTIVE');
+  const sourcePendingRemoval =
+    sources.find((source) => source.id === confirmRemoveSourceId) ?? null;
   const selectedFolder = folders.find((folder) => folder.id === selectedFolderId) ?? null;
 
   const folderRelations = useMemo(() => {
@@ -276,19 +289,8 @@ function Settings({ sessionConnection }: { sessionConnection: Connection | null 
   }, [folders]);
 
   const visibleFolders = useMemo(() => {
-    const visible: IndexedFolder[] = [];
-    const visited = new Set<string>();
-    const append = (folder: IndexedFolder) => {
-      if (visited.has(folder.id)) return;
-      visited.add(folder.id);
-      visible.push(folder);
-      if (collapsedFolders.has(folder.id)) return;
-      for (const child of folderRelations.childrenById.get(folder.id) ?? []) append(child);
-    };
-    for (const root of folderRelations.roots) append(root);
-    for (const folder of folders) append(folder);
-    return visible;
-  }, [collapsedFolders, folderRelations, folders]);
+    return visibleFolderTree(folders, collapsedFolders);
+  }, [collapsedFolders, folders]);
 
   const scopeFolders = useMemo(() => {
     if (!selectedFolder) return [];
@@ -327,6 +329,26 @@ function Settings({ sessionConnection }: { sessionConnection: Connection | null 
           'error',
         ),
       );
+  };
+
+  const reconnectDrive = async () => {
+    setBusyAction('connect-drive');
+    try {
+      const result = await apiJson<{
+        available: boolean;
+        authorizationUrl?: string;
+        message?: string;
+      }>(settingsEndpoint.driveAuthorize, { method: 'POST' });
+      if (!result.available || !result.authorizationUrl) {
+        announce(result.message ?? 'La conexión con Google Drive no está disponible.', 'warning');
+        return;
+      }
+      window.location.assign(result.authorizationUrl);
+    } catch (error) {
+      announce(errorCopy(error, 'No se pudo iniciar la reconexión con Drive.'), 'error');
+    } finally {
+      setBusyAction(null);
+    }
   };
 
   const loadSources = async () => {
@@ -483,6 +505,21 @@ function Settings({ sessionConnection }: { sessionConnection: Connection | null 
   };
 
   useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const driveResult = params.get('oauth');
+    if (driveResult === 'drive-connected') {
+      announce(
+        'Drive se ha conectado. Las fuentes de la misma cuenta vuelven a estar disponibles.',
+        'success',
+      );
+      window.history.replaceState(null, '', window.location.pathname);
+    } else if (driveResult === 'drive-denied') {
+      announce(
+        'No se concedió acceso a Drive. Tus fuentes siguen guardadas; puedes intentarlo de nuevo.',
+        'warning',
+      );
+      window.history.replaceState(null, '', window.location.pathname);
+    }
     void loadSources().catch((error) =>
       announce(
         errorCopy(error, 'No se pudieron cargar las fuentes configuradas. Reintenta.'),
@@ -515,6 +552,7 @@ function Settings({ sessionConnection }: { sessionConnection: Connection | null 
     setPendingView(false);
     setConfirmRemovePhotos(false);
     setConfirmRemoveRule(false);
+    setConfirmRemoveSourceId(null);
     setConfirmDate(false);
     setManualEditorOpen(false);
     setDateError('');
@@ -687,6 +725,31 @@ function Settings({ sessionConnection }: { sessionConnection: Connection | null 
       );
     } catch (error) {
       announce(errorCopy(error, 'No fue posible guardar esa carpeta. Reintenta.'), 'error');
+    } finally {
+      setBusyAction(null);
+    }
+  };
+
+  const removeSource = async (source: Source) => {
+    if (source.id === activeSource?.id && isSyncActive(run)) return;
+    setBusyAction('remove-source');
+    try {
+      await apiJson<void>(settingsEndpoint.removeSource(source.id), { method: 'DELETE' });
+      setConfirmRemoveSourceId(null);
+      setSources((current) => current.filter((item) => item.id !== source.id));
+      setSelectedSourceId(null);
+      announce(
+        `“${source.name}” y su índice local se han quitado. Drive no se ha modificado; puedes añadir la carpeta de nuevo más adelante.`,
+        'success',
+      );
+      void loadSources().catch(() =>
+        announce(
+          'La carpeta y su índice se quitaron correctamente. No se pudo actualizar la lista de fuentes; recarga Ajustes para verla al día.',
+          'warning',
+        ),
+      );
+    } catch (error) {
+      announce(errorCopy(error, 'No se pudo quitar la carpeta del archivo. Reintenta.'), 'error');
     } finally {
       setBusyAction(null);
     }
@@ -1076,6 +1139,22 @@ function Settings({ sessionConnection }: { sessionConnection: Connection | null 
             Desconectar Drive
           </button>
         )}
+        {!connection && (
+          <div className={styles.buttonRow}>
+            <button
+              type="button"
+              className={styles.primaryButton}
+              onClick={() => void reconnectDrive()}
+              disabled={busy}
+            >
+              {busyAction === 'connect-drive' && (
+                <span className={styles.spinner} aria-hidden="true" />
+              )}
+              Conectar o reconectar Drive
+            </button>
+            <p>Se solicitará acceso de solo lectura. Tus fuentes existentes se conservarán.</p>
+          </div>
+        )}
         {confirmDisconnect && (
           <div className={styles.confirmationPanel} role="group" aria-labelledby="disconnect-title">
             <div>
@@ -1359,8 +1438,86 @@ function Settings({ sessionConnection }: { sessionConnection: Connection | null 
               <summary>Ver identificación de la carpeta</summary>
               <code>{activeSource.driveFolderId}</code>
             </details>
+            <button
+              type="button"
+              className={styles.textButton}
+              onClick={() => setConfirmRemoveSourceId(activeSource.id)}
+              disabled={busy || isSyncActive(run)}
+            >
+              Quitar esta carpeta del archivo
+            </button>
           </div>
         ) : null}
+
+        {inactiveSources.length > 0 && (
+          <section className={styles.connectionSection} aria-labelledby="inactive-sources-title">
+            <div className={styles.sectionHeading}>
+              <div>
+                <h2 id="inactive-sources-title">Fuentes guardadas no activas</h2>
+                <p>
+                  Puedes quitar fuentes pausadas o desconectadas sin reconectar Drive. Sus
+                  originales permanecen en Drive.
+                </p>
+              </div>
+            </div>
+            <ul className={styles.inactiveSourceList}>
+              {inactiveSources.map((source) => (
+                <li key={source.id}>
+                  <strong>{source.name}</strong>
+                  <span>{source.status === 'PAUSED' ? 'Pausada' : 'Desconectada'}</span>
+                  <button
+                    type="button"
+                    className={styles.textButton}
+                    onClick={() => setConfirmRemoveSourceId(source.id)}
+                    disabled={busy}
+                  >
+                    Quitar del archivo
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
+
+        {sourcePendingRemoval && (
+          <div
+            className={styles.confirmationPanel}
+            role="group"
+            aria-labelledby="remove-source-title"
+          >
+            <div>
+              <h3 id="remove-source-title">Quitar “{sourcePendingRemoval.name}” del archivo</h3>
+              <p>
+                Se eliminarán el índice, las fechas organizadas y el historial de revisiones de esta
+                fuente. Los archivos originales seguirán intactos en Drive. Puedes añadir la carpeta
+                de nuevo para crear otro índice.
+              </p>
+            </div>
+            <div className={styles.buttonRow}>
+              <button
+                type="button"
+                className={styles.dangerButton}
+                onClick={() => void removeSource(sourcePendingRemoval)}
+                disabled={
+                  busy || (sourcePendingRemoval.id === activeSource?.id && isSyncActive(run))
+                }
+              >
+                {busyAction === 'remove-source' && (
+                  <span className={styles.spinner} aria-hidden="true" />
+                )}
+                Quitar carpeta e índice
+              </button>
+              <button
+                type="button"
+                className={styles.secondaryButton}
+                onClick={() => setConfirmRemoveSourceId(null)}
+                disabled={busy}
+              >
+                Cancelar
+              </button>
+            </div>
+          </div>
+        )}
 
         {run && (
           <div
@@ -1772,6 +1929,7 @@ function Settings({ sessionConnection }: { sessionConnection: Connection | null 
                             }
                             aria-describedby="selection-limit-hint"
                           />
+                          {/* eslint-disable-next-line @next/next/no-img-element -- Private media URLs rely on the browser's session cookies. */}
                           <img
                             src={mediaUrl(api, photo.thumbnailUrl)}
                             alt={`Vista previa de ${photo.fileName}`}

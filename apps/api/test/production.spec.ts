@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
+  createMemoryRateLimitStore,
   createRateLimitMiddleware,
   createResilientRateLimitStore,
   isAllowedOrigin,
@@ -141,7 +142,7 @@ describe('production controls', () => {
     );
   });
 
-  it('uses a bounded per-process fallback and returns to Redis when it recovers', async () => {
+  it('rate limits with a bounded per-process fallback and returns to Redis when it recovers', async () => {
     const redisError = new Error("Stream isn't writeable and enableOfflineQueue options is false");
     const primary: RateLimitStore = {
       increment: vi
@@ -181,6 +182,43 @@ describe('production controls', () => {
     expect(response.json).toHaveBeenCalledWith(
       expect.objectContaining({ code: 'RATE_LIMITED', requestId: 'fallback-request-id' }),
     );
+  });
+
+  it('bounds fallback identities without evicting active buckets and recovers expired capacity', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-10-14T12:00:00.000Z'));
+    try {
+      const store = createMemoryRateLimitStore(2);
+      await expect(store.increment('first', 5_000)).resolves.toEqual({
+        count: 1,
+        retryAfterMs: 5_000,
+      });
+      await store.increment('second', 5_000);
+      await expect(store.increment('first', 5_000)).resolves.toEqual({
+        count: 2,
+        retryAfterMs: 5_000,
+      });
+      await expect(store.increment('overflow', 5_000)).resolves.toEqual({
+        count: Number.MAX_SAFE_INTEGER,
+        retryAfterMs: 5_000,
+      });
+
+      vi.advanceTimersByTime(5_000);
+      await expect(store.increment('overflow', 5_000)).resolves.toEqual({
+        count: 1,
+        retryAfterMs: 5_000,
+      });
+      await expect(store.increment('first', 5_000)).resolves.toEqual({
+        count: 1,
+        retryAfterMs: 5_000,
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('rejects an invalid in-memory fallback capacity', () => {
+    expect(() => createMemoryRateLimitStore(0)).toThrow('maxBuckets');
   });
 
   it('adds security and request-id headers without logging private request fields', () => {

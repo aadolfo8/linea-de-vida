@@ -129,6 +129,9 @@ export const securityHeadersMiddleware = (_: Request, response: Response, next: 
 };
 
 type Bucket = { count: number; resetAt: number };
+const MAX_MEMORY_RATE_LIMIT_BUCKETS = 10_000;
+const MEMORY_RATE_LIMIT_CLEANUP_INTERVAL_MS = 1_000;
+const MEMORY_RATE_LIMIT_CLEANUP_INTERVAL_OPERATIONS = 128;
 export type RateLimitStore = {
   increment(key: string, windowMs: number): Promise<{ count: number; retryAfterMs: number }>;
 };
@@ -157,20 +160,49 @@ export function classifyTraffic(
 
 class MemoryRateLimitStore implements RateLimitStore {
   private readonly buckets = new Map<string, Bucket>();
+  private lastCleanupAt = 0;
+  private operationsSinceCleanup = 0;
+
+  constructor(private readonly maxBuckets: number) {}
+
   async increment(key: string, windowMs: number) {
     const now = Date.now();
     const bucket = this.buckets.get(key);
-    const current =
-      !bucket || bucket.resetAt <= now ? { count: 0, resetAt: now + windowMs } : bucket;
-    current.count += 1;
-    this.buckets.set(key, current);
-    return { count: current.count, retryAfterMs: Math.max(1, current.resetAt - now) };
+    if (bucket && bucket.resetAt <= now) this.buckets.delete(key);
+
+    this.operationsSinceCleanup += 1;
+    const shouldCleanup =
+      this.operationsSinceCleanup >= MEMORY_RATE_LIMIT_CLEANUP_INTERVAL_OPERATIONS ||
+      now - this.lastCleanupAt >= MEMORY_RATE_LIMIT_CLEANUP_INTERVAL_MS;
+    if (shouldCleanup) {
+      this.operationsSinceCleanup = 0;
+      this.lastCleanupAt = now;
+      for (const [bucketKey, existing] of this.buckets) {
+        if (existing.resetAt <= now) this.buckets.delete(bucketKey);
+      }
+    }
+
+    const current = this.buckets.get(key);
+    if (!current && this.buckets.size >= this.maxBuckets) {
+      // Reject new identities instead of evicting live buckets and letting key churn bypass limits.
+      return { count: Number.MAX_SAFE_INTEGER, retryAfterMs: Math.max(1, windowMs) };
+    }
+    const next = current ?? { count: 0, resetAt: now + windowMs };
+    next.count += 1;
+    this.buckets.set(key, next);
+    return { count: next.count, retryAfterMs: Math.max(1, next.resetAt - now) };
   }
+}
+
+export function createMemoryRateLimitStore(maxBuckets = MAX_MEMORY_RATE_LIMIT_BUCKETS) {
+  if (!Number.isInteger(maxBuckets) || maxBuckets < 1)
+    throw new Error('maxBuckets must be a positive integer.');
+  return new MemoryRateLimitStore(maxBuckets);
 }
 
 export function createResilientRateLimitStore(
   primary: RateLimitStore,
-  fallback: RateLimitStore = new MemoryRateLimitStore(),
+  fallback: RateLimitStore = createMemoryRateLimitStore(),
 ): RateLimitStore {
   return {
     increment: async (key, windowMs) => {
@@ -185,7 +217,7 @@ export function createResilientRateLimitStore(
 
 export function createRateLimitMiddleware(
   config: RuntimeConfig,
-  store: RateLimitStore = new MemoryRateLimitStore(),
+  store: RateLimitStore = createMemoryRateLimitStore(),
 ) {
   return async (request: Request, response: Response, next: NextFunction) => {
     const trafficClass = classifyTraffic(request);

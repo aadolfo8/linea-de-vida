@@ -5,8 +5,38 @@ export type TimelinePhoto = {
   fileName: string;
   mimeType: string;
   thumbnailUrl: string;
+  dimensions?: { width: number; height: number };
   effectiveDate: { value: string | null; precision: Precision };
 };
+
+export function photoAspectRatio(photo: Pick<TimelinePhoto, 'dimensions'>) {
+  const { width, height } = photo.dimensions ?? {};
+  if (!width || !height || !Number.isFinite(width / height)) return undefined;
+  return Math.min(2, Math.max(0.6, width / height));
+}
+
+const photoDateFormats = {
+  YEAR: new Intl.DateTimeFormat('es-ES', { year: 'numeric', timeZone: 'UTC' }),
+  MONTH: new Intl.DateTimeFormat('es-ES', {
+    month: 'long',
+    year: 'numeric',
+    timeZone: 'UTC',
+  }),
+  DAY: new Intl.DateTimeFormat('es-ES', {
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+    timeZone: 'UTC',
+  }),
+};
+
+export function photoDateLabel(photo: Pick<TimelinePhoto, 'effectiveDate'>) {
+  const { value, precision } = photo.effectiveDate;
+  if (!value || precision === 'UNKNOWN') return 'Fecha no disponible';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return 'Fecha no disponible';
+  return photoDateFormats[precision].format(date);
+}
 
 export type TimelineYearItem = { year: number; photoCount: number };
 

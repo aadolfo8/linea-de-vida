@@ -4,6 +4,8 @@ import {
   groupTimelineGalleryRows,
   isCurrentTimelineRequest,
   parseTimelineRoute,
+  photoAspectRatio,
+  photoDateLabel,
   resolveInitialTimelineYear,
   resolveTimelineYearSelection,
   shouldCommitTemporalSelection,
@@ -15,6 +17,28 @@ import {
 } from './timeline-model';
 
 describe('timeline route state', () => {
+  it('uses bounded source-image proportions when available', () => {
+    expect(photoAspectRatio({ dimensions: { width: 3000, height: 2000 } })).toBe(1.5);
+    expect(photoAspectRatio({ dimensions: { width: 10000, height: 1000 } })).toBe(2);
+    expect(photoAspectRatio({ dimensions: { width: 1, height: 100 } })).toBe(0.6);
+    expect(photoAspectRatio({})).toBeUndefined();
+  });
+
+  it('formats only the precision actually assigned to a photo', () => {
+    expect(
+      photoDateLabel({ effectiveDate: { value: '2024-01-02T00:00:00.000Z', precision: 'DAY' } }),
+    ).toBe('2 de enero de 2024');
+    expect(
+      photoDateLabel({ effectiveDate: { value: '2024-01-01T00:00:00.000Z', precision: 'MONTH' } }),
+    ).toBe('enero de 2024');
+    expect(
+      photoDateLabel({ effectiveDate: { value: '2024-01-01T00:00:00.000Z', precision: 'YEAR' } }),
+    ).toBe('2024');
+    expect(photoDateLabel({ effectiveDate: { value: null, precision: 'UNKNOWN' } })).toBe(
+      'Fecha no disponible',
+    );
+  });
+
   it('keeps immersive routes query-free and preserves editorial mode across levels', () => {
     expect(timelineHref({})).toBe('/timeline');
     expect(timelineHref({ year: 2018, month: 5 })).toBe('/timeline/2018/5');

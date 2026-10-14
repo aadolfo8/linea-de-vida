@@ -58,11 +58,11 @@ export class FolderDateParser {
       const iso = /^(\d{4})[-_/](\d{1,2})[-_/](\d{1,2})$/.exec(segment);
       const words = /^(\d{1,2})\s+([a-z]+)\s+(\d{4})$/.exec(segment);
       if (iso && valid(+iso[1], +iso[2], +iso[3]))
-        return { value: makeDate(+iso[1], +iso[2], +iso[3]), precision: 'MONTH', source: 'FOLDER' };
+        return { value: makeDate(+iso[1], +iso[2], +iso[3]), precision: 'DAY', source: 'FOLDER' };
       if (words && months[words[2]] && valid(+words[3], months[words[2]], +words[1]))
         return {
           value: makeDate(+words[3], months[words[2]], +words[1]),
-          precision: 'MONTH',
+          precision: 'DAY',
           source: 'FOLDER',
         };
     }
@@ -105,7 +105,7 @@ export class PhotoDateResolver {
         if (!Number.isNaN(date.valueOf()))
           return {
             value: new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate())),
-            precision: 'MONTH',
+            precision: 'DAY',
             source,
           };
       }

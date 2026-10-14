@@ -5,8 +5,15 @@ import IORedis from 'ioredis';
 import { AppModule } from './app.module';
 import { SyncService } from './sync.service';
 import { loadRuntimeConfig } from './production';
+import {
+  clearWorkerHeartbeat,
+  WORKER_HEALTH_INTERVAL_MS,
+  writeWorkerHeartbeat,
+} from './worker-health';
+
 export async function bootstrap() {
   loadRuntimeConfig();
+  await clearWorkerHeartbeat();
   const context = await NestFactory.createApplicationContext(AppModule);
   const concurrency = Math.min(10, Math.max(5, Number(process.env.SYNC_CONCURRENCY ?? 5)));
   let sync: SyncService;
@@ -30,7 +37,28 @@ export async function bootstrap() {
     throw error;
   }
   const pendingFailures = new Set<Promise<void>>();
-  worker.on('error', () => console.error(JSON.stringify({ event: 'sync_worker_error' })));
+  let workerReady = false;
+  let stopping = false;
+  let heartbeatInFlight = false;
+  let heartbeatTimer: NodeJS.Timeout | undefined;
+  let closing: Promise<void> | undefined;
+  worker.on('ready', () => {
+    workerReady = true;
+  });
+  worker.on('error', () => {
+    console.error(JSON.stringify({ event: 'sync_worker_error' }));
+  });
+  const refreshHeartbeat = async () => {
+    if (!workerReady || !worker.isRunning() || stopping || heartbeatInFlight || !connection) return;
+    heartbeatInFlight = true;
+    try {
+      await writeWorkerHeartbeat(() => connection!.ping());
+    } catch {
+      console.error(JSON.stringify({ event: 'sync_worker_health_ping_failed' }));
+    } finally {
+      heartbeatInFlight = false;
+    }
+  };
   worker.on('failed', (job) => {
     if (job && job.attemptsMade >= (job.opts.attempts ?? 1)) {
       const pending = sync
@@ -42,10 +70,15 @@ export async function bootstrap() {
       pendingFailures.add(pending);
     }
   });
-  let closing: Promise<void> | undefined;
   const shutdown = () => {
+    stopping = true;
+    workerReady = false;
+    if (heartbeatTimer) clearInterval(heartbeatTimer);
     closing ??= (async () => {
       try {
+        await clearWorkerHeartbeat().catch(() =>
+          console.error(JSON.stringify({ event: 'sync_worker_health_cleanup_failed' })),
+        );
         // Keep Prisma and Redis available until active jobs and final status writes finish.
         await worker.close();
       } finally {
@@ -74,6 +107,10 @@ export async function bootstrap() {
   process.on('SIGTERM', onSignal);
   try {
     await worker.waitUntilReady();
+    workerReady = true;
+    await refreshHeartbeat();
+    heartbeatTimer = setInterval(() => void refreshHeartbeat(), WORKER_HEALTH_INTERVAL_MS);
+    heartbeatTimer.unref();
   } catch (error) {
     await shutdown();
     throw error;

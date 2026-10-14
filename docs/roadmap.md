@@ -93,6 +93,6 @@ Las acciones de sincronización se modelan como creación de subrecurso porque p
 
 ## Cierre de Fase 7 y riesgo pendiente
 
-La API valida secretos y HTTPS en producción, limita cuerpo/stream y aplica rate limit por usuario firmado (o IP anónima) dentro de cada proceso. Incluye request IDs, logs estructurados sin contenido privado, health/readiness y métricas autenticadas. La limpieza nunca borra fotos Drive y el procedimiento de backup/restauración está en README.
+La API valida secretos y HTTPS en producción, limita cuerpo/stream y aplica rate limit por usuario firmado (o IP anónima) con contadores atómicos en Redis compartido. Si Redis falla, usa un fallback local acotado a 10 000 identidades por proceso: conserva los límites de identidades activas y rechaza nuevas identidades cuando se llena, en vez de desalojar contadores vigentes. Incluye request IDs, logs estructurados sin contenido privado, health/readiness y métricas autenticadas. La limpieza nunca borra fotos Drive y el procedimiento de backup/restauración está en README.
 
-Antes de lanzamiento aún se requiere una prueba real documentada de Google OAuth con cliente/URIs de producción, una revisión de threat model y una prueba de carga. El rate limit actual es local al proceso: un despliegue con múltiples réplicas necesita un contador compartido (por ejemplo Redis) antes de escalar.
+Antes de lanzamiento aún se requiere una prueba real documentada de Google OAuth con cliente/URIs de producción, una revisión de threat model y una prueba de carga. La consistencia global del rate limit depende de que Redis esté disponible; durante una caída, los fallbacks son locales a cada proceso y no coordinan sus contadores entre réplicas.
