@@ -13,6 +13,7 @@ vi.mock('../../lib/api', async (original) => ({
   apiJson: vi.fn(),
 }));
 import { apiJson } from '../../lib/api';
+import { ArchiveWorkspace } from '../components/ArchiveWorkspace';
 import SettingsPage from './page';
 
 const request = vi.mocked(apiJson);
@@ -62,6 +63,16 @@ describe('mounted archive removal', () => {
     await act(async () => node.click());
   };
   const mount = async () => {
+    await act(async () =>
+      root.render(
+        <ArchiveWorkspace
+          area="organize"
+          sessionConnection={{ id: 'connection', provider: 'google-drive', status: 'ACTIVE' }}
+        />,
+      ),
+    );
+  };
+  const mountSettings = async () => {
     await act(async () => root.render(<SettingsPage />));
   };
   const removeSelected = async () => {
@@ -100,6 +111,8 @@ describe('mounted archive removal', () => {
         sourceRemoved = true;
         return undefined;
       }
+      if (path === '/photo-sources/source/sync-runs' && init?.method === 'POST')
+        return { id: 'run', status: 'QUEUED', createdAt: '2026-10-14T00:00:00.000Z' };
       if (path.includes('/indexed-folders?'))
         return {
           items: [
@@ -155,7 +168,7 @@ describe('mounted archive removal', () => {
   });
 
   it('offers reconnection from Settings and explains when OAuth is unavailable', async () => {
-    await mount();
+    await mountSettings();
     await click(button('Conectar o reconectar Drive'));
     expect(request).toHaveBeenCalledWith('/oauth/google/drive/authorize', { method: 'POST' });
     expect(container.textContent).toContain('Google OAuth no está configurado.');
@@ -171,11 +184,26 @@ describe('mounted archive removal', () => {
     expect(container.textContent).toContain('Aún no hay una fuente de fotografías');
   });
 
+  it('shows a source overview and lets the user start a review from its own row', async () => {
+    await mount();
+    expect(container.textContent).toContain('Fuentes de fotografías');
+    expect(container.textContent).toContain('Disponible');
+    const overviewStats = container.querySelector('li dl')?.textContent;
+    expect(overviewStats).toContain('Fotos incluidas2');
+    expect(overviewStats).toContain('Sin fecha suficiente2');
+
+    await click(button('Buscar cambios'));
+    expect(request).toHaveBeenCalledWith('/photo-sources/source/sync-runs', { method: 'POST' });
+  });
+
   it('allows removing a disconnected source without reconnecting Drive', async () => {
     sourceStatus = 'DISCONNECTED';
     await mount();
-    expect(container.textContent).toContain('Fuentes guardadas no activas');
-    await click(button('Quitar del archivo'));
+    expect(container.textContent).toContain('Drive desconectado');
+    expect(container.querySelector('a[href="/settings#drive-title"]')?.textContent).toContain(
+      'Reconectar Drive',
+    );
+    await click(button('Quitar fuente'));
     expect(container.textContent).toContain('Los archivos originales seguirán intactos en Drive.');
     await click(button('Quitar carpeta e índice'));
     expect(request).toHaveBeenCalledWith('/photo-sources/source', { method: 'DELETE' });
@@ -184,7 +212,7 @@ describe('mounted archive removal', () => {
 
   it('announces a successful Drive reconnect and removes the callback query', async () => {
     window.history.replaceState(null, '', '/settings?oauth=drive-connected');
-    await mount();
+    await mountSettings();
     expect(container.textContent).toContain('Drive se ha conectado.');
     expect(window.location.search).toBe('');
   });

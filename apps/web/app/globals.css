@@ -198,9 +198,14 @@ body:has(.timeline-editorial-shell) a:focus-visible {
     grid-column: 1/-1;
     width: 100%;
     justify-content: space-between;
+    gap: 0;
+    overflow-x: auto;
   }
   .archive-nav nav a {
     min-height: 44px;
+    flex: 0 0 auto;
+    padding-inline: 8px;
+    white-space: nowrap;
   }
   .session-status {
     display: none;
