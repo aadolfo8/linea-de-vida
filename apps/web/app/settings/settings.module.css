@@ -270,9 +270,213 @@
 
 .connectionSection,
 .sourceSetup,
-.archiveSection {
+.archiveSection,
+.privacySection,
+.sourcesOverview {
   border-top: 1px solid var(--line);
   padding-block: 42px 52px;
+}
+
+.privacySection,
+.sourcesOverview {
+  display: grid;
+  gap: 20px;
+}
+
+.privacySection {
+  max-width: 78ch;
+}
+
+.accountEmail {
+  color: var(--muted);
+  font-size: 0.88rem;
+  overflow-wrap: anywhere;
+}
+
+.privacyList {
+  display: grid;
+  gap: 12px;
+  margin: 0 0 4px;
+  padding-inline-start: 1.25rem;
+  color: var(--text);
+  line-height: 1.55;
+}
+
+.privacyList li::marker {
+  color: var(--map-route);
+}
+
+.privacySection > a {
+  width: fit-content;
+  text-decoration: none;
+}
+
+.reconnectNotice {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  border-block: 1px solid var(--danger);
+  padding: 24px 0;
+}
+
+.reconnectNotice > div {
+  max-width: 68ch;
+}
+
+.reconnectNotice p {
+  margin: 0;
+}
+
+.reconnectNotice a {
+  flex: 0 0 auto;
+  text-decoration: none;
+}
+
+.sourceOverviewList {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.sourceOverview {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 20px 32px;
+  border-block-end: 1px solid var(--line);
+  padding: 22px 0;
+}
+
+.sourceOverview:first-child {
+  border-block-start: 1px solid var(--line);
+}
+
+.sourceOverviewMain {
+  min-width: 0;
+}
+
+.sourceOverviewTitle {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px 20px;
+}
+
+.sourceOverviewTitle h3 {
+  margin: 0 0 3px;
+  overflow-wrap: anywhere;
+}
+
+.sourceOverviewTitle p,
+.sourceOverviewHint,
+.sourceOverviewRun {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.84rem;
+}
+
+.sourceLocation {
+  width: fit-content;
+  margin-block-start: 8px;
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.sourceLocation summary {
+  width: fit-content;
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-color: transparent;
+  text-underline-offset: 3px;
+}
+
+.sourceLocation summary:hover {
+  color: var(--map-route);
+  text-decoration-color: currentColor;
+}
+
+.sourceLocation code {
+  display: block;
+  max-width: min(70ch, 75vw);
+  margin-block-start: 6px;
+  overflow-wrap: anywhere;
+  color: var(--text);
+}
+
+.sourceStatus {
+  flex: 0 0 auto;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  padding: 4px 9px;
+  font-size: 0.75rem;
+  font-weight: 650;
+  line-height: 1.3;
+}
+
+.sourceStatus_active {
+  color: #285c45;
+  background: #e1efe6;
+}
+
+.sourceStatus_disconnected {
+  color: #7b352d;
+  background: #f8e9e4;
+}
+
+.sourceStatus_paused {
+  color: #665523;
+  background: #f3edd8;
+}
+
+.sourceOverviewStats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(110px, 1fr));
+  gap: 12px 22px;
+  margin: 18px 0 10px;
+}
+
+.sourceOverviewStats div {
+  min-width: 0;
+}
+
+.sourceOverviewStats dt {
+  color: var(--muted);
+  font-size: 0.77rem;
+}
+
+.sourceOverviewStats dd {
+  margin: 3px 0 0;
+  color: var(--text);
+  font-size: 1.05rem;
+  font-weight: 670;
+  font-variant-numeric: tabular-nums;
+}
+
+.sourceOverviewHint {
+  margin-block: 14px 8px;
+}
+
+.sourceOverviewHint[role='alert'] {
+  color: var(--danger);
+}
+
+.sourceOverviewActions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.sourceOverviewActions a {
+  text-decoration: none;
+}
+
+.settings :is(.sourcesOverview, .privacySection, .reconnectNotice, .archiveSection, #drive-title) {
+  scroll-margin-top: 88px;
 }
 
 .connectionSection,
@@ -1649,7 +1853,9 @@
 
   .connectionSection,
   .sourceSetup,
-  .archiveSection {
+  .archiveSection,
+  .privacySection,
+  .sourcesOverview {
     padding-block: 34px 42px;
   }
 
@@ -1667,6 +1873,15 @@
   .folderDateHeading {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .sourceOverview {
+    grid-template-columns: 1fr;
+    gap: 16px;
+  }
+
+  .sourceOverviewActions {
+    justify-content: flex-start;
   }
 
   .syncAction {
@@ -1768,6 +1983,16 @@
 
   .photoGrid {
     grid-template-columns: 1fr;
+  }
+
+  .sourceOverviewStats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+  }
+
+  .sourceOverviewActions > :is(a, button),
+  .reconnectNotice > a {
+    width: 100%;
   }
 
   .buttonRow > button,
