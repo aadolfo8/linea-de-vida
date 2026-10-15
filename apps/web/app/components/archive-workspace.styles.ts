@@ -20,6 +20,10 @@ export const archiveStyles: Record<string, string> = {
   notice_success: 'border-[#4c8068] bg-map-panel',
   notice_warning: 'border-[#97721d] bg-map-panel [&_span]:bg-[#d49a27]',
   notice_error: 'border-map-danger bg-[#f8e9e4] [&_span]:bg-map-danger',
+  dateResult:
+    'mb-8 flex flex-wrap items-center justify-between gap-6 border-y border-map-route bg-map-panel/70 px-4 py-5 [&_h2]:m-0 [&_h2]:text-xl [&_h2]:font-semibold [&_p]:mb-0 [&_p]:mt-2 [&_p]:max-w-[68ch] [&_p]:text-sm [&_p]:text-map-muted',
+  dateResultEyebrow: 'm-0 mb-2 text-xs font-bold uppercase tracking-[0.08em] text-map-route',
+  dateResultActions: 'flex flex-wrap items-center gap-2',
   connectionSection: 'border-t border-map-line py-10 pb-13',
   sourceSetup: 'border-t border-map-line py-10 pb-13',
   archiveSection: 'border-t border-map-line py-10 pb-13',
@@ -183,6 +187,8 @@ export const archiveStyles: Record<string, string> = {
   dateFields: 'grid grid-cols-[repeat(auto-fit,minmax(9rem,1fr))] gap-3',
   fieldError: 'mt-2 text-sm font-medium text-map-danger',
   folderDateSection: 'my-5 border-y border-map-line py-5',
+  folderReview:
+    'my-4 flex flex-wrap items-center justify-between gap-4 border-y border-map-line bg-map-panel/40 px-4 py-4 [&_strong]:text-sm [&_p]:mb-0 [&_p]:mt-1 [&_p]:max-w-[68ch] [&_p]:text-sm [&_p]:text-map-muted',
   folderDateHeading:
     'mb-4 flex flex-wrap items-start justify-between gap-3 [&_h3]:m-0 [&_h3]:text-lg [&_h3]:font-semibold [&_p]:m-0 [&_p]:text-sm [&_p]:text-map-muted',
   scopeOptions:

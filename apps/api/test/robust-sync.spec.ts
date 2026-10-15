@@ -40,7 +40,37 @@ function fixture(pages: Record<string, { items: DriveItem[]; nextCursor?: string
       findFirst: async () => null,
       create: async () => run,
     },
-    syncIssue: { create: async ({ data }: any) => issues.push(data) },
+    syncIssue: {
+      findFirst: async ({ where }: any) =>
+        issues.find(
+          (issue) =>
+            issue.code === where.code &&
+            issue.driveFileId === where.driveFileId &&
+            issue.driveFolderId === where.driveFolderId &&
+            issue.resolvedAt === null,
+        ) ?? null,
+      create: async ({ data }: any) => {
+        const issue = {
+          ...data,
+          driveFileId: data.driveFileId ?? null,
+          driveFolderId: data.driveFolderId ?? null,
+          id: `issue-${issues.length + 1}`,
+          resolvedAt: null,
+        };
+        issues.push(issue);
+        return issue;
+      },
+      update: async ({ where, data }: any) => {
+        const issue = issues.find((candidate) => candidate.id === where.id)!;
+        Object.assign(issue, data);
+        return issue;
+      },
+      updateMany: async ({ where, data }: any) => {
+        for (const issue of issues)
+          if (issue.resolvedAt === where.resolvedAt && issue.syncRunId !== where.syncRunId.not)
+            Object.assign(issue, data);
+      },
+    },
     photoExclusion: {
       findUnique: async ({ where }: any) => {
         const driveFileId = where.userId_driveFileId.driveFileId;
@@ -573,6 +603,64 @@ describe('robust sync', () => {
     expect(f.run.status).toBe('FAILED');
     expect(f.photos.get('old').status).toBe('ACTIVE');
     expect(f.folders.get('old-folder').status).toBe('ACTIVE');
+  });
+
+  it('does not mark the archive missing when Drive returns 404 for the configured root', async () => {
+    const f = fixture({ 'root:': { items: [] } });
+    f.drive.getFolder = async () => {
+      throw new DriveRequestError(404, 'not found or inaccessible');
+    };
+    f.photos.set('old', {
+      id: 'old',
+      sourceId: 'source',
+      status: 'ACTIVE',
+      lastSeenSyncRunId: 'previous',
+    });
+    f.folders.set('old-folder', {
+      id: 'old-folder',
+      sourceId: 'source',
+      status: 'ACTIVE',
+      lastSeenSyncRunId: 'previous',
+    });
+
+    await f.service.execute('run');
+
+    expect(f.run.status).toBe('FAILED');
+    expect(f.photos.get('old').status).toBe('ACTIVE');
+    expect(f.folders.get('old-folder').status).toBe('ACTIVE');
+  });
+
+  it('keeps an issue pending after a partial scan and resolves it after a later complete scan', async () => {
+    const f = fixture({ 'root:': { items: [sidecar('broken')] } });
+    f.run.source.type = 'GOOGLE_TAKEOUT';
+    let includeBrokenSidecar = true;
+    f.drive.getContentStream = async () => ({
+      stream: Readable.from('{bad'),
+      contentType: 'application/json',
+    });
+    f.drive.listChildren = async () => ({
+      items: includeBrokenSidecar ? [sidecar('broken')] : [image('photo')],
+    });
+
+    await f.service.execute('run');
+
+    expect(f.run.status).toBe('PARTIAL');
+    expect(f.issues).toHaveLength(1);
+    expect(f.issues[0]).toMatchObject({
+      code: 'INVALID_TAKEOUT_JSON',
+      driveFileId: 'broken',
+      resolvedAt: null,
+    });
+
+    includeBrokenSidecar = false;
+    f.run.id = 'run-2';
+    f.run.status = 'QUEUED';
+    f.run.checkpoint = null;
+    f.run.issueCount = 0;
+    await f.service.execute('run-2');
+
+    expect(f.run.status).toBe('SUCCEEDED');
+    expect(f.issues[0].resolvedAt).toBeInstanceOf(Date);
   });
 
   it('updates a moved file by driveFileId and keeps its override', async () => {

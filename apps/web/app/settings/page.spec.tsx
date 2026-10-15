@@ -138,6 +138,8 @@ describe('mounted archive removal', () => {
       if (path.includes('/issues?'))
         return {
           items: [{ id: 'issue-1', code: 'ACCESS_DENIED', details: 'Drive denied access.' }],
+          totalCount: 1,
+          countsByCode: { ACCESS_DENIED: 1 },
           nextCursor: null,
         };
       if (path.endsWith('/classification-summary'))
@@ -161,6 +163,7 @@ describe('mounted archive removal', () => {
           alreadySameCount: 0,
           alreadyDatedCount: 1,
         };
+      if (path === '/photos/manual-date-overrides' && init?.method === 'PUT') return { items: [] };
       if (path === '/indexed-folders/folder/date-override/preview')
         return {
           scopePhotoCount: 2,
@@ -230,6 +233,47 @@ describe('mounted archive removal', () => {
     expect(request).toHaveBeenCalledWith('/photo-sources/source/sync-runs', { method: 'POST' });
   });
 
+  it('offers a safe Drive review from the selected folder context', async () => {
+    await mount();
+    await click(treeRow());
+
+    expect(container.textContent).toContain('Revisaremos toda esta fuente');
+    expect(container.textContent).toContain('nunca se borrarán fotos de Drive');
+    await click(button('Revisar cambios en Drive'));
+
+    expect(request).toHaveBeenCalledWith('/photo-sources/source/sync-runs', { method: 'POST' });
+    expect(container.textContent).toContain('Revisión solicitada');
+  });
+
+  it('restores the selected folder and pending task from a shareable URL', async () => {
+    window.history.replaceState(
+      null,
+      '',
+      '/organizar?source=source&folder=folder&task=pending&classification=UNCLASSIFIED',
+    );
+    await mount();
+
+    expect(request).toHaveBeenCalledWith(
+      '/photo-sources/source/pending-photos?limit=30',
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
+    expect(container.textContent).toContain('Fotos sin fecha suficiente');
+    expect(container.textContent).toContain('Volver a Family');
+    expect(window.location.search).toContain('task=pending');
+    expect(window.location.search).toContain('folder=folder');
+  });
+
+  it('writes task and folder changes to browser history without serializing selections', async () => {
+    await mount();
+    await click(treeRow());
+    await click(button('Fotos por revisar'));
+
+    expect(window.location.search).toContain('source=source');
+    expect(window.location.search).toContain('folder=folder');
+    expect(window.location.search).toContain('task=pending');
+    expect(window.location.search).not.toContain('selected');
+  });
+
   it('opens the review queue and loads photos without a date', async () => {
     await mount();
     await click(button('Fotos por revisar'));
@@ -263,6 +307,30 @@ describe('mounted archive removal', () => {
     expect(button('Aplicar a 1 foto').disabled).toBe(false);
   });
 
+  it('offers the corrected period in the timeline after applying a manual date', async () => {
+    await mount();
+    await click(checkbox('a')!);
+    await click(button('Corregir fecha'));
+
+    const yearSelect = [...container.querySelectorAll('select')].find((node) =>
+      node.querySelector('option[value="2000"]'),
+    )!;
+    await changeSelect(yearSelect, '2000');
+    await click(button('Ver qué cambiará'));
+    await click(button('Aplicar a 1 foto'));
+
+    expect(request).toHaveBeenCalledWith(
+      '/photos/manual-date-overrides',
+      expect.objectContaining({ method: 'PUT' }),
+    );
+    expect(container.textContent).toContain('Corrección guardada');
+    expect(container.textContent).toContain('Fecha actualizada en 1 foto');
+    const timelineLink = [...container.querySelectorAll('a')].find(
+      (link) => link.textContent === 'Ver en la cronología',
+    );
+    expect(timelineLink?.getAttribute('href')).toBe('/timeline/2000');
+  });
+
   it('previews the exact folder-rule impact before saving the rule', async () => {
     await mount();
     await click(treeRow());
@@ -293,10 +361,10 @@ describe('mounted archive removal', () => {
     };
     await mount();
     await click(button('Fotos por revisar'));
-    expect(container.textContent).toContain('Problemas de la última revisión');
+    expect(container.textContent).toContain('Problemas que siguen pendientes');
     expect(container.textContent).toContain('No se pudo acceder a la carpeta configurada.');
     expect(container.textContent).toContain('Comprueba que la carpeta siga disponible en Drive');
-    expect(request).toHaveBeenCalledWith('/sync-runs/run-1/issues?limit=30', {
+    expect(request).toHaveBeenCalledWith('/photo-sources/source/issues?limit=30', {
       signal: expect.any(AbortSignal),
     });
   });

@@ -10,8 +10,10 @@ import {
   resolveTimelineYearSelection,
   shouldCommitTemporalSelection,
   shouldStartTimelineRequest,
+  safeOrganizeReturnHref,
   temporalSelectionIndex,
   timelineHref,
+  timelineHrefWithReturn,
   wrappedFocusIndex,
   type TimelineYearsPage,
 } from './timeline-model';
@@ -43,6 +45,18 @@ describe('timeline route state', () => {
     expect(timelineHref({})).toBe('/timeline');
     expect(timelineHref({ year: 2018, month: 5 })).toBe('/timeline/2018/5');
     expect(timelineHref({ year: 2018, month: 'sin-mes' })).toBe('/timeline/2018/sin-mes');
+  });
+
+  it('carries a validated Organizar return destination through temporal routes', () => {
+    const returnTo = '/organizar?source=s1&folder=f2&task=dates&restoreScroll=640#photos-workspace';
+    expect(timelineHrefWithReturn('/timeline/1987/7', returnTo)).toBe(
+      `/timeline/1987/7?returnTo=${encodeURIComponent(returnTo)}`,
+    );
+    expect(safeOrganizeReturnHref(returnTo, 'https://example.test')).toBe(returnTo);
+    expect(safeOrganizeReturnHref('https://attacker.test/organizar', 'https://example.test')).toBe(
+      null,
+    );
+    expect(safeOrganizeReturnHref('/settings', 'https://example.test')).toBe(null);
   });
 
   it('marks invalid dynamic month paths while retaining a valid year for correction', () => {

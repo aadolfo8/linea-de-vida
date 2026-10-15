@@ -19,6 +19,7 @@ import {
   shouldCommitTemporalSelection,
   shouldStartTimelineRequest,
   timelineHref,
+  timelineHrefWithReturn,
   type TimelineMonth,
   type TimelinePhoto,
   type TimelinePhotoPage,
@@ -170,7 +171,13 @@ function parseMonthKey(key: string): TimelineMonth {
   return key === 'sin-mes' ? 'sin-mes' : Number(key);
 }
 
-export function ImmersiveTimelineExperience() {
+export function ImmersiveTimelineExperience({
+  organizeReturnTo = null,
+  organizeReturnLabel = null,
+}: {
+  organizeReturnTo?: string | null;
+  organizeReturnLabel?: string | null;
+}) {
   const pathname = usePathname();
   useTimelinePosition(`immersive:${pathname}`);
   const router = useRouter();
@@ -216,9 +223,12 @@ export function ImmersiveTimelineExperience() {
   useEffect(() => {
     if (!years?.items.length || !route.year) return;
     if (!years.items.some((item) => item.year === route.year)) {
-      router.replace('/timeline', { scroll: false });
+      router.replace(
+        timelineHrefWithReturn('/timeline', organizeReturnTo, organizeReturnLabel),
+        { scroll: false },
+      );
     }
-  }, [route.year, router, years]);
+  }, [organizeReturnLabel, organizeReturnTo, route.year, router, years]);
 
   const { data: loadedSummary, state: summaryState } = useYearSummary(selectedSettledYear);
   const summary = loadedSummary?.year === selectedSettledYear ? loadedSummary : null;
@@ -287,10 +297,13 @@ export function ImmersiveTimelineExperience() {
         settledYear: year,
       }));
       if (route.year && shouldCommitTemporalSelection(route.year, year)) {
-        router.push(timelineHref({ year }), { scroll: false });
+        router.push(
+          timelineHrefWithReturn(timelineHref({ year }), organizeReturnTo, organizeReturnLabel),
+          { scroll: false },
+        );
       }
     },
-    [route.year, router, years],
+    [organizeReturnLabel, organizeReturnTo, route.year, router, years],
   );
 
   const settleMonth = useCallback(
@@ -298,11 +311,16 @@ export function ImmersiveTimelineExperience() {
       if (!route.year) return;
       const committed = route.unknown ? 'sin-mes' : (route.month?.toString() ?? null);
       if (!shouldCommitTemporalSelection(committed, key)) return;
-      router.push(timelineHref({ year: route.year, month: parseMonthKey(key) }), {
-        scroll: false,
-      });
+      router.push(
+        timelineHrefWithReturn(
+          timelineHref({ year: route.year, month: parseMonthKey(key) }),
+          organizeReturnTo,
+          organizeReturnLabel,
+        ),
+        { scroll: false },
+      );
     },
-    [route.month, route.unknown, route.year, router],
+    [organizeReturnLabel, organizeReturnTo, route.month, route.unknown, route.year, router],
   );
 
   const selectedMonthLabel = route.unknown
@@ -334,9 +352,23 @@ export function ImmersiveTimelineExperience() {
         years={years?.items ?? []}
         year={selectedSettledYear}
         month={route.unknown ? 'sin-mes' : route.month}
-        onYear={(year) => router.push(timelineHref({ year }), { scroll: false })}
+        organizeReturnTo={organizeReturnTo}
+        organizeReturnLabel={organizeReturnLabel}
+        onYear={(year) =>
+          router.push(
+            timelineHrefWithReturn(timelineHref({ year }), organizeReturnTo, organizeReturnLabel),
+            { scroll: false },
+          )
+        }
         onMonth={(month) =>
-          router.push(timelineHref({ year: selectedSettledYear, month }), { scroll: false })
+          router.push(
+            timelineHrefWithReturn(
+              timelineHref({ year: selectedSettledYear, month }),
+              organizeReturnTo,
+              organizeReturnLabel,
+            ),
+            { scroll: false },
+          )
         }
       />
       <a className={styles.skipLink} href="#timeline-focus">
@@ -444,9 +476,14 @@ export function ImmersiveTimelineExperience() {
                       <button
                         className={styles.enterYear}
                         onClick={() =>
-                          router.push(timelineHref({ year: selectedSettledYear }), {
-                            scroll: false,
-                          })
+                          router.push(
+                            timelineHrefWithReturn(
+                              timelineHref({ year: selectedSettledYear }),
+                              organizeReturnTo,
+                              organizeReturnLabel,
+                            ),
+                            { scroll: false },
+                          )
                         }
                       >
                         Entrar en {selectedSettledYear}
@@ -478,7 +515,16 @@ export function ImmersiveTimelineExperience() {
               {isMonthRoute && (
                 <button
                   className={styles.backToYear}
-                  onClick={() => router.push(timelineHref({ year: route.year }), { scroll: false })}
+                  onClick={() =>
+                    router.push(
+                      timelineHrefWithReturn(
+                        timelineHref({ year: route.year }),
+                        organizeReturnTo,
+                        organizeReturnLabel,
+                      ),
+                      { scroll: false },
+                    )
+                  }
                 >
                   Volver a {route.year}
                 </button>
