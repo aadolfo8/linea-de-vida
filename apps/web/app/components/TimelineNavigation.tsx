@@ -5,37 +5,36 @@ import {
   monthLabel,
   timelineHref,
   type TimelineMonth,
-  type TimelineView,
   type TimelineYearItem,
 } from './timeline-model';
-import styles from './timeline-navigation.module.css';
 
 export function TimelineNavigation({
   years,
   year,
   month,
-  view = 'immersive',
   onYear,
   onMonth,
 }: {
   years: TimelineYearItem[];
   year: number | null;
   month: TimelineMonth | null;
-  view?: TimelineView;
   onYear: (year: number) => void;
   onMonth: (month: TimelineMonth) => void;
 }) {
   return (
-    <nav className={styles.navigation} aria-label="Navegación temporal directa">
-      <div className={styles.context}>
-        <Link href={timelineHref({ view })} scroll={false}>
+    <nav
+      className="sticky top-0 z-20 flex flex-wrap items-center justify-between gap-x-8 gap-y-3 border-b border-map-line bg-map-paper px-[max(1rem,4vw)] py-3 text-map-ink max-[600px]:gap-y-1"
+      aria-label="Navegación temporal directa"
+    >
+      <div className="flex flex-wrap items-center gap-3 tabular-nums max-[600px]:w-full">
+        <Link href={timelineHref()} scroll={false}>
           Cronología
         </Link>
         {year && (
           <>
             <span aria-hidden="true">/</span>
             <Link
-              href={timelineHref({ year, view })}
+              href={timelineHref({ year })}
               scroll={false}
               aria-label={`Volver a ${year}`}
             >
@@ -50,10 +49,11 @@ export function TimelineNavigation({
           </>
         )}
       </div>
-      <div className={styles.controls}>
-        <label>
+      <div className="flex flex-wrap items-center gap-3 text-sm max-[600px]:gap-x-3 max-[600px]:gap-y-2">
+        <label className="flex items-center gap-3 max-[600px]:gap-1.5">
           Año
           <select
+            className="min-h-11 max-w-full rounded-md border border-map-line bg-map-surface px-3 py-2 pr-7 text-map-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-map-route"
             value={year ?? ''}
             disabled={!years.length}
             onChange={(event) => onYear(Number(event.target.value))}
@@ -69,9 +69,10 @@ export function TimelineNavigation({
           </select>
         </label>
         {year && (
-          <label>
+          <label className="flex items-center gap-3 max-[600px]:gap-1.5">
             Mes
             <select
+              className="min-h-11 max-w-full rounded-md border border-map-line bg-map-surface px-3 py-2 pr-7 text-map-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-map-route"
               value={month ?? ''}
               onChange={(event) =>
                 onMonth(event.target.value === 'sin-mes' ? 'sin-mes' : Number(event.target.value))
@@ -89,7 +90,10 @@ export function TimelineNavigation({
             </select>
           </label>
         )}
-        <Link className={styles.undated} href="/organizar?filter=undated#photos-workspace">
+        <Link
+          className="inline-flex min-h-11 items-center text-map-ink underline-offset-4 hover:text-map-route"
+          href="/organizar?filter=undated#photos-workspace"
+        >
           Fotografías sin fecha
         </Link>
       </div>

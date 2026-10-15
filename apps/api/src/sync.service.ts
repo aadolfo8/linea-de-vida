@@ -271,7 +271,15 @@ export class SyncService {
       const excluded = await this.prisma.photoExclusion.findUnique({
         where: { userId_driveFileId: { userId: run.source.userId, driveFileId: item.id } },
       });
-      if (excluded) return false;
+      if (excluded && !excluded.restoredAt) return false;
+      const restoredOverride =
+        excluded?.manualDateValue && excluded.manualDatePrecision
+          ? {
+              dateValue: excluded.manualDateValue,
+              precision: excluded.manualDatePrecision,
+              reason: excluded.manualDateReason,
+            }
+          : null;
       const match =
         run.source.type === 'GOOGLE_TAKEOUT'
           ? this.takeoutMatcher.match(item.name, candidates)
@@ -301,7 +309,7 @@ export class SyncService {
           detectedPrecision: detected.precision as DatePrecision,
           detectedSource: detected.source as DateSource,
           folderRule,
-          override: existing?.override,
+          override: existing?.override ?? restoredOverride,
         });
         const data = {
           sourceId: run.source.id,
@@ -319,7 +327,8 @@ export class SyncService {
           gpsLatitude: match.metadata?.location?.latitude ?? null,
           gpsLongitude: match.metadata?.location?.longitude ?? null,
         };
-        if (existing)
+        let indexedPhotoId: string;
+        if (existing) {
           await tx.photo.update({
             where: { id: existing.id },
             data: {
@@ -329,8 +338,9 @@ export class SyncService {
               effectiveDateSource: effective.origin as DateSource,
             },
           });
-        else
-          await tx.photo.create({
+          indexedPhotoId = existing.id;
+        } else {
+          const created = await tx.photo.create({
             data: {
               userId: run.source.userId,
               driveFileId: item.id,
@@ -339,6 +349,18 @@ export class SyncService {
               effectiveDatePrecision: effective.precision as DatePrecision,
               effectiveDateSource: effective.origin as DateSource,
             },
+          });
+          indexedPhotoId = created.id;
+        }
+        if (restoredOverride && !existing?.override)
+          await tx.manualDateOverride.upsert({
+            where: { photoId: indexedPhotoId },
+            create: { photoId: indexedPhotoId, ...restoredOverride },
+            update: restoredOverride,
+          });
+        if (excluded?.restoredAt)
+          await tx.photoExclusion.deleteMany({
+            where: { id: excluded.id, userId: run.source.userId },
           });
       });
       counts.indexed++;
