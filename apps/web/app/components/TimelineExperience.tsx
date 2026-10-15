@@ -5,7 +5,10 @@ import { usePathname, useRouter } from 'next/navigation';
 import { api, ApiError, apiJson } from '../../lib/api';
 import { mediaUrl } from '../../lib/media';
 import { TimelinePhotoViewer } from './TimelinePhotoViewer';
+import { TimelineNavigation } from './TimelineNavigation';
+import { useTimelinePosition } from './useTimelinePosition';
 import {
+  collectTimelineYears,
   isCurrentTimelineRequest,
   monthLabel,
   parseTimelineRoute,
@@ -40,6 +43,7 @@ export function routeFrom(pathname: string) {
 
 export function TimelineExperience({ view = 'editorial' }: { view?: TimelineView }) {
   const pathname = usePathname();
+  useTimelinePosition(`editorial:${pathname}`);
   const router = useRouter();
   const route = routeFrom(pathname);
   const [years, setYears] = useState<Years | null>(null);
@@ -63,7 +67,11 @@ export function TimelineExperience({ view = 'editorial' }: { view?: TimelineView
     const controller = new AbortController();
     const requestId = ++yearsRequest.current;
     setYearsError('');
-    apiJson<Years>('/timeline/years', { signal: controller.signal })
+    collectTimelineYears((cursor) =>
+      apiJson<Years>(`/timeline/years${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ''}`, {
+        signal: controller.signal,
+      }),
+    )
       .then((data) => {
         if (!isCurrentTimelineRequest(requestId, yearsRequest.current)) return;
         yearsCache.current = data;
@@ -137,16 +145,21 @@ export function TimelineExperience({ view = 'editorial' }: { view?: TimelineView
       : null;
   return (
     <main className={styles.experience}>
+      <TimelineNavigation
+        years={years?.items ?? []}
+        year={selectedYear}
+        month={route.unknown ? 'sin-mes' : route.month}
+        view={view}
+        onYear={selectYear}
+        onMonth={selectMonth}
+      />
       <a className={styles.skipLink} href="#timeline-content">
         Saltar al contenido temporal
       </a>
       <header className={styles.intro}>
         <div>
           <h1>La vida se vuelve a mirar por partes.</h1>
-          <p>
-            Elige un año, recorre sus meses y abre las fotografías. La precisión original siempre se
-            conserva.
-          </p>
+          <p>Elige un año y vuelve a sus recuerdos.</p>
         </div>
         <p className={styles.context} aria-live="polite">
           {selectedMonthLabel
@@ -444,11 +457,7 @@ function MonthGallery({
         <h2 id="month-title">
           {label} de {year}
         </h2>
-        <p>
-          {month === 'sin-mes'
-            ? 'Fotografías con precisión de año: no se les asigna un mes.'
-            : 'Fotos con precisión de mes o día, ordenadas sin mostrar días.'}
-        </p>
+        {month === 'sin-mes' && <p>Conocemos el año, pero no el mes.</p>}
       </header>
       {state === 'loading' && !photos.length ? <GallerySkeleton /> : null}
       {photos.length ? (
@@ -546,8 +555,8 @@ function EmptyArchive() {
   return (
     <section className={styles.empty}>
       <h2>Tu archivo todavía no tiene fechas disponibles.</h2>
-      <p>Selecciona una fuente y ejecuta una sincronización desde Ajustes.</p>
-      <a href="/settings">Ir a Ajustes</a>
+      <p>Añade una carpeta o revisa las fotografías que todavía no tienen fecha.</p>
+      <a href="/organizar">Ir a Organizar</a>
     </section>
   );
 }

@@ -120,7 +120,7 @@ export function TimelinePhotoViewer({
         if (ariaHidden === null) element.removeAttribute('aria-hidden');
         else element.setAttribute('aria-hidden', ariaHidden);
       });
-      if (previous?.isConnected) previous.focus();
+      if (previous?.isConnected) previous.focus({ preventScroll: true });
     };
   }, []);
 

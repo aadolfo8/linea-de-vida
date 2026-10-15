@@ -2,15 +2,19 @@
   min-height: 100dvh;
 }
 
+.shell :global(.archive-nav) {
+  position: relative;
+}
+
 .shell :is(a, button) {
   min-width: 44px;
   min-height: 44px;
 }
 
 .modeBar {
-  position: sticky;
+  position: relative;
   z-index: 19;
-  top: 4.5rem;
+  top: auto;
   min-height: 3.25rem;
   display: flex;
   justify-content: flex-end;
@@ -18,9 +22,8 @@
   gap: 0.8rem;
   padding: 0.45rem max(1rem, 5vw);
   border-bottom: 1px solid var(--map-line);
-  background: rgb(241 239 232 / 0.96);
+  background: var(--map-paper);
   color: var(--map-muted);
-  backdrop-filter: blur(0.75rem);
 }
 
 .shell[data-mode='editorial'] .modeBar {
