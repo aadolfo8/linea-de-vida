@@ -136,7 +136,11 @@ describe('Timeline shell targets', () => {
       expect(navigation.router.replace).not.toHaveBeenCalled();
 
       await act(async () => exit.click());
-      expect(document.activeElement).toBe(container.querySelector('button'));
+      expect(document.activeElement).toBe(
+        [...container.querySelectorAll('button')].find(
+          (button) => button.textContent === 'Concentrar vista',
+        ),
+      );
       expect(container.querySelector('.archive-nav')).not.toBeNull();
       expect(container.querySelector<HTMLAnchorElement>('a[aria-current="page"]')?.href).toContain(
         '/timeline',

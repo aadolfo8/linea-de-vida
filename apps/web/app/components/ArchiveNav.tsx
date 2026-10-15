@@ -1,8 +1,11 @@
 'use client';
 
+import { useState } from 'react';
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import { CalendarDays, FolderCog, Settings2 } from 'lucide-react';
+import { Button } from '../../components/ui/button';
+import { apiJson } from '../../lib/api';
 
 export function ArchiveNav({
   name,
@@ -12,6 +15,24 @@ export function ArchiveNav({
   timelinePath?: string;
 }) {
   const pathname = usePathname();
+  const router = useRouter();
+  const [signingOut, setSigningOut] = useState(false);
+  const [signOutError, setSignOutError] = useState(false);
+
+  const signOut = async () => {
+    if (signingOut) return;
+    setSigningOut(true);
+    setSignOutError(false);
+    try {
+      await apiJson<void>('/auth/logout', { method: 'POST' });
+      router.replace('/');
+      router.refresh();
+    } catch {
+      setSignOutError(true);
+      setSigningOut(false);
+    }
+  };
+
   return (
     <header className="archive-nav sticky top-0 z-20 grid min-h-[72px] grid-cols-[1fr_auto_1fr] items-center gap-6 border-b border-map-line bg-map-paper px-[5vw] text-map-ink max-[680px]:min-h-16 max-[680px]:grid-cols-[1fr_auto] max-[680px]:px-[18px]">
       <Link
@@ -55,13 +76,23 @@ export function ArchiveNav({
           <span>Ajustes</span>
         </Link>
       </nav>
-      <p
-        className="session-status flex items-center justify-self-end gap-2 text-[0.82rem] text-map-muted"
-        aria-label={name ? `Sesión de ${name}` : 'Sesión activa'}
-      >
-        <span className="size-2 rounded-full bg-map-route" aria-hidden="true" />
-        {name ?? 'Sesión activa'}
-      </p>
+      <div className="flex items-center justify-self-end gap-2 max-[680px]:col-start-2 max-[680px]:row-start-1">
+        <p
+          className="session-status flex items-center gap-2 text-[0.82rem] text-map-muted max-[420px]:sr-only"
+          aria-label={name ? `Sesión de ${name}` : 'Sesión activa'}
+        >
+          <span className="size-2 rounded-full bg-map-route" aria-hidden="true" />
+          {name ?? 'Sesión activa'}
+        </p>
+        <Button variant="outline" size="sm" onClick={() => void signOut()} disabled={signingOut}>
+          {signingOut ? 'Saliendo…' : 'Cerrar sesión'}
+        </Button>
+        {signOutError && (
+          <span className="sr-only" role="alert">
+            No se pudo cerrar la sesión. Comprueba tu conexión e inténtalo de nuevo.
+          </span>
+        )}
+      </div>
     </header>
   );
 }
