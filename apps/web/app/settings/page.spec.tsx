@@ -246,16 +246,38 @@ describe('mounted archive removal', () => {
     expect(container.textContent).toContain('Aún no hay carpetas de fotos');
   });
 
-  it('shows a folder overview and lets the user start a review from its own row', async () => {
+  it('shows a folder overview and explains its safe review action', async () => {
     await mount();
     expect(container.textContent).toContain('Mis carpetas');
     expect(container.textContent).toContain('Disponible');
+    expect(container.textContent).toContain('Solo una revisión completa retira fotos ausentes');
+    expect(container.textContent).toContain('no se eliminan archivos de Google Drive');
     const overviewStats = container.querySelector('li dl')?.textContent;
     expect(overviewStats).toContain('Fotos incluidas2');
     expect(overviewStats).toContain('Fotos por revisar2');
 
-    await click(button('Buscar cambios'));
+    await click(button('Revisar y actualizar carpeta'));
     expect(request).toHaveBeenCalledWith('/photo-sources/source/sync-runs', { method: 'POST' });
+  });
+
+  it('reports the exact number of photos removed after a complete review', async () => {
+    historyRun = {
+      id: 'run',
+      status: 'SUCCEEDED',
+      foundCount: 5,
+      indexedCount: 3,
+      issueCount: 0,
+      removedCount: 2,
+      createdAt: '2026-10-14T00:00:00.000Z',
+    };
+    await mount();
+
+    expect(container.textContent).toContain(
+      'Revisión completada: Se han retirado 2 fotos que ya no estaban.',
+    );
+    expect(container.textContent).toContain(
+      'Esta acción solo actualiza la aplicación; no borra archivos de Google Drive.',
+    );
   });
 
   it('explains and supports the folder tree keyboard controls', async () => {
@@ -306,9 +328,9 @@ describe('mounted archive removal', () => {
     await mount();
     await click(treeRow());
 
-    expect(container.textContent).toContain('Revisaremos toda esta fuente');
-    expect(container.textContent).toContain('nunca se borrarán fotos de Drive');
-    await click(button('Revisar cambios en Drive'));
+    expect(container.textContent).toContain('La revisión completa la carpeta de origen');
+    expect(container.textContent).toContain('No se borran archivos de Drive.');
+    await click(button('Revisar y actualizar carpeta'));
 
     expect(request).toHaveBeenCalledWith('/photo-sources/source/sync-runs', { method: 'POST' });
     expect(container.textContent).toContain('Revisión solicitada');

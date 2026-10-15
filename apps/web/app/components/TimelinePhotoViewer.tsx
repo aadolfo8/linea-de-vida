@@ -4,7 +4,7 @@ import useEmblaCarousel from 'embla-carousel-react';
 import { useReducedMotion } from 'motion/react';
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { api } from '../../lib/api';
-import { mediaUrl } from '../../lib/media';
+import { mediaUrl, thumbnailVariantUrl } from '../../lib/media';
 import { Button } from '../../components/ui/button';
 import {
   photoDateLabel,
@@ -227,7 +227,7 @@ export function TimelinePhotoViewer({
                 eager={eagerIndexes.has(photoIndex)}
                 requestOriginal={
                   photoIndex === index &&
-                  /^image\/(jpeg|png|webp)$/i.test(photo.mimeType) &&
+                  /^image\/(jpeg|png|webp|gif)$/i.test(photo.mimeType) &&
                   thumbnailFallbackPhotoId !== photo.id
                 }
                 onOriginalUnavailable={() => setThumbnailFallbackPhotoId(photo.id)}
@@ -344,11 +344,9 @@ function ViewerPhotoSlide({
     setStatus('loading');
     setRetryKey((current) => current + 1);
   };
-  const src = mediaUrl(
-    api,
-    variant === 'original' ? `/v1/photos/${photo.id}/content` : photo.thumbnailUrl,
-  );
-  const thumbnailSrc = mediaUrl(api, photo.thumbnailUrl);
+  const thumbnailSrc = thumbnailVariantUrl(api, photo.thumbnailUrl, 1280);
+  const src =
+    variant === 'original' ? mediaUrl(api, `/v1/photos/${photo.id}/content`) : thumbnailSrc;
 
   return (
     <div

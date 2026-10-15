@@ -26,6 +26,7 @@ function fixture(pages: Record<string, { items: DriveItem[]; nextCursor?: string
     processedCount: 0,
     indexedCount: 0,
     issueCount: 0,
+    removedCount: 0,
     checkpoint: null,
   };
   const photos = new Map<string, any>();
@@ -119,12 +120,17 @@ function fixture(pages: Record<string, { items: DriveItem[]; nextCursor?: string
       },
       update: async ({ where, data }: any) => Object.assign(photos.get(where.id), data),
       updateMany: async ({ where, data }: any) => {
+        let count = 0;
         for (const photo of photos.values())
           if (
             photo.sourceId === where.sourceId &&
+            (!where.status || photo.status === where.status) &&
             photo.lastSeenSyncRunId !== where.lastSeenSyncRunId.not
-          )
+          ) {
             Object.assign(photo, data);
+            count++;
+          }
+        return { count };
       },
     },
     manualDateOverride: {
@@ -390,7 +396,7 @@ describe('robust sync', () => {
     f.run.checkpoint = JSON.parse(JSON.stringify(f.run.checkpoint));
     failing = false;
     await f.service.execute('run');
-    expect(f.run).toMatchObject({ status: 'PARTIAL', issueCount: 1 });
+    expect(f.run).toMatchObject({ status: 'PARTIAL', issueCount: 1, removedCount: 0 });
     expect(f.photos.get('old').status).toBe('ACTIVE');
   });
 
@@ -531,6 +537,12 @@ describe('robust sync', () => {
       status: 'ACTIVE',
       lastSeenSyncRunId: 'previous',
     });
+    f.photos.set('already-missing', {
+      id: 'already-missing',
+      sourceId: 'source',
+      status: 'MISSING',
+      lastSeenSyncRunId: 'previous',
+    });
     f.folders.set('old-folder', {
       id: 'old-folder',
       sourceId: 'source',
@@ -543,8 +555,10 @@ describe('robust sync', () => {
       foundCount: 2,
       processedCount: 2,
       indexedCount: 2,
+      removedCount: 1,
     });
     expect(f.photos.get('old').status).toBe('MISSING');
+    expect(f.photos.get('already-missing').status).toBe('MISSING');
     expect(f.folders.get('old-folder').status).toBe('MISSING');
   });
 
