@@ -3,7 +3,8 @@ import { ContextCursor } from './components/ContextCursor';
 import './globals.css';
 export const metadata: Metadata = {
   title: 'Línea de vida',
-  description: 'Your photos, honestly ordered in time.',
+  description:
+    'Un espacio privado para recorrer tus fotografías y recuerdos familiares en el tiempo.',
 };
 export default function Layout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
