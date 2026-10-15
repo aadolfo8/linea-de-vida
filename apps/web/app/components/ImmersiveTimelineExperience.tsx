@@ -5,7 +5,7 @@ import { usePathname, useRouter } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { api, ApiError, apiJson } from '../../lib/api';
 import { subscribeArchiveIndexUpdated } from '../../lib/archive-index-events';
-import { mediaUrl } from '../../lib/media';
+import { thumbnailVariantUrl } from '../../lib/media';
 import { TemporalCarousel, type TemporalCarouselItem } from './TemporalCarousel';
 import { TimelinePhotoViewer } from './TimelinePhotoViewer';
 import { TimelineNavigation } from './TimelineNavigation';
@@ -617,6 +617,7 @@ function YearCollage({
         <ImmersivePhotoTile
           key={photo.id}
           photo={photo}
+          thumbnailWidth={640}
           className={styles[`orbit${index}`] ?? ''}
           onOpen={() => onOpen({ photos: previews, index })}
         />
@@ -858,11 +859,13 @@ function ImmersiveMonthGallery({
 
 function ImmersivePhotoTile({
   photo,
+  thumbnailWidth = 1280,
   className = '',
   style,
   onOpen,
 }: {
   photo: TimelinePhoto;
+  thumbnailWidth?: 640 | 1280;
   className?: string;
   style?: CSSProperties;
   onOpen: () => void;
@@ -883,10 +886,15 @@ function ImmersivePhotoTile({
         ) : (
           /* eslint-disable-next-line @next/next/no-img-element -- Private media URLs rely on the browser's session cookies. */
           <img
-            src={mediaUrl(api, photo.thumbnailUrl)}
+            src={thumbnailVariantUrl(api, photo.thumbnailUrl, thumbnailWidth)}
+            srcSet={`${thumbnailVariantUrl(api, photo.thumbnailUrl, 640)} 640w, ${thumbnailVariantUrl(api, photo.thumbnailUrl, 1280)} 1280w`}
+            sizes="(max-width: 42rem) 100vw, (max-width: 70rem) 50vw, 34vw"
             className={styles.photoImage}
             alt={photo.fileName}
+            width={photo.dimensions?.width}
+            height={photo.dimensions?.height}
             loading="lazy"
+            decoding="async"
             onError={() => setFailed(true)}
           />
         )}

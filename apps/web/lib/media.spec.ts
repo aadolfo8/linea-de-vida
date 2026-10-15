@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { mediaUrl } from './media';
+import { mediaUrl, thumbnailVariantUrl } from './media';
 
 describe('mediaUrl', () => {
   it('returns root-relative media paths for a production same-origin API', () => {
@@ -30,5 +30,16 @@ describe('mediaUrl', () => {
     expect(mediaUrl('/v1', 'http://media.example/photo.jpg')).toBe(
       'http://media.example/photo.jpg',
     );
+  });
+});
+
+describe('thumbnailVariantUrl', () => {
+  it('adds a bounded size to API media paths across deployment URL styles', () => {
+    expect(thumbnailVariantUrl('/v1', '/v1/photos/one/thumbnail', 640)).toBe(
+      '/v1/photos/one/thumbnail?width=640',
+    );
+    expect(
+      thumbnailVariantUrl('https://api.example/v1', '/v1/photos/one/thumbnail?token=x', 1280),
+    ).toBe('https://api.example/v1/photos/one/thumbnail?token=x&width=1280');
   });
 });
