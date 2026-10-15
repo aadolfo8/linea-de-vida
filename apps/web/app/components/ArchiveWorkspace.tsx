@@ -19,6 +19,7 @@ import {
   type Source,
 } from '../../lib/api';
 import { mediaUrl } from '../../lib/media';
+import { driveFolderIdFromInput } from '../../lib/drive-folder';
 import { removePhotosFromArchive } from '../../lib/photo-removal';
 import { visibleFolderTree } from '../settings/folder-tree';
 import { archiveStyles as styles } from './archive-workspace.styles';
@@ -79,13 +80,27 @@ type SyncRun = {
   issueCount?: number;
   createdAt?: string;
 };
-type SyncIssue = { id: string; details?: string; code?: string };
+type SyncIssue = { id: string; details?: string; code?: string; driveFileId?: string | null };
 type SourceOverview = {
   summary: ClassificationSummary | null;
   latestRun: SyncRun | null;
   error: boolean;
 };
 type Notice = { message: string; tone: 'info' | 'success' | 'warning' | 'error' };
+type ManualDatePreview = {
+  selectedCount: number;
+  willChangeCount: number;
+  alreadySameCount: number;
+  alreadyDatedCount: number;
+};
+type FolderDatePreview = {
+  scopePhotoCount: number;
+  willChangeCount: number;
+  unchangedCount: number;
+  preservesManualCount: number;
+  replacesAutomaticCount: number;
+  replacesFolderNameDateCount: number;
+};
 type BusyAction =
   | 'browse'
   | 'connect-drive'
@@ -95,7 +110,9 @@ type BusyAction =
   | 'remove-photos'
   | 'refresh-photos'
   | 'folder-date'
+  | 'folder-date-preview'
   | 'manual-date'
+  | 'manual-date-preview'
   | 'remove-rule'
   | 'restore-exclusion'
   | 'disconnect';
@@ -204,6 +221,19 @@ const issueCopy = (issue: SyncIssue) =>
   })[issue.code ?? ''] ??
   'Una fotografía no se pudo procesar. Vuelve a revisar el archivo para intentarlo de nuevo.';
 
+const issueActionCopy = (issue: SyncIssue) =>
+  ({
+    ACCESS_DENIED:
+      'Comprueba que la carpeta siga disponible en Drive y que tu cuenta tenga acceso; después vuelve a revisarla.',
+    AMBIGUOUS_TAKEOUT_MATCH:
+      'Comprueba que la exportación de Google Fotos esté completa y vuelve a revisar la carpeta.',
+    INVALID_TAKEOUT_JSON:
+      'Vuelve a exportar los datos de Google Fotos, guárdalos en Drive y después revisa la carpeta.',
+    UNREADABLE_METADATA:
+      'La foto se conservó. Vuelve a revisar la carpeta para intentar leer su información otra vez.',
+    UNKNOWN: 'Prueba con una carpeta más pequeña o revisa sus subcarpetas por separado.',
+  })[issue.code ?? ''] ?? 'Vuelve a revisar la carpeta para intentarlo otra vez.';
+
 const formatRunDate = (value?: string) => {
   if (!value) return 'Fecha no disponible';
   const date = new Date(value);
@@ -227,6 +257,7 @@ export function ArchiveWorkspace({
 }) {
   const [connection, setConnection] = useState(sessionConnection);
   const [sources, setSources] = useState<Source[]>([]);
+  const [organizeTab, setOrganizeTab] = useState<'folders' | 'pending' | 'dates'>('folders');
   const [sourceOverviews, setSourceOverviews] = useState<Record<string, SourceOverview>>({});
   const [selectedSourceId, setSelectedSourceId] = useState<string | null>(null);
   const [folderId, setFolderId] = useState('');
@@ -255,6 +286,10 @@ export function ArchiveWorkspace({
   const [run, setRun] = useState<SyncRun | null>(null);
   const [history, setHistory] = useState<SyncRun[]>([]);
   const [issues, setIssues] = useState<SyncIssue[]>([]);
+  const [issueCursor, setIssueCursor] = useState<string | null>(null);
+  const [loadingIssues, setLoadingIssues] = useState(false);
+  const [loadingMoreIssues, setLoadingMoreIssues] = useState(false);
+  const [issuesError, setIssuesError] = useState(false);
   const [loadingSources, setLoadingSources] = useState(true);
   const [loadingArchive, setLoadingArchive] = useState(false);
   const [loadingPhotos, setLoadingPhotos] = useState(false);
@@ -266,11 +301,13 @@ export function ArchiveWorkspace({
   const [dateYear, setDateYear] = useState('');
   const [dateMonth, setDateMonth] = useState('');
   const [dateError, setDateError] = useState('');
+  const [folderDatePreview, setFolderDatePreview] = useState<FolderDatePreview | null>(null);
   const [ruleScope, setRuleScope] = useState<RuleScope>('DIRECT_ONLY');
   const [confirmDate, setConfirmDate] = useState(false);
   const [manualYear, setManualYear] = useState('');
   const [manualMonth, setManualMonth] = useState('');
   const [manualError, setManualError] = useState('');
+  const [manualDatePreview, setManualDatePreview] = useState<ManualDatePreview | null>(null);
   const [manualEditorOpen, setManualEditorOpen] = useState(false);
   const activeSourceIdRef = useRef<string | null>(null);
   const selectedFolderIdRef = useRef<string | null>(null);
@@ -287,6 +324,14 @@ export function ArchiveWorkspace({
   const sourcePendingRemoval =
     sources.find((source) => source.id === confirmRemoveSourceId) ?? null;
   const selectedFolder = folders.find((folder) => folder.id === selectedFolderId) ?? null;
+  const groupedIssues = useMemo(() => {
+    const groups = new Map<string, SyncIssue[]>();
+    for (const issue of issues) {
+      const code = issue.code ?? 'UNKNOWN';
+      groups.set(code, [...(groups.get(code) ?? []), issue]);
+    }
+    return [...groups.entries()];
+  }, [issues]);
 
   const folderRelations = useMemo(() => {
     const byId = new Map(folders.map((folder) => [folder.id, folder]));
@@ -347,14 +392,54 @@ export function ArchiveWorkspace({
 
   const reviewPendingPhotos = () => {
     if (!activeSource || busy) return;
+    setOrganizeTab('pending');
     void loadPending(activeSource.id)
-      .then(() => document.getElementById('photos-workspace')?.scrollIntoView({ block: 'start' }))
+      .then(() => document.getElementById('pending-queue')?.scrollIntoView?.({ block: 'start' }))
       .catch((error) =>
         announce(
           errorCopy(error, 'No se pudieron cargar las fotos pendientes. Reintenta.'),
           'error',
         ),
       );
+  };
+
+  const loadMoreIssues = async () => {
+    if (!run || !issueCursor || loadingMoreIssues) return;
+    setLoadingMoreIssues(true);
+    try {
+      const page = await apiJson<{ items: SyncIssue[]; nextCursor: string | null }>(
+        settingsEndpoint.issues(run.id, issueCursor),
+      );
+      setIssues((current) => [
+        ...new Map([...current, ...page.items].map((issue) => [issue.id, issue])).values(),
+      ]);
+      setIssueCursor(page.nextCursor);
+      setIssuesError(false);
+    } catch (error) {
+      setIssuesError(true);
+      announce(errorCopy(error, 'No se pudieron cargar más problemas. Reintenta.'), 'error');
+    } finally {
+      setLoadingMoreIssues(false);
+    }
+  };
+
+  const openOrganizeTab = (tab: 'folders' | 'pending' | 'dates') => {
+    setOrganizeTab(tab);
+    if (tab === 'pending') {
+      reviewPendingPhotos();
+      return;
+    }
+    if (tab === 'dates') {
+      if (selectedPhotos.size) setManualEditorOpen(true);
+      else announce('Abre una carpeta y selecciona las fotos que quieras fechar.', 'info');
+      requestAnimationFrame(() =>
+        document.getElementById('photos-workspace')?.scrollIntoView?.({ block: 'start' }),
+      );
+      return;
+    }
+    requestAnimationFrame(() =>
+      document.getElementById('sources-title')?.scrollIntoView?.({ block: 'start' }),
+    );
   };
 
   const reconnectDrive = async () => {
@@ -533,6 +618,7 @@ export function ArchiveWorkspace({
     append = false,
     retained: IndexedPhoto[] = [],
   ) => {
+    setOrganizeTab('pending');
     photoRequestRef.current?.abort();
     const controller = new AbortController();
     photoRequestRef.current = controller;
@@ -797,7 +883,12 @@ export function ArchiveWorkspace({
     setDateError('');
     setConfirmDate(false);
     setConfirmRemoveRule(false);
+    setFolderDatePreview(null);
   }, [selectedFolderId]);
+
+  useEffect(() => {
+    setManualDatePreview(null);
+  }, [manualYear, manualMonth, selectedPhotos]);
 
   useEffect(() => {
     const sourceId = activeSource?.id;
@@ -837,19 +928,43 @@ export function ArchiveWorkspace({
     const sourceId = activeSource?.id;
     if (!run) {
       setIssues([]);
+      setIssueCursor(null);
+      setLoadingIssues(false);
+      setIssuesError(false);
       return;
     }
-    if (!sourceId) return;
+    if (!sourceId) {
+      setIssues([]);
+      setIssueCursor(null);
+      setLoadingIssues(false);
+      setIssuesError(false);
+      return;
+    }
     const controller = new AbortController();
-    void apiJson<{ items: SyncIssue[] }>(settingsEndpoint.issues(run.id), {
-      signal: controller.signal,
-    })
+    setIssues([]);
+    setIssueCursor(null);
+    setLoadingIssues(true);
+    setIssuesError(false);
+    void apiJson<{ items: SyncIssue[]; nextCursor: string | null }>(
+      settingsEndpoint.issues(run.id),
+      {
+        signal: controller.signal,
+      },
+    )
       .then((page) => {
-        if (!controller.signal.aborted && activeSourceIdRef.current === sourceId)
+        if (!controller.signal.aborted && activeSourceIdRef.current === sourceId) {
           setIssues(page.items);
+          setIssueCursor(page.nextCursor);
+          setLoadingIssues(false);
+          setIssuesError(false);
+        }
       })
       .catch((error) => {
-        if (!isAbortError(error) && activeSourceIdRef.current === sourceId) setIssues([]);
+        if (!isAbortError(error) && activeSourceIdRef.current === sourceId) {
+          setIssues([]);
+          setLoadingIssues(false);
+          setIssuesError(true);
+        }
       });
     if (run.status === 'SUCCEEDED') {
       announce(
@@ -881,14 +996,15 @@ export function ArchiveWorkspace({
 
   const browse = async (event: FormEvent) => {
     event.preventDefault();
-    if (!connection || !folderId.trim() || folderId === 'root') {
+    const driveFolderId = driveFolderIdFromInput(folderId);
+    if (!connection || !driveFolderId || driveFolderId === 'root') {
       announce('Indica una carpeta concreta. Nunca exploramos todo tu Drive.', 'warning');
       return;
     }
     setBusyAction('browse');
     try {
       const page = await apiJson<{ items: DriveFolder[] }>(
-        settingsEndpoint.folderChildren(connection.id, folderId.trim()),
+        settingsEndpoint.folderChildren(connection.id, driveFolderId),
       );
       setDriveFolders(page.items);
       announce(
@@ -908,7 +1024,8 @@ export function ArchiveWorkspace({
   };
 
   const createSource = async () => {
-    if (!connection || !folderId.trim() || folderId === 'root') return;
+    const driveFolderId = driveFolderIdFromInput(folderId);
+    if (!connection || !driveFolderId || driveFolderId === 'root') return;
     setBusyAction('create-source');
     try {
       await apiJson<Source>(settingsEndpoint.createSource, {
@@ -916,7 +1033,7 @@ export function ArchiveWorkspace({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           oauthConnectionId: connection.id,
-          driveFolderId: folderId.trim(),
+          driveFolderId,
           name: sourceName.trim() || 'Carpeta seleccionada',
           type: sourceType,
         }),
@@ -1053,6 +1170,44 @@ export function ArchiveWorkspace({
   };
 
   const applyFolderDate = async () => {
+    if (!selectedFolder || !folderDatePreview) return;
+    setConfirmDate(false);
+    setBusyAction('folder-date');
+    try {
+      const result = await apiJson<{ affectedCount: number }>(
+        settingsEndpoint.folderDate(selectedFolder.id),
+        {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            year: Number(dateYear),
+            ...(dateMonth ? { month: Number(dateMonth) } : {}),
+            precision: dateMonth ? 'MONTH' : 'YEAR',
+            scope: ruleScope,
+            reason: 'Fecha configurada desde la organización del archivo',
+          }),
+        },
+      );
+      setFolderDatePreview(null);
+      if (activeSource) await loadArchive(activeSource.id);
+      if (activeSource)
+        await loadPhotos(activeSource.id, selectedFolder.id, photoFilterRef.current);
+      announce(
+        `Fecha de carpeta actualizada en ${pluralize(result.affectedCount, 'foto', 'fotos')}. Las fotos originales no se modificaron.`,
+        'success',
+      );
+    } catch (error) {
+      announce(
+        errorCopy(error, 'No se pudo guardar la fecha. Revisa los campos y reintenta.'),
+        'error',
+      );
+      setConfirmDate(true);
+    } finally {
+      setBusyAction(null);
+    }
+  };
+
+  const previewFolderDate = async () => {
     if (!selectedFolder) return;
     const year = Number(dateYear);
     if (!Number.isInteger(year) || year < 1900 || year > 2100) {
@@ -1060,12 +1215,12 @@ export function ArchiveWorkspace({
       return;
     }
     setDateError('');
-    setBusyAction('folder-date');
+    setBusyAction('folder-date-preview');
     try {
-      const result = await apiJson<{ affectedCount: number }>(
-        settingsEndpoint.folderDate(selectedFolder.id),
+      const preview = await apiJson<FolderDatePreview>(
+        settingsEndpoint.folderDatePreview(selectedFolder.id),
         {
-          method: 'PUT',
+          method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             year,
@@ -1076,26 +1231,52 @@ export function ArchiveWorkspace({
           }),
         },
       );
-      setConfirmDate(false);
-      if (activeSource) await loadArchive(activeSource.id);
-      if (activeSource)
-        await loadPhotos(activeSource.id, selectedFolder.id, photoFilterRef.current);
-      announce(
-        `Fecha de carpeta guardada. Se revisaron ${pluralize(result.affectedCount, 'foto', 'fotos')} sin borrar la información original.`,
-        'success',
-      );
+      setFolderDatePreview(preview);
+      setConfirmDate(true);
     } catch (error) {
-      announce(
-        errorCopy(error, 'No se pudo guardar la fecha. Revisa los campos y reintenta.'),
-        'error',
+      announce(errorCopy(error, 'No se pudo calcular qué fotos cambiarían. Reintenta.'), 'error');
+    } finally {
+      setBusyAction(null);
+    }
+  };
+
+  const previewManualDate = async () => {
+    if (!selectedPhotos.size) return;
+    if (selectedPhotos.size > MANUAL_DATE_BULK_LIMIT) {
+      setManualError(
+        `Puedes corregir un máximo de ${MANUAL_DATE_BULK_LIMIT} fotos a la vez. Reduce la selección y vuelve a intentarlo.`,
       );
+      return;
+    }
+    const year = Number(manualYear);
+    if (!Number.isInteger(year) || year < 1900 || year > 2100) {
+      setManualError('Selecciona un año entre 1900 y 2100.');
+      return;
+    }
+    setManualError('');
+    setBusyAction('manual-date-preview');
+    try {
+      const preview = await apiJson<ManualDatePreview>(settingsEndpoint.manualDatePreview, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          photoIds: [...selectedPhotos],
+          year,
+          ...(manualMonth ? { month: Number(manualMonth) } : {}),
+          precision: manualMonth ? 'MONTH' : 'YEAR',
+          reason: 'Corrección manual desde la organización del archivo',
+        }),
+      });
+      setManualDatePreview(preview);
+    } catch (error) {
+      announce(errorCopy(error, 'No se pudo calcular qué fotos cambiarían. Reintenta.'), 'error');
     } finally {
       setBusyAction(null);
     }
   };
 
   const applyManualDate = async () => {
-    if (!selectedPhotos.size) return;
+    if (!selectedPhotos.size || !manualDatePreview) return;
     if (selectedPhotos.size > MANUAL_DATE_BULK_LIMIT) {
       setManualError(
         `Puedes corregir un máximo de ${MANUAL_DATE_BULK_LIMIT} fotos a la vez. Reduce la selección y vuelve a intentarlo.`,
@@ -1123,6 +1304,7 @@ export function ArchiveWorkspace({
         }),
       });
       setManualEditorOpen(false);
+      setManualDatePreview(null);
       setSelectedPhotos(new Set());
       if (activeSource && pendingView) await loadPending(activeSource.id);
       else if (activeSource && searchMode)
@@ -1209,6 +1391,7 @@ export function ArchiveWorkspace({
     setSelectedPhotos(new Set());
     setLoadingPhotos(true);
     setSelectedFolderId(folderIdValue);
+    setOrganizeTab('folders');
   };
 
   const beginArchiveSearch = (event: FormEvent) => {
@@ -1332,10 +1515,11 @@ export function ArchiveWorkspace({
       <header className={styles.intro}>
         {area === 'organize' ? (
           <>
-            <h1>Organiza tu archivo</h1>
+            <h1>Organizar recuerdos</h1>
             <p>
-              Elige una carpeta, revisa qué necesita atención y corrige las fechas sin salir del
-              recorrido de tus fotografías. Drive se consulta en solo lectura.
+              Añade tus carpetas, revisa las fotos que necesitan atención y ponles fecha para
+              encontrarlas en la cronología. Google Drive solo se consulta; tus archivos originales
+              no se modifican.
             </p>
           </>
         ) : (
@@ -1347,43 +1531,39 @@ export function ArchiveWorkspace({
       </header>
 
       {area === 'organize' && (
-        <nav className={styles.taskRail} aria-label="Acciones frecuentes de organización">
-          {activeSource && summary?.unclassified ? (
+        <nav className={styles.organizeNav} aria-label="Tareas de organización">
+          {(
+            [
+              ['folders', 'Mis carpetas'],
+              [
+                'pending',
+                `Fotos por revisar${summary?.unclassified ? ` · ${summary.unclassified.toLocaleString('es-ES')}` : ''}`,
+              ],
+              ['dates', 'Corregir fechas'],
+            ] as const
+          ).map(([tab, label]) => (
             <button
               type="button"
-              className={styles.taskPrimary}
-              onClick={reviewPendingPhotos}
-              disabled={busy || loadingArchive || loadingPhotos}
+              key={tab}
+              className={`${styles.organizeTab} ${organizeTab === tab ? styles.organizeTabActive : ''}`}
+              aria-pressed={organizeTab === tab}
+              onClick={() => openOrganizeTab(tab)}
+              disabled={busy || (tab !== 'folders' && !activeSource)}
             >
-              Revisar {summary.unclassified.toLocaleString('es-ES')} fotos sin fecha
+              {label}
             </button>
-          ) : (
-            <a className={styles.taskPrimary} href="#archive-title">
-              {activeSource ? 'Ver estado del archivo' : 'Configurar el archivo'}
-            </a>
-          )}
+          ))}
           {connection && (
             <a
               className={styles.taskLink}
               href="#source-setup"
               onClick={() => {
+                setOrganizeTab('folders');
                 const setup = document.getElementById('source-setup');
                 if (setup instanceof HTMLDetailsElement) setup.open = true;
               }}
             >
               Añadir una carpeta
-            </a>
-          )}
-          {history.length > 0 && (
-            <a
-              className={styles.taskLink}
-              href="#review-history"
-              onClick={() => {
-                const historySection = document.getElementById('review-history');
-                if (historySection instanceof HTMLDetailsElement) historySection.open = true;
-              }}
-            >
-              Revisiones anteriores
             </a>
           )}
         </nav>
@@ -1531,8 +1711,8 @@ export function ArchiveWorkspace({
               <div>
                 <h2 id="source-picker-title">Elige una carpeta de Drive</h2>
                 <p>
-                  Elige el tipo correcto para que podamos interpretar las fechas sin alterar los
-                  archivos originales.
+                  Elige una carpeta concreta. Buscaremos sus fotos y las de sus subcarpetas; Drive
+                  no se modifica.
                 </p>
               </div>
             </div>
@@ -1548,10 +1728,10 @@ export function ArchiveWorkspace({
                   onChange={() => setSourceType('GENERIC')}
                 />
                 <span>
-                  <strong>Una carpeta normal de fotografías</strong>
+                  <strong>Fotos y vídeos de una carpeta</strong>
                   <small>
-                    Elige esta opción para imágenes organizadas por ti. La fecha se obtiene de la
-                    información disponible en Drive y, si hace falta, del nombre de las carpetas.
+                    Para fotos que has organizado tú. También buscaremos fechas en la información de
+                    las fotos y en los nombres de sus carpetas.
                   </small>
                 </span>
               </label>
@@ -1566,9 +1746,9 @@ export function ArchiveWorkspace({
                 <span>
                   <strong>Una exportación de Google Fotos</strong>
                   <small>
-                    Google Takeout es la descarga que crea Google Fotos con imágenes y archivos de
-                    datos. Elige esta opción si copiaste esa exportación completa a Drive; usaremos
-                    esos datos para recuperar mejor la fecha de captura.
+                    Elige esta opción si guardaste en Drive la descarga completa de Google Fotos.
+                    Puede incluir archivos de datos que ayudan a recuperar cuándo se hicieron las
+                    fotos.
                   </small>
                 </span>
               </label>
@@ -1576,7 +1756,7 @@ export function ArchiveWorkspace({
 
             <form className={styles.sourceForm} onSubmit={(event) => void browse(event)}>
               <label htmlFor="source-name">
-                Nombre para reconocer esta fuente
+                Nombre para reconocer la carpeta
                 <input
                   id="source-name"
                   value={sourceName}
@@ -1586,10 +1766,10 @@ export function ArchiveWorkspace({
                 />
               </label>
               <label htmlFor="folder-id">
-                ID de la carpeta de Google Drive
+                Enlace de la carpeta de Google Drive
                 <span className={styles.fieldHint}>
-                  Es la parte de la dirección de Drive que aparece después de <code>/folders/</code>
-                  . Nunca usamos la raíz completa de tu Drive.
+                  Copia y pega el enlace de la carpeta. También puedes pegar solo el identificador.
+                  Nunca exploramos todo tu Drive.
                 </span>
                 <div className={styles.inputAction}>
                   <input
@@ -1599,7 +1779,7 @@ export function ArchiveWorkspace({
                       setFolderId(event.target.value);
                       setDriveFolders([]);
                     }}
-                    placeholder="Pega aquí el ID de la carpeta"
+                    placeholder="https://drive.google.com/drive/folders/…"
                     required
                   />
                   <button
@@ -1650,9 +1830,9 @@ export function ArchiveWorkspace({
                 {busyAction === 'create-source' && (
                   <span className={styles.spinner} aria-hidden="true" />
                 )}
-                Guardar esta carpeta como fuente
+                Añadir carpeta
               </button>
-              <p>Después podrás revisar su contenido y clasificar las fechas.</p>
+              <p>Después podrás ver sus fotos, revisar pendientes y corregir sus fechas.</p>
             </div>
           </section>
         </details>
@@ -1662,8 +1842,14 @@ export function ArchiveWorkspace({
         <section className={styles.sourcesOverview} aria-labelledby="sources-title">
           <div className={styles.sectionHeading}>
             <div>
-              <h2 id="sources-title">Fuentes de fotografías</h2>
-              <p>Estado de conexión, última revisión y fotos que todavía necesitan atención.</p>
+              <h2 id="sources-title">
+                {area === 'organize' ? 'Mis carpetas' : 'Fuentes de fotografías'}
+              </h2>
+              <p>
+                {area === 'organize'
+                  ? 'Carpetas que has añadido, su última revisión y las fotos que necesitan atención.'
+                  : 'Estado de conexión, última revisión y fotos que todavía necesitan atención.'}
+              </p>
             </div>
             {connection && (
               <a
@@ -1700,8 +1886,8 @@ export function ArchiveWorkspace({
                           <h3>{source.name}</h3>
                           <p>
                             {source.type === 'GOOGLE_TAKEOUT'
-                              ? 'Exportación de Google Fotos'
-                              : 'Carpeta de fotografías'}
+                              ? 'Google Drive · Exportación de Google Fotos'
+                              : 'Google Drive · Carpeta de fotos'}
                           </p>
                         </div>
                         <span
@@ -1712,7 +1898,7 @@ export function ArchiveWorkspace({
                         </span>
                       </div>
                       <details className={styles.sourceLocation}>
-                        <summary>Ubicación en Drive</summary>
+                        <summary>Ver identificador de Drive</summary>
                         <code>{source.driveFolderId}</code>
                       </details>
                       {overview?.summary ? (
@@ -1722,7 +1908,7 @@ export function ArchiveWorkspace({
                             <dd>{overview.summary.total.toLocaleString('es-ES')}</dd>
                           </div>
                           <div>
-                            <dt>Sin fecha suficiente</dt>
+                            <dt>Fotos por revisar</dt>
                             <dd>{overview.summary.unclassified.toLocaleString('es-ES')}</dd>
                           </div>
                           <div>
@@ -1778,8 +1964,8 @@ export function ArchiveWorkspace({
                             disabled={busy || loadingSources}
                           >
                             {latestRun?.status === 'FAILED' || latestRun?.status === 'PARTIAL'
-                              ? 'Revisar resultado'
-                              : 'Organizar fotos'}
+                              ? 'Ver resultado'
+                              : 'Ver fotos'}
                           </button>
                           <button
                             type="button"
@@ -1850,6 +2036,148 @@ export function ArchiveWorkspace({
           )}
         </section>
       )}
+
+      {area === 'organize' &&
+        (organizeTab === 'pending' && activeSource ? (
+          <section
+            className={styles.reviewQueue}
+            id="pending-queue"
+            aria-labelledby="pending-title"
+          >
+            <div className={styles.sectionHeading}>
+              <div>
+                <h2 id="pending-title">Fotos por revisar</h2>
+                <p>
+                  {activeSource.name}. Aquí se reúnen las fotos sin fecha y los problemas detectados
+                  en la última revisión de esta carpeta.
+                </p>
+              </div>
+              {activeSource && (
+                <button
+                  type="button"
+                  className={styles.secondaryButton}
+                  onClick={() => void sync(activeSource)}
+                  disabled={busy || isSyncActive(run)}
+                >
+                  {isSyncActive(run) && <span className={styles.spinner} aria-hidden="true" />}
+                  {isSyncActive(run) ? 'Revisión en curso' : 'Volver a revisar carpeta'}
+                </button>
+              )}
+            </div>
+
+            {loadingArchive || loadingIssues || !summary ? (
+              <p className={styles.loadingLine} role="status">
+                <span className={styles.spinner} aria-hidden="true" />
+                Cargando fotos y resultado de la última revisión…
+              </p>
+            ) : null}
+
+            {issuesError && (
+              <div className={styles.reviewQueueError} role="alert">
+                <p>
+                  No pudimos cargar los problemas de la última revisión; todavía no podemos
+                  confirmar que esté todo revisado.
+                </p>
+                <button
+                  type="button"
+                  className={styles.secondaryButton}
+                  onClick={() => activeSource && void loadArchive(activeSource.id)}
+                  disabled={busy || loadingArchive}
+                >
+                  Volver a cargar
+                </button>
+              </div>
+            )}
+
+            {!loadingArchive && summary?.unclassified ? (
+              <div className={styles.reviewQueueRow}>
+                <div>
+                  <h3>Falta una fecha</h3>
+                  <p>
+                    {pluralize(summary.unclassified, 'foto no tiene', 'fotos no tienen')} un año o
+                    mes para aparecer en la cronología.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  className={styles.secondaryButton}
+                  onClick={() => void loadPending(activeSource.id)}
+                  disabled={busy || loadingArchive || loadingPhotos}
+                >
+                  Ver fotos sin fecha
+                </button>
+              </div>
+            ) : null}
+
+            {!loadingIssues && !!groupedIssues.length ? (
+              <div className={styles.reviewIssues}>
+                <h3>Problemas de la última revisión</h3>
+                {run?.issueCount && run.issueCount > issues.length ? (
+                  <p className={styles.reviewQueueHint}>
+                    Se muestran las primeras {issues.length} incidencias de{' '}
+                    {run.issueCount.toLocaleString('es-ES')} detectadas.
+                  </p>
+                ) : null}
+                <ul className={styles.reviewIssueList}>
+                  {groupedIssues.map(([code, group]) => (
+                    <li key={code}>
+                      <div>
+                        <strong>{issueCopy(group[0]!)}</strong>
+                        <span>{issueActionCopy(group[0]!)}</span>
+                        {group.length > 1 && (
+                          <span>{pluralize(group.length, 'incidencia', 'incidencias')}</span>
+                        )}
+                      </div>
+                      <button
+                        type="button"
+                        className={styles.textButton}
+                        onClick={() => activeSource && void sync(activeSource)}
+                        disabled={busy || isSyncActive(run)}
+                      >
+                        Volver a revisar
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+                {issueCursor && (
+                  <button
+                    type="button"
+                    className={styles.loadMoreButton}
+                    onClick={() => void loadMoreIssues()}
+                    disabled={loadingMoreIssues || busy}
+                  >
+                    {loadingMoreIssues && <span className={styles.spinner} aria-hidden="true" />}
+                    {loadingMoreIssues ? 'Cargando problemas…' : 'Ver más problemas'}
+                  </button>
+                )}
+              </div>
+            ) : null}
+
+            {!loadingArchive &&
+              !loadingIssues &&
+              !issuesError &&
+              summary &&
+              !summary.unclassified &&
+              !groupedIssues.length && (
+                <div className={styles.reviewComplete}>
+                  <h3>Todo revisado en esta carpeta</h3>
+                  <p>No hay fotos sin fecha ni problemas registrados en la última revisión.</p>
+                  <button
+                    type="button"
+                    className={styles.primaryButton}
+                    onClick={() => {
+                      setOrganizeTab('folders');
+                      document
+                        .getElementById('archive-title')
+                        ?.scrollIntoView?.({ block: 'start' });
+                    }}
+                  >
+                    Ver fotos de la carpeta
+                  </button>
+                </div>
+              )}
+          </section>
+        ) : null)}
 
       {area === 'organize' && (
         <section className={styles.sourcesOverview} aria-labelledby="excluded-title">
@@ -1931,10 +2259,10 @@ export function ArchiveWorkspace({
         >
           <div className={styles.archiveHeader}>
             <div>
-              <h2 id="archive-title">Explorar y organizar</h2>
+              <h2 id="archive-title">Fotos de la carpeta</h2>
               <p>
-                Este índice refleja la última revisión completada. Las fotos siguen en Drive y solo
-                se muestran aquí para organizar su fecha.
+                Aquí puedes ver las fotos guardadas en Drive, seleccionar algunas y corregir sus
+                fechas. Los archivos originales no se modifican.
               </p>
             </div>
             {activeSource && (
@@ -2016,13 +2344,13 @@ export function ArchiveWorkspace({
             <div className={styles.emptyState}>
               <h3>
                 {sources.length
-                  ? 'No hay una fuente disponible para organizar'
-                  : 'Aún no hay una fuente de fotografías'}
+                  ? 'No hay una carpeta disponible para organizar'
+                  : 'Aún no hay carpetas de fotos'}
               </h3>
               <p>
                 {sources.length
-                  ? 'Las fuentes guardadas aparecen arriba. Reconecta Drive o revisa su estado para volver a organizar las fotos.'
-                  : 'Añade una carpeta de Drive para crear el índice y empezar a organizar las fechas.'}
+                  ? 'Tus carpetas aparecen arriba. Reconecta Drive o revisa su estado para volver a organizar las fotos.'
+                  : 'Añade una carpeta de Drive para empezar a organizar sus fotos.'}
               </p>
             </div>
           ) : activeSource ? (
@@ -2057,11 +2385,13 @@ export function ArchiveWorkspace({
               aria-labelledby="remove-source-title"
             >
               <div>
-                <h3 id="remove-source-title">Quitar “{sourcePendingRemoval.name}” del archivo</h3>
+                <h3 id="remove-source-title">
+                  Quitar “{sourcePendingRemoval.name}” de Línea de vida
+                </h3>
                 <p>
-                  Se eliminarán el índice, las fechas organizadas y el historial de revisiones de
-                  esta fuente. Los archivos originales seguirán intactos en Drive. Puedes añadir la
-                  carpeta de nuevo para crear otro índice.
+                  Sus fotos dejarán de aparecer aquí y se quitarán las fechas corregidas y el
+                  historial de revisión de esta carpeta. Los archivos originales seguirán intactos
+                  en Drive. Si la añades de nuevo, se volverá a revisar como una carpeta nueva.
                 </p>
               </div>
               <div className={styles.buttonRow}>
@@ -2076,7 +2406,7 @@ export function ArchiveWorkspace({
                   {busyAction === 'remove-source' && (
                     <span className={styles.spinner} aria-hidden="true" />
                   )}
-                  Quitar carpeta e índice
+                  {area === 'organize' ? 'Quitar carpeta' : 'Quitar carpeta e índice'}
                 </button>
                 <button
                   type="button"
@@ -2152,7 +2482,7 @@ export function ArchiveWorkspace({
                   <dd>{(run.issueCount ?? 0).toLocaleString('es-ES')}</dd>
                 </div>
               </dl>
-              {!!issues.length && (
+              {!!issues.length && organizeTab !== 'pending' && (
                 <ul className={styles.issues}>
                   {issues.map((issue) => (
                     <li key={issue.id}>{issueCopy(issue)}</li>
@@ -2644,7 +2974,11 @@ export function ArchiveWorkspace({
                       <button
                         type="button"
                         className={styles.primaryButton}
-                        onClick={() => setManualEditorOpen(true)}
+                        onClick={() => {
+                          setOrganizeTab('dates');
+                          setManualDatePreview(null);
+                          setManualEditorOpen(true);
+                        }}
                         disabled={busy || loadingArchive || !selectedPhotos.size}
                       >
                         Corregir fecha
@@ -2733,6 +3067,7 @@ export function ArchiveWorkspace({
                           onChange={(event) => {
                             setManualYear(event.target.value);
                             setManualError('');
+                            setManualDatePreview(null);
                           }}
                           aria-invalid={Boolean(manualError)}
                           aria-describedby={manualError ? 'manual-date-error' : undefined}
@@ -2749,7 +3084,10 @@ export function ArchiveWorkspace({
                         Mes
                         <select
                           value={manualMonth}
-                          onChange={(event) => setManualMonth(event.target.value)}
+                          onChange={(event) => {
+                            setManualMonth(event.target.value);
+                            setManualDatePreview(null);
+                          }}
                         >
                           <option value="">Solo el año</option>
                           {MONTH_OPTIONS.map((month) => (
@@ -2769,13 +3107,15 @@ export function ArchiveWorkspace({
                       <button
                         type="button"
                         className={styles.primaryButton}
-                        onClick={() => void applyManualDate()}
+                        onClick={() => void previewManualDate()}
                         disabled={busy || !manualYear}
                       >
-                        {busyAction === 'manual-date' && (
+                        {busyAction === 'manual-date-preview' && (
                           <span className={styles.spinner} aria-hidden="true" />
                         )}
-                        Guardar corrección
+                        {busyAction === 'manual-date-preview'
+                          ? 'Calculando cambios…'
+                          : 'Ver qué cambiará'}
                       </button>
                       <button
                         type="button"
@@ -2783,12 +3123,72 @@ export function ArchiveWorkspace({
                         onClick={() => {
                           setManualEditorOpen(false);
                           setManualError('');
+                          setManualDatePreview(null);
                         }}
                         disabled={busy}
                       >
                         Cancelar
                       </button>
                     </div>
+                    {manualDatePreview && (
+                      <div
+                        className={styles.changeReview}
+                        role="group"
+                        aria-labelledby="manual-preview-title"
+                      >
+                        <div>
+                          <span>Revisión del cambio</span>
+                          <h3 id="manual-preview-title">
+                            {manualMonth
+                              ? `${MONTH_OPTIONS.find((month) => month.value === manualMonth)?.label} de ${manualYear}`
+                              : manualYear}
+                          </h3>
+                          <p>
+                            {manualDatePreview.willChangeCount
+                              ? `La fecha cambiará en ${pluralize(manualDatePreview.willChangeCount, 'foto', 'fotos')}.`
+                              : 'Las fotos seleccionadas ya tienen esta fecha corregida.'}{' '}
+                            {manualDatePreview.alreadySameCount > 0 &&
+                              `${pluralize(manualDatePreview.alreadySameCount, 'foto ya tiene', 'fotos ya tienen')} esta fecha.`}
+                          </p>
+                          {manualDatePreview.alreadyDatedCount >
+                            manualDatePreview.alreadySameCount && (
+                            <p>
+                              En{' '}
+                              {pluralize(
+                                manualDatePreview.alreadyDatedCount -
+                                  manualDatePreview.alreadySameCount,
+                                'foto sustituirás',
+                                'fotos sustituirás',
+                              )}{' '}
+                              la fecha visible actual. La información original seguirá conservada.
+                            </p>
+                          )}
+                        </div>
+                        <div className={styles.buttonRow}>
+                          <button
+                            type="button"
+                            className={styles.primaryButton}
+                            onClick={() => void applyManualDate()}
+                            disabled={busy || !manualDatePreview.willChangeCount}
+                          >
+                            {busyAction === 'manual-date' && (
+                              <span className={styles.spinner} aria-hidden="true" />
+                            )}
+                            {manualDatePreview.willChangeCount
+                              ? `Aplicar a ${pluralize(manualDatePreview.willChangeCount, 'foto', 'fotos')}`
+                              : 'No hay cambios que aplicar'}
+                          </button>
+                          <button
+                            type="button"
+                            className={styles.secondaryButton}
+                            onClick={() => setManualDatePreview(null)}
+                            disabled={busy}
+                          >
+                            Volver a editar
+                          </button>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
 
@@ -2855,6 +3255,7 @@ export function ArchiveWorkspace({
                             setDateYear(event.target.value);
                             setDateError('');
                             setConfirmDate(false);
+                            setFolderDatePreview(null);
                           }}
                           aria-invalid={Boolean(dateError)}
                           aria-describedby={dateError ? 'folder-date-error' : undefined}
@@ -2874,6 +3275,7 @@ export function ArchiveWorkspace({
                           onChange={(event) => {
                             setDateMonth(event.target.value);
                             setConfirmDate(false);
+                            setFolderDatePreview(null);
                           }}
                         >
                           <option value="">Solo el año</option>
@@ -2902,6 +3304,7 @@ export function ArchiveWorkspace({
                           onChange={() => {
                             setRuleScope('DIRECT_ONLY');
                             setConfirmDate(false);
+                            setFolderDatePreview(null);
                           }}
                         />
                         <span>
@@ -2924,6 +3327,7 @@ export function ArchiveWorkspace({
                           onChange={() => {
                             setRuleScope('FALLBACK_DESCENDANTS');
                             setConfirmDate(false);
+                            setFolderDatePreview(null);
                           }}
                         />
                         <span>
@@ -2952,6 +3356,7 @@ export function ArchiveWorkspace({
                           onChange={() => {
                             setRuleScope('ALL_DESCENDANTS');
                             setConfirmDate(false);
+                            setFolderDatePreview(null);
                           }}
                         />
                         <span>
@@ -2970,13 +3375,15 @@ export function ArchiveWorkspace({
                     <button
                       type="button"
                       className={styles.primaryButton}
-                      onClick={() => {
-                        if (!dateYear) setDateError('Selecciona un año entre 1900 y 2100.');
-                        else setConfirmDate(true);
-                      }}
+                      onClick={() => void previewFolderDate()}
                       disabled={busy || !dateYear}
                     >
-                      Revisar antes de guardar
+                      {busyAction === 'folder-date-preview' && (
+                        <span className={styles.spinner} aria-hidden="true" />
+                      )}
+                      {busyAction === 'folder-date-preview'
+                        ? 'Calculando cambios…'
+                        : 'Ver qué fotos cambiarán'}
                     </button>
 
                     {confirmDate && (
@@ -2993,9 +3400,24 @@ export function ArchiveWorkspace({
                               : dateYear}
                           </h3>
                           <p>
-                            {scopeLabel(ruleScope)}: la revisión alcanza{' '}
-                            {pluralize(affectedFolders.length, 'carpeta', 'carpetas')} y hasta{' '}
-                            {pluralize(affectedPhotoCount, 'foto', 'fotos')}.
+                            {folderDatePreview?.willChangeCount
+                              ? `La fecha cambiará en ${pluralize(folderDatePreview.willChangeCount, 'foto', 'fotos')}.`
+                              : 'No cambiará la fecha de ninguna foto existente.'}{' '}
+                            {folderDatePreview &&
+                              `${pluralize(folderDatePreview.unchangedCount, 'otra foto conservará', 'otras fotos conservarán')} su fecha actual.`}
+                          </p>
+                          <p>
+                            {scopeLabel(ruleScope)}. Se revisarán{' '}
+                            {pluralize(folderDatePreview?.scopePhotoCount ?? 0, 'foto', 'fotos')}.
+                            {folderDatePreview?.replacesAutomaticCount
+                              ? ` Puede sustituir ${pluralize(folderDatePreview.replacesAutomaticCount, 'fecha automática', 'fechas automáticas')}.`
+                              : ''}{' '}
+                            {folderDatePreview?.replacesFolderNameDateCount
+                              ? `Incluye ${pluralize(folderDatePreview.replacesFolderNameDateCount, 'fecha deducida del nombre de carpeta', 'fechas deducidas de nombres de carpeta')}.`
+                              : ''}{' '}
+                            {folderDatePreview?.preservesManualCount
+                              ? `${pluralize(folderDatePreview.preservesManualCount, 'corrección manual se conserva', 'correcciones manuales se conservan')}.`
+                              : 'Las correcciones manuales siempre se conservan.'}
                           </p>
                           <p>{scopeDescription(ruleScope)}</p>
                         </div>
@@ -3009,12 +3431,17 @@ export function ArchiveWorkspace({
                             {busyAction === 'folder-date' && (
                               <span className={styles.spinner} aria-hidden="true" />
                             )}
-                            Guardar fecha de carpeta
+                            {folderDatePreview?.willChangeCount
+                              ? `Aplicar fecha a ${pluralize(folderDatePreview.willChangeCount, 'foto', 'fotos')}`
+                              : 'Guardar para futuras fotos'}
                           </button>
                           <button
                             type="button"
                             className={styles.secondaryButton}
-                            onClick={() => setConfirmDate(false)}
+                            onClick={() => {
+                              setConfirmDate(false);
+                              setFolderDatePreview(null);
+                            }}
                             disabled={busy}
                           >
                             Volver a editar

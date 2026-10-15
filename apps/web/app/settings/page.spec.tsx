@@ -46,6 +46,7 @@ describe('mounted archive removal', () => {
   let remove: () => Promise<unknown>;
   let sourceRemoved: boolean;
   let sourceStatus: string;
+  let historyRun: Record<string, unknown> | null;
   let excludedItems: Array<Record<string, unknown>>;
   const button = (text: string) => {
     const found = [...container.querySelectorAll('button')].find((node) =>
@@ -103,6 +104,7 @@ describe('mounted archive removal', () => {
     remove = async () => ({ results: [] });
     sourceRemoved = false;
     sourceStatus = 'ACTIVE';
+    historyRun = null;
     excludedItems = [];
     request.mockImplementation(async (path, init) => {
       if (path === '/photo-sources')
@@ -132,7 +134,12 @@ describe('mounted archive removal', () => {
           ],
           nextCursor: null,
         };
-      if (path.includes('/sync-runs?')) return { items: [] };
+      if (path.includes('/sync-runs?')) return { items: historyRun ? [historyRun] : [] };
+      if (path.includes('/issues?'))
+        return {
+          items: [{ id: 'issue-1', code: 'ACCESS_DENIED', details: 'Drive denied access.' }],
+          nextCursor: null,
+        };
       if (path.endsWith('/classification-summary'))
         return { total: 2, automatic: 0, folder: 0, manual: 0, unclassified: 2 };
       if (path.includes('/pending-photos?')) return load();
@@ -147,6 +154,22 @@ describe('mounted archive removal', () => {
         return undefined;
       }
       if (path === '/photo-removals') return remove();
+      if (path === '/photos/manual-date-overrides/preview')
+        return {
+          selectedCount: 1,
+          willChangeCount: 1,
+          alreadySameCount: 0,
+          alreadyDatedCount: 1,
+        };
+      if (path === '/indexed-folders/folder/date-override/preview')
+        return {
+          scopePhotoCount: 2,
+          willChangeCount: 1,
+          unchangedCount: 1,
+          preservesManualCount: 0,
+          replacesAutomaticCount: 1,
+          replacesFolderNameDateCount: 0,
+        };
       if (path === '/oauth/google/drive/authorize')
         return { available: false, message: 'Google OAuth no está configurado.' };
       throw new Error(`Unexpected request: ${path}`);
@@ -189,22 +212,93 @@ describe('mounted archive removal', () => {
     await mount();
     await click(button('Quitar esta carpeta del archivo'));
     expect(container.textContent).toContain('Los archivos originales seguirán intactos en Drive.');
-    await click(button('Quitar carpeta e índice'));
+    await click(button('Quitar carpeta'));
     expect(request).toHaveBeenCalledWith('/photo-sources/source', { method: 'DELETE' });
     expect(container.textContent).toContain('Drive no se ha modificado');
-    expect(container.textContent).toContain('Aún no hay una fuente de fotografías');
+    expect(container.textContent).toContain('Aún no hay carpetas de fotos');
   });
 
-  it('shows a source overview and lets the user start a review from its own row', async () => {
+  it('shows a folder overview and lets the user start a review from its own row', async () => {
     await mount();
-    expect(container.textContent).toContain('Fuentes de fotografías');
+    expect(container.textContent).toContain('Mis carpetas');
     expect(container.textContent).toContain('Disponible');
     const overviewStats = container.querySelector('li dl')?.textContent;
     expect(overviewStats).toContain('Fotos incluidas2');
-    expect(overviewStats).toContain('Sin fecha suficiente2');
+    expect(overviewStats).toContain('Fotos por revisar2');
 
     await click(button('Buscar cambios'));
     expect(request).toHaveBeenCalledWith('/photo-sources/source/sync-runs', { method: 'POST' });
+  });
+
+  it('opens the review queue and loads photos without a date', async () => {
+    await mount();
+    await click(button('Fotos por revisar'));
+    expect(request).toHaveBeenCalledWith(
+      '/photo-sources/source/pending-photos?limit=30',
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
+    expect(container.textContent).toContain('Falta una fecha');
+    expect(container.textContent).toContain('Ver fotos sin fecha');
+  });
+
+  it('previews a manual correction before enabling the apply action', async () => {
+    await mount();
+    await click(checkbox('a')!);
+    await click(button('Corregir fecha'));
+
+    const yearSelect = [...container.querySelectorAll('select')].find((node) =>
+      node.querySelector('option[value="2000"]'),
+    )!;
+    await changeSelect(yearSelect, '2000');
+    await click(button('Ver qué cambiará'));
+
+    expect(request).toHaveBeenCalledWith(
+      '/photos/manual-date-overrides/preview',
+      expect.objectContaining({
+        method: 'POST',
+        body: expect.stringContaining('"photoIds":["a"]'),
+      }),
+    );
+    expect(container.textContent).toContain('La fecha cambiará en 1 foto.');
+    expect(button('Aplicar a 1 foto').disabled).toBe(false);
+  });
+
+  it('previews the exact folder-rule impact before saving the rule', async () => {
+    await mount();
+    await click(treeRow());
+
+    const yearSelect = [...container.querySelectorAll('select')].find((node) =>
+      node.querySelector('option[value="2000"]'),
+    )!;
+    await changeSelect(yearSelect, '2000');
+    await click(button('Ver qué fotos cambiarán'));
+
+    expect(request).toHaveBeenCalledWith(
+      '/indexed-folders/folder/date-override/preview',
+      expect.objectContaining({
+        method: 'POST',
+        body: expect.stringContaining('"scope":"DIRECT_ONLY"'),
+      }),
+    );
+    expect(container.textContent).toContain('La fecha cambiará en 1 foto.');
+    expect(button('Aplicar fecha a 1 foto').disabled).toBe(false);
+  });
+
+  it('explains access problems from the latest review and offers a retry', async () => {
+    historyRun = {
+      id: 'run-1',
+      status: 'PARTIAL',
+      issueCount: 1,
+      createdAt: '2026-10-14T00:00:00.000Z',
+    };
+    await mount();
+    await click(button('Fotos por revisar'));
+    expect(container.textContent).toContain('Problemas de la última revisión');
+    expect(container.textContent).toContain('No se pudo acceder a la carpeta configurada.');
+    expect(container.textContent).toContain('Comprueba que la carpeta siga disponible en Drive');
+    expect(request).toHaveBeenCalledWith('/sync-runs/run-1/issues?limit=30', {
+      signal: expect.any(AbortSignal),
+    });
   });
 
   it('searches the source across folders and filters locally excluded photos into a recoverable bin', async () => {
@@ -256,9 +350,9 @@ describe('mounted archive removal', () => {
     );
     await click(button('Quitar fuente'));
     expect(container.textContent).toContain('Los archivos originales seguirán intactos en Drive.');
-    await click(button('Quitar carpeta e índice'));
+    await click(button('Quitar carpeta'));
     expect(request).toHaveBeenCalledWith('/photo-sources/source', { method: 'DELETE' });
-    expect(container.textContent).toContain('Aún no hay una fuente de fotografías');
+    expect(container.textContent).toContain('Aún no hay carpetas de fotos');
   });
 
   it('announces a successful Drive reconnect and removes the callback query', async () => {

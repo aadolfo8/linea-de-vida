@@ -112,6 +112,63 @@ describe('effective date', () => {
   });
 });
 
+describe('manual date preview', () => {
+  it('counts dates that change and photos already matching the requested correction', async () => {
+    const prisma: any = {
+      photo: {
+        findMany: async () => [
+          {
+            id: 'automatic',
+            effectiveDateValue: new Date('2010-01-01T00:00:00.000Z'),
+            effectiveDatePrecision: 'YEAR',
+            effectiveDateSource: 'EXIF',
+            detectedDate: new Date('2010-01-01T00:00:00.000Z'),
+            detectedPrecision: 'YEAR',
+            detectedSource: 'EXIF',
+            override: null,
+          },
+          {
+            id: 'same-manual',
+            effectiveDateValue: new Date('2005-01-01T00:00:00.000Z'),
+            effectiveDatePrecision: 'YEAR',
+            effectiveDateSource: 'MANUAL',
+            detectedDate: null,
+            detectedPrecision: 'UNKNOWN',
+            detectedSource: 'NONE',
+            override: {
+              dateValue: new Date('2005-01-01T00:00:00.000Z'),
+              precision: 'YEAR',
+            },
+          },
+          {
+            id: 'same-automatic',
+            effectiveDateValue: new Date('2005-01-01T00:00:00.000Z'),
+            effectiveDatePrecision: 'YEAR',
+            effectiveDateSource: 'EXIF',
+            detectedDate: new Date('2005-01-01T00:00:00.000Z'),
+            detectedPrecision: 'YEAR',
+            detectedSource: 'EXIF',
+            override: null,
+          },
+        ],
+      },
+    };
+
+    const preview = await new ManualDateService(prisma).preview(
+      'owner',
+      ['automatic', 'same-manual', 'same-automatic'],
+      { year: 2005, precision: 'YEAR' },
+    );
+
+    expect(preview).toEqual({
+      selectedCount: 3,
+      willChangeCount: 2,
+      alreadySameCount: 1,
+      alreadyDatedCount: 3,
+    });
+  });
+});
+
 describe('removing a manual date', () => {
   it('restores the applicable folder rule instead of leaving the photo undated', async () => {
     let update: any;

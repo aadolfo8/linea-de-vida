@@ -732,6 +732,31 @@ export class AppController {
       nextCursor: records.length > limit ? this.cursor(scope, offset + limit) : null,
     };
   }
+  @UseGuards(SessionGuard, CsrfGuard)
+  @Post('indexed-folders/:id/date-override/preview')
+  async previewFolderDate(
+    @CurrentUserId() userId: string,
+    @Param('id') folderId: string,
+    @Body() body: ManualDateInput & { scope?: unknown },
+  ) {
+    if (body.precision !== 'YEAR' && body.precision !== 'MONTH')
+      throw new BadRequestException({
+        code: 'INVALID_PRECISION',
+        message: 'Folder rules support YEAR or MONTH precision.',
+      });
+    const manual = validateManualDate(body);
+    const scope = body.scope ?? 'DIRECT_ONLY';
+    if (!Object.values(FolderDateRuleScope).includes(scope as FolderDateRuleScope))
+      throw new BadRequestException({
+        code: 'INVALID_FOLDER_RULE_SCOPE',
+        message: 'The folder rule scope is invalid.',
+      });
+    return this.folderDates.preview(userId, folderId, {
+      dateValue: manual.dateValue,
+      precision: manual.precision,
+      scope: scope as FolderDateRuleScope,
+    });
+  }
   @UseGuards(SessionGuard, CsrfGuard) @Put('indexed-folders/:id/date-override') async setFolderDate(
     @CurrentUserId() userId: string,
     @Param('id') folderId: string,
@@ -1307,6 +1332,19 @@ export class AppController {
       })),
       nextCursor: records.length > limit ? this.cursor(scope, offset + limit) : null,
     };
+  }
+  @UseGuards(SessionGuard, CsrfGuard)
+  @Post('photos/manual-date-overrides/preview')
+  async previewManualDates(
+    @CurrentUserId() userId: string,
+    @Body() body: ManualDateInput & { photoIds?: unknown },
+  ) {
+    if (!Array.isArray(body?.photoIds) || !body.photoIds.every((id) => typeof id === 'string'))
+      throw new BadRequestException({
+        code: 'INVALID_PHOTO_IDS',
+        message: 'Photo IDs are required.',
+      });
+    return this.manualDates.preview(userId, body.photoIds, body);
   }
   @UseGuards(SessionGuard, CsrfGuard)
   @Put('photos/manual-date-overrides')

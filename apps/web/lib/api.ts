@@ -70,7 +70,8 @@ export const settingsEndpoint = {
   removeSource: (sourceId: string) => `/photo-sources/${encodeURIComponent(sourceId)}`,
   sync: (sourceId: string) => `/photo-sources/${sourceId}/sync-runs`,
   run: (runId: string) => `/sync-runs/${runId}`,
-  issues: (runId: string) => `/sync-runs/${runId}/issues?limit=30`,
+  issues: (runId: string, cursor?: string) =>
+    `/sync-runs/${runId}/issues?limit=30${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`,
   history: (sourceId: string, cursor?: string) =>
     `/photo-sources/${sourceId}/sync-runs?limit=20${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`,
   indexedFolders: (sourceId: string, cursor?: string) =>
@@ -94,9 +95,11 @@ export const settingsEndpoint = {
     `/photo-exclusions?limit=30${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`,
   restorePhotoExclusion: (id: string) => `/photo-exclusions/${encodeURIComponent(id)}`,
   manualDates: '/photos/manual-date-overrides',
+  manualDatePreview: '/photos/manual-date-overrides/preview',
   folderPhotos: (folderId: string, cursor?: string, classification?: string) =>
     `/indexed-folders/${folderId}/photos?limit=30${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}${classification ? `&classification=${encodeURIComponent(classification)}` : ''}`,
   folderDate: (folderId: string) => `/indexed-folders/${folderId}/date-override`,
+  folderDatePreview: (folderId: string) => `/indexed-folders/${folderId}/date-override/preview`,
   photo: (photoId: string) => `/photos/${photoId}`,
   disconnect: (connectionId: string) => `/oauth-connections/${connectionId}`,
 };
