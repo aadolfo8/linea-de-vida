@@ -84,11 +84,16 @@ export const archiveStyles: Record<string, string> = {
     'mt-3 grid grid-cols-[repeat(auto-fit,minmax(7rem,1fr))] gap-3 [&_dt]:text-xs [&_dt]:text-map-muted [&_dd]:m-0 [&_dd]:font-semibold [&_dd]:tabular-nums',
   sourceOverviewHint: 'mt-3 text-sm leading-relaxed text-map-muted',
   sourceOverviewRun: 'mt-3 text-xs text-map-muted',
+  sourceProgress:
+    'mt-3 grid gap-2 [&_progress]:h-2 [&_progress]:w-full [&_progress]:accent-map-route',
+  sourceProgressLine: 'm-0 text-xs text-map-muted',
   sourceOverviewActions: 'flex flex-wrap items-start justify-end gap-2 max-[680px]:justify-start',
   reviewQueue: 'grid scroll-mt-24 gap-5 border-y border-map-line py-8',
   reviewQueueRow:
     'flex flex-wrap items-center justify-between gap-4 border-y border-map-line py-4 [&_h3]:m-0 [&_h3]:text-base [&_h3]:font-semibold [&_p]:mb-0 [&_p]:mt-1 [&_p]:text-sm [&_p]:text-map-muted',
   reviewIssues: 'grid gap-3 [&_h3]:m-0 [&_h3]:text-base [&_h3]:font-semibold',
+  reviewIssueSection:
+    'grid gap-1 border-t border-map-line pt-3 [&_h4]:m-0 [&_h4]:text-sm [&_h4]:font-semibold [&_h4]:text-map-route',
   reviewQueueHint: 'm-0 text-sm text-map-muted',
   reviewQueueError:
     'flex flex-wrap items-center justify-between gap-3 border-y border-map-danger bg-[#f8e9e4] px-4 py-3 text-sm text-map-danger [&_p]:m-0 [&_p]:max-w-[68ch]',
@@ -138,14 +143,14 @@ export const archiveStyles: Record<string, string> = {
   treePanel:
     'min-w-0 border-r border-map-line pr-5 max-[900px]:border-r-0 max-[900px]:border-b max-[900px]:pb-5 max-[900px]:pr-0',
   treeHeading:
-    'mb-3 flex items-center justify-between gap-2 [&_h3]:m-0 [&_h3]:text-base [&_h3]:font-semibold',
+    'mb-3 flex flex-wrap items-start justify-between gap-x-4 gap-y-2 [&_h3]:m-0 [&_h3]:text-base [&_h3]:font-semibold [&>span]:max-w-full [&>span]:text-xs [&>span]:leading-relaxed [&>span]:text-map-muted',
   pendingTreeRow: 'flex min-h-11 items-center gap-2 rounded-md px-3 text-sm text-map-muted',
   tree: 'grid max-h-[65dvh] gap-1 overflow-auto max-[900px]:max-h-72',
   treeItem:
     'flex min-h-11 w-full items-center gap-2 rounded-md px-2 text-left text-sm text-map-muted transition-colors hover:bg-map-panel hover:text-map-ink focus-visible:outline-2 focus-visible:outline-map-route',
   currentFolder: 'bg-map-route-soft/60 font-semibold text-map-ink',
-  disclosure: 'grid size-8 shrink-0 place-items-center rounded hover:bg-map-panel',
-  disclosureSpacer: 'size-8 shrink-0',
+  disclosure: 'grid size-11 shrink-0 place-items-center rounded hover:bg-map-panel [&_svg]:size-4',
+  disclosureSpacer: 'size-11 shrink-0',
   treeRow: 'flex min-w-0 flex-1 items-center gap-2',
   folderIcon: 'size-4 shrink-0 fill-map-route-soft stroke-map-route',
   treeLabel: 'min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap',
