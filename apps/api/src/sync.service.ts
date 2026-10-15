@@ -315,6 +315,7 @@ export class SyncService {
           SyncIssueSeverity.WARNING,
           'Takeout metadata match was ambiguous.',
           item.id,
+          folder.id,
         );
       const dimensions = photoDimensions(item.imageWidth, item.imageHeight);
       const detected = this.dates.resolve({
@@ -492,6 +493,8 @@ export class SyncService {
                   SyncIssueCode.LIMIT_REACHED,
                   SyncIssueSeverity.ERROR,
                   'The Takeout folder metadata safety limit was reached.',
+                  undefined,
+                  folder.id,
                 );
                 await this.persist(run.id, checkpoint, counts);
                 await this.prisma.syncRun.update({
@@ -507,6 +510,7 @@ export class SyncService {
                 SyncIssueSeverity.WARNING,
                 'Takeout metadata JSON was invalid.',
                 id,
+                folder.id,
               );
             metadata.candidates.push(...additions);
             metadata.bytes += addedBytes;
@@ -535,6 +539,8 @@ export class SyncService {
             SyncIssueCode.UNKNOWN,
             SyncIssueSeverity.ERROR,
             'The configured pending-folder safety limit was reached.',
+            undefined,
+            folder.id,
           );
           break;
         }
@@ -555,6 +561,7 @@ export class SyncService {
                   SyncIssueSeverity.WARNING,
                   'The file could not be indexed.',
                   item.id,
+                  folder.id,
                 );
               }
             }),

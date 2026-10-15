@@ -864,8 +864,28 @@ export class AppController {
         _count: { _all: true },
       }),
     ]);
+    const page = records.slice(0, limit);
+    const relatedPhotos = await this.prisma.photo.findMany({
+      where: {
+        sourceId,
+        userId,
+        driveFileId: {
+          in: page.flatMap((issue) => (issue.driveFileId ? [issue.driveFileId] : [])),
+        },
+      },
+      select: { id: true, driveFileId: true, fileName: true, folderId: true },
+    });
+    const photosByDriveId = new Map(relatedPhotos.map((photo) => [photo.driveFileId, photo]));
     return {
-      items: records.slice(0, limit),
+      items: page.map((issue) => {
+        const photo = issue.driveFileId ? photosByDriveId.get(issue.driveFileId) : null;
+        return {
+          ...issue,
+          indexedPhotoId: photo?.id ?? null,
+          fileName: photo?.fileName ?? null,
+          indexedFolderId: photo?.folderId ?? null,
+        };
+      }),
       totalCount: grouped.reduce((total, group) => total + group._count._all, 0),
       countsByCode: Object.fromEntries(grouped.map((group) => [group.code, group._count._all])),
       nextCursor: records.length > limit ? this.cursor(scope, offset + limit) : null,
