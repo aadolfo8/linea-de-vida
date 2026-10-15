@@ -5,13 +5,13 @@ import { useReducedMotion } from 'motion/react';
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { api } from '../../lib/api';
 import { mediaUrl } from '../../lib/media';
+import { Button } from '../../components/ui/button';
 import {
   photoDateLabel,
   wrappedFocusIndex,
   type TimelinePhoto,
   type TimelinePhotoPage,
 } from './timeline-model';
-import styles from './timeline-photo-viewer.module.css';
 
 const focusableSelector =
   'button:not(:disabled), a[href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"]), [contenteditable="true"]';
@@ -24,7 +24,11 @@ const isEditable = (target: EventTarget | null) =>
 
 function ArrowIcon({ direction }: { direction: 'left' | 'right' }) {
   return (
-    <svg viewBox="0 0 24 24" aria-hidden="true">
+    <svg
+      className="w-[1.15rem] fill-none stroke-current [stroke-linecap:round] [stroke-linejoin:round] [stroke-width:1.8]"
+      viewBox="0 0 24 24"
+      aria-hidden="true"
+    >
       <path d={direction === 'left' ? 'M15 5l-7 7 7 7' : 'M9 5l7 7-7 7'} />
     </svg>
   );
@@ -189,28 +193,34 @@ export function TimelinePhotoViewer({
   return (
     <div
       ref={backdrop}
-      className={styles.backdrop}
+      className="fixed inset-0 z-50 grid place-items-center bg-[rgb(6_10_8_/_0.94)] p-4 max-[42rem]:p-2"
       onPointerDown={(event) => {
         if (event.target === event.currentTarget) onClose();
       }}
     >
       <section
         ref={dialog}
-        className={styles.dialog}
+        className="timeline-photo-dialog grid max-h-[calc(100dvh-2rem)] w-[min(70rem,100%)] grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden rounded-2xl bg-[#f3f0e8] text-[#151a16] shadow-[0_1.75rem_5rem_rgb(0_0_0_/_0.38)] outline-none max-[42rem]:max-h-[calc(100dvh-1rem)]"
         role="dialog"
         aria-modal="true"
         aria-label={`Vista ampliada de ${selected.fileName}`}
         tabIndex={-1}
         onKeyDown={keyDown}
       >
-        <header>
-          <span aria-live="polite">
+        <header className="flex min-h-16 items-center justify-between gap-4 border-b border-[#cbd0c7] px-4 py-3 max-[42rem]:min-h-14 max-[42rem]:px-3">
+          <span className="tabular-nums" aria-live="polite">
             {index + 1} de {loadedPhotos.length}
           </span>
-          <button onClick={onClose}>Cerrar</button>
+          <Button
+            variant="outline"
+            className="min-w-11 rounded-xl border-[#66705f] bg-transparent px-3 text-[#151a16] transition-[background,color,transform] hover:bg-[#151a16] hover:text-[#f3f0e8] active:translate-y-px focus-visible:outline-[#b7d43b] disabled:cursor-not-allowed disabled:opacity-40"
+            onClick={onClose}
+          >
+            Cerrar
+          </Button>
         </header>
-        <div className={styles.viewport} ref={viewportRef}>
-          <div className={styles.container}>
+        <div className="min-h-0 overflow-hidden" ref={viewportRef}>
+          <div className="flex h-full touch-pan-y touch-pinch-zoom">
             {loadedPhotos.map((photo, photoIndex) => (
               <ViewerPhotoSlide
                 key={photo.id}
@@ -223,24 +233,30 @@ export function TimelinePhotoViewer({
             ))}
           </div>
         </div>
-        <footer>
-          <div className={styles.caption}>
-            <strong>{selected.fileName}</strong>
-            <span>{photoDateLabel(selected)}</span>
+        <footer className="flex min-h-16 items-center justify-between gap-4 border-t border-[#cbd0c7] px-4 py-3 max-[42rem]:min-h-14 max-[42rem]:flex-wrap max-[42rem]:px-3">
+          <div className="grid min-w-0 gap-1">
+            <strong className="overflow-hidden text-ellipsis whitespace-nowrap text-sm">
+              {selected.fileName}
+            </strong>
+            <span className="text-[0.76rem] tabular-nums text-[#566156]">
+              {photoDateLabel(selected)}
+            </span>
           </div>
-          <div className={styles.controls}>
+          <div className="flex items-center gap-2 max-[42rem]:flex-wrap max-[42rem]:justify-end">
             {canViewOriginal && (
-              <button
+              <Button
                 type="button"
+                variant="outline"
+                className="min-w-11 rounded-xl border-[#66705f] bg-transparent px-3 text-[#151a16] hover:bg-[#151a16] hover:text-[#f3f0e8] focus-visible:outline-[#b7d43b]"
                 aria-pressed={selectedOriginalRequested}
                 onClick={() => setOriginalPhotoId(selectedOriginalRequested ? null : selected.id)}
               >
                 {selectedOriginalRequested ? 'Volver a vista previa' : 'Ver original'}
-              </button>
+              </Button>
             )}
             {isDownloadOnly && (
               <a
-                className={styles.download}
+                className="inline-flex min-h-11 items-center px-3 text-[0.8rem] text-inherit underline-offset-4 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#b7d43b]"
                 href={mediaUrl(api, `/v1/photos/${selected.id}/content`)}
               >
                 Descargar original
@@ -252,18 +268,29 @@ export function TimelinePhotoViewer({
               </span>
             )}
             {loadMoreError && (
-              <button type="button" onClick={() => void fetchNextPage()}>
+              <Button
+                type="button"
+                variant="outline"
+                className="min-w-11 rounded-xl border-[#66705f] text-[#151a16] hover:bg-[#151a16] hover:text-[#f3f0e8]"
+                onClick={() => void fetchNextPage()}
+              >
                 Reintentar carga
-              </button>
+              </Button>
             )}
-            <button
+            <Button
+              variant="outline"
+              size="icon"
+              className="min-h-11 rounded-xl border-[#66705f] bg-transparent text-[#151a16] hover:bg-[#151a16] hover:text-[#f3f0e8] focus-visible:outline-[#b7d43b] disabled:bg-transparent disabled:text-[#151a16]"
               aria-label="Foto anterior"
               disabled={index === 0}
               onClick={() => embla?.scrollPrev(jump)}
             >
               <ArrowIcon direction="left" />
-            </button>
-            <button
+            </Button>
+            <Button
+              variant="outline"
+              size="icon"
+              className="min-h-11 rounded-xl border-[#66705f] bg-transparent text-[#151a16] hover:bg-[#151a16] hover:text-[#f3f0e8] focus-visible:outline-[#b7d43b] disabled:bg-transparent disabled:text-[#151a16]"
               aria-label={
                 index === loadedPhotos.length - 1 && hasMore
                   ? 'Cargar siguientes fotografías'
@@ -276,7 +303,7 @@ export function TimelinePhotoViewer({
               }}
             >
               <ArrowIcon direction="right" />
-            </button>
+            </Button>
           </div>
         </footer>
       </section>
@@ -332,7 +359,10 @@ function ViewerPhotoSlide({
   );
 
   return (
-    <div className={styles.slide} aria-hidden={!active}>
+    <div
+      className="relative grid min-h-0 min-w-full place-items-center bg-[#080c09]"
+      aria-hidden={!active}
+    >
       {/* eslint-disable-next-line @next/next/no-img-element -- Private media URLs rely on the browser's session cookies. */}
       <img
         key={`${photo.id}-${variant}-${retryKey}`}
@@ -340,26 +370,43 @@ function ViewerPhotoSlide({
         alt={active ? photo.fileName : ''}
         width={photo.dimensions?.width}
         height={photo.dimensions?.height}
+        className="max-h-[min(68dvh,45rem)] max-w-full object-contain"
         loading={eager ? 'eager' : 'lazy'}
         onLoad={() => setStatus('ready')}
         onError={handleError}
       />
       {active && status === 'loading' && (
-        <span className={styles.imageStatus} role="status" aria-live="polite">
+        <span
+          className="absolute bottom-4 left-1/2 w-fit max-w-[calc(100%-2rem)] -translate-x-1/2 rounded-[0.65rem] border border-[#f3f0e8]/30 bg-[#151a16]/95 px-3.5 py-2.5 text-center text-sm text-[#f3f0e8]"
+          role="status"
+          aria-live="polite"
+        >
           Cargando fotografía…
         </span>
       )}
       {active && status === 'ready' && originalFallback && (
-        <span className={styles.imageStatus} role="status" aria-live="polite">
+        <span
+          className="absolute bottom-4 left-1/2 w-fit max-w-[calc(100%-2rem)] -translate-x-1/2 rounded-[0.65rem] border border-[#f3f0e8]/30 bg-[#151a16]/95 px-3.5 py-2.5 text-center text-sm text-[#f3f0e8]"
+          role="status"
+          aria-live="polite"
+        >
           El original no se pudo cargar; se muestra la miniatura.
         </span>
       )}
       {active && status === 'error' && (
-        <div className={styles.imageError} role="alert">
-          <p>No se pudo cargar la fotografía.</p>
-          <button type="button" onClick={retryThumbnail}>
+        <div
+          className="absolute inset-x-4 bottom-4 mx-auto grid w-fit max-w-[calc(100%-2rem)] justify-items-center gap-3 rounded-[0.65rem] border border-[#f3f0e8]/30 bg-[#151a16]/95 px-3.5 py-2.5 text-center text-[#f3f0e8]"
+          role="alert"
+        >
+          <p className="m-0 text-sm">No se pudo cargar la fotografía.</p>
+          <Button
+            type="button"
+            variant="outline"
+            className="min-w-11 rounded-xl border-[#b7d43b] bg-transparent text-[#f3f0e8] hover:bg-[#f3f0e8] hover:text-[#151a16]"
+            onClick={retryThumbnail}
+          >
             Reintentar miniatura
-          </button>
+          </Button>
         </div>
       )}
     </div>

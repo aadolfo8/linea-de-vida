@@ -804,6 +804,123 @@ export class AppController {
       nextCursor: records.length > limit ? this.cursor(scope, offset + limit) : null,
     };
   }
+  @UseGuards(SessionGuard) @Get('photo-sources/:id/photos') async searchSourcePhotos(
+    @CurrentUserId() userId: string,
+    @Param('id') sourceId: string,
+    @Query('q') rawQuery?: string,
+    @Query('folderId') folderId?: string,
+    @Query('classification') classification?: string,
+    @Query('cursor') cursor?: string,
+    @Query('limit') rawLimit?: string,
+  ) {
+    const source = await this.prisma.photoSource.findFirst({ where: { id: sourceId, userId } });
+    if (!source)
+      throw new NotFoundException({ code: 'SOURCE_NOT_FOUND', message: 'Photo source not found.' });
+    const query = rawQuery?.trim() ?? '';
+    if (query.length > 120)
+      throw new BadRequestException({
+        code: 'SEARCH_TOO_LONG',
+        message: 'Search is limited to 120 characters.',
+      });
+    const supportedClassifications = ['ALL', 'UNCLASSIFIED', 'AUTOMATIC', 'FOLDER', 'MANUAL'];
+    if (classification && !supportedClassifications.includes(classification))
+      throw new BadRequestException({
+        code: 'INVALID_CLASSIFICATION',
+        message: 'The photo classification filter is invalid.',
+      });
+    if (folderId) {
+      const folder = await this.prisma.indexedFolder.findFirst({
+        where: { id: folderId, userId, sourceId },
+        select: { id: true },
+      });
+      if (!folder)
+        throw new NotFoundException({
+          code: 'FOLDER_NOT_FOUND',
+          message: 'Indexed folder not found.',
+        });
+    }
+    const scope = `source-photos:${sourceId}:${query}:${folderId ?? ''}:${classification ?? 'ALL'}`;
+    const { limit, offset } = this.page(cursor, rawLimit, scope);
+    const classificationWhere =
+      classification === 'UNCLASSIFIED'
+        ? { effectiveDateValue: null }
+        : classification === 'MANUAL'
+          ? { effectiveDateSource: 'MANUAL' as const }
+          : classification === 'FOLDER'
+            ? { effectiveDateSource: 'FOLDER_RULE' as const }
+            : classification === 'AUTOMATIC'
+              ? {
+                  effectiveDateSource: {
+                    in: ['EXIF', 'DRIVE_IMAGE_METADATA', 'TAKEOUT', 'FOLDER'] as DateSource[],
+                  },
+                }
+              : {};
+    const records = await this.prisma.photo.findMany({
+      where: {
+        userId,
+        sourceId,
+        status: 'ACTIVE',
+        ...(query ? { fileName: { contains: query, mode: 'insensitive' as const } } : {}),
+        ...(folderId ? { folderId } : {}),
+        ...classificationWhere,
+      },
+      orderBy: [{ fileName: 'asc' }, { id: 'asc' }],
+      skip: offset,
+      take: limit + 1,
+      include: { override: true, folder: { select: { path: true } } },
+    });
+    return {
+      items: records.slice(0, limit).map((photo) => ({
+        ...photoDateResponse(photo),
+        thumbnailUrl: `/v1/photos/${photo.id}/thumbnail`,
+        folderPath: photo.folder?.path ?? [],
+      })),
+      nextCursor: records.length > limit ? this.cursor(scope, offset + limit) : null,
+    };
+  }
+  @UseGuards(SessionGuard) @Get('photo-exclusions') async photoExclusions(
+    @CurrentUserId() userId: string,
+    @Query('cursor') cursor?: string,
+    @Query('limit') rawLimit?: string,
+  ) {
+    const scope = `photo-exclusions:${userId}`;
+    const { limit, offset } = this.page(cursor, rawLimit, scope);
+    const records = await this.prisma.photoExclusion.findMany({
+      where: { userId },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      skip: offset,
+      take: limit + 1,
+    });
+    return {
+      items: records.slice(0, limit).map((item) => ({
+        id: item.id,
+        sourceId: item.sourceId,
+        sourceName: item.sourceName,
+        folderPath: item.folderPath,
+        fileName: item.fileName,
+        mimeType: item.mimeType,
+        restoredAt: item.restoredAt,
+        createdAt: item.createdAt,
+      })),
+      nextCursor: records.length > limit ? this.cursor(scope, offset + limit) : null,
+    };
+  }
+  @UseGuards(SessionGuard, CsrfGuard)
+  @Delete('photo-exclusions/:id')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  async restorePhotoExclusion(@CurrentUserId() userId: string, @Param('id') id: string) {
+    const exclusion = await this.prisma.photoExclusion.findFirst({ where: { id, userId } });
+    if (!exclusion)
+      throw new NotFoundException({
+        code: 'PHOTO_EXCLUSION_NOT_FOUND',
+        message: 'Excluded photo not found.',
+      });
+    if (!exclusion.restoredAt)
+      await this.prisma.photoExclusion.updateMany({
+        where: { id, userId, restoredAt: null },
+        data: { restoredAt: new Date() },
+      });
+  }
   @UseGuards(SessionGuard) @Get('sync-runs/:id') async run(
     @CurrentUserId() userId: string,
     @Param('id') id: string,
@@ -1243,14 +1360,43 @@ export class AppController {
   @Delete('photos/:id')
   @HttpCode(HttpStatus.NO_CONTENT)
   async deletePhoto(@CurrentUserId() userId: string, @Param('id') id: string) {
-    const photo = await this.prisma.photo.findFirst({ where: { id, userId } });
+    const photo = await this.prisma.photo.findFirst({
+      where: { id, userId },
+      include: {
+        source: { select: { name: true } },
+        folder: { select: { path: true } },
+        override: true,
+      },
+    });
     if (!photo)
       throw new NotFoundException({ code: 'PHOTO_NOT_FOUND', message: 'Photo not found.' });
     await this.prisma.$transaction(async (tx) => {
       await tx.photoExclusion.upsert({
         where: { userId_driveFileId: { userId, driveFileId: photo.driveFileId } },
-        create: { userId, driveFileId: photo.driveFileId },
-        update: {},
+        create: {
+          userId,
+          driveFileId: photo.driveFileId,
+          sourceId: photo.sourceId,
+          sourceName: photo.source.name,
+          folderPath: photo.folder?.path ?? [],
+          fileName: photo.fileName,
+          mimeType: photo.mimeType,
+          manualDateValue: photo.override?.dateValue ?? null,
+          manualDatePrecision: photo.override?.precision ?? null,
+          manualDateReason: photo.override?.reason ?? null,
+          restoredAt: null,
+        },
+        update: {
+          sourceId: photo.sourceId,
+          sourceName: photo.source.name,
+          folderPath: photo.folder?.path ?? [],
+          fileName: photo.fileName,
+          mimeType: photo.mimeType,
+          manualDateValue: photo.override?.dateValue ?? null,
+          manualDatePrecision: photo.override?.precision ?? null,
+          manualDateReason: photo.override?.reason ?? null,
+          restoredAt: null,
+        },
       });
       await tx.photo.delete({ where: { id: photo.id } });
     });
