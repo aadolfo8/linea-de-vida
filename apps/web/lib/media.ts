@@ -11,3 +11,9 @@ export function mediaUrl(apiUrl: string, path: string) {
   const relativeOrigin = origin ? `/${origin.replace(/^\/+|\/+$/g, '')}` : '';
   return `${relativeOrigin}/${path}`;
 }
+
+/** Adds a bounded thumbnail variant while preserving API-provided media paths. */
+export function thumbnailVariantUrl(apiUrl: string, path: string, width: 640 | 1280) {
+  const url = mediaUrl(apiUrl, path);
+  return `${url}${url.includes('?') ? '&' : '?'}width=${width}`;
+}

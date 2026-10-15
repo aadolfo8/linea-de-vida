@@ -177,6 +177,11 @@ describe('TimelinePhotoViewer effects', () => {
       true,
     );
     expect(
+      images
+        .find((image) => image.getAttribute('src')?.includes('/photo-2/thumbnail'))
+        ?.getAttribute('src'),
+    ).toContain('width=1280');
+    expect(
       [...container.querySelectorAll('button')].some((item) =>
         item.textContent?.includes('Ver original'),
       ),
