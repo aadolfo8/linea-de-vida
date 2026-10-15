@@ -1,11 +1,12 @@
 ---
 version: 1
-slug: "app-page-tsx"
-primary_target: "app/page.tsx"
+slug: 'app-page-tsx'
+primary_target: 'app/page.tsx'
 related_targets: []
 ---
 
 ## Inicio — Persuade
+
 - **Job y audiencia:** Una persona de la familia llega para recuperar recuerdos y entender cómo entrar en su archivo privado.
 - **Resultado y prueba:** En segundos sabe que es una aplicación de recuerdos familiares, ve «Iniciar sesión con Google» como acción principal y entiende que después selecciona carpetas de Drive. Pruebas verdaderas: Drive es de solo lectura y solo se usan carpetas seleccionadas.
 - **Dirección elegida:** Mapa familiar desplegado, aprobada por el usuario. Reutiliza el mundo cartográfico ya implementado (papel, tinta azul verdosa, rutas menta y señal coral); composición en dos columnas en escritorio, y arte de mapa/fotografía ilustrada arriba con acceso en primer plano en móvil. La ilustración SVG actual es temporal hasta que el usuario aporte su imagen. Tres garantías discretas anclan privacidad, selección explícita y solo lectura.
