@@ -35,6 +35,7 @@ type RuleScope = 'DIRECT_ONLY' | 'FALLBACK_DESCENDANTS' | 'ALL_DESCENDANTS';
 type DriveFolder = { id: string; name: string; parents: string[] };
 type IndexedFolder = {
   id: string;
+  driveFolderId?: string;
   parentId: string | null;
   name: string;
   path: string[];
@@ -93,12 +94,16 @@ type SyncIssue = {
   code?: string;
   driveFileId?: string | null;
   driveFolderId?: string | null;
+  indexedPhotoId?: string | null;
+  indexedFolderId?: string | null;
+  fileName?: string | null;
   createdAt?: string;
 };
 type SourceOverview = {
   summary: ClassificationSummary | null;
   latestRun: SyncRun | null;
   error: boolean;
+  pollError?: boolean;
 };
 type Notice = { message: string; tone: 'info' | 'success' | 'warning' | 'error' };
 type ManualDatePreview = {
@@ -223,6 +228,19 @@ const syncStatusLabel = (status: string) =>
 const syncPhaseLabel = (phase?: string) =>
   phase === 'SCANNING' ? 'Revisando carpetas y fotografías' : 'Preparando la revisión';
 
+const syncResultSummary = (run: SyncRun) => {
+  const totals = `${pluralize(run.foundCount ?? 0, 'foto encontrada', 'fotos encontradas')}; ${pluralize(run.indexedCount ?? 0, 'incluida', 'incluidas')}; ${pluralize(run.issueCount ?? 0, 'incidencia', 'incidencias')}.`;
+  if (run.status === 'SUCCEEDED')
+    return `Revisión completa. ${totals} Los originales de Drive no se modificaron.`;
+  if (run.status === 'PARTIAL')
+    return `Revisión parcial. ${totals} No se confirmaron las ausencias que quedaron sin revisar.`;
+  if (run.status === 'FAILED')
+    return `Revisión fallida. ${totals} No se confirmó ninguna ausencia en el archivo.`;
+  if (run.status === 'CANCELLED')
+    return 'Revisión cancelada. No se confirmó la ausencia de archivos.';
+  return null;
+};
+
 const sourceStatusLabel = (status: string) =>
   ({ ACTIVE: 'Disponible', DISCONNECTED: 'Drive desconectado', PAUSED: 'Pausada' })[status] ??
   'Estado no disponible';
@@ -231,12 +249,20 @@ const issueCopy = (issue: SyncIssue) =>
   ({
     ACCESS_DENIED:
       'No se pudo acceder a la carpeta configurada. Comprueba que siga disponible en Drive y vuelve a intentarlo.',
+    DRIVE_UNAVAILABLE:
+      'Drive no respondió a la revisión. Tus archivos no se han modificado; inténtalo de nuevo más tarde.',
+    RATE_LIMITED:
+      'Drive limitó temporalmente las solicitudes. La revisión no pudo confirmar el estado de este elemento.',
     AMBIGUOUS_TAKEOUT_MATCH:
       'No se pudo relacionar con seguridad una foto con sus datos de Google Fotos. La foto se conservó para revisión.',
     INVALID_TAKEOUT_JSON:
       'Uno de los archivos de datos de Google Fotos no se pudo leer. Puedes volver a exportarlo y repetir la revisión.',
     UNREADABLE_METADATA:
       'No se pudo leer la información de una fotografía. La revisión continuó con el resto del archivo.',
+    UNSUPPORTED_MEDIA:
+      'Este archivo no tiene un formato de foto compatible. Sigue intacto en Drive y no se añadió al archivo.',
+    LIMIT_REACHED:
+      'La revisión alcanzó un límite de seguridad y quedó incompleta. No se confirmaron ausencias en Drive.',
     UNKNOWN:
       'La revisión alcanzó un límite de seguridad. Reduce el tamaño de la carpeta o vuelve a intentarlo.',
   })[issue.code ?? ''] ??
@@ -246,12 +272,19 @@ const issueActionCopy = (issue: SyncIssue) =>
   ({
     ACCESS_DENIED:
       'Comprueba que la carpeta siga disponible en Drive y que tu cuenta tenga acceso; después vuelve a revisarla.',
+    DRIVE_UNAVAILABLE: 'Espera a que Drive se recupere y vuelve a iniciar una revisión completa.',
+    RATE_LIMITED:
+      'Espera un poco antes de volver a revisar; no se ha confirmado que falten archivos.',
     AMBIGUOUS_TAKEOUT_MATCH:
       'Comprueba que la exportación de Google Fotos esté completa y vuelve a revisar la carpeta.',
     INVALID_TAKEOUT_JSON:
       'Vuelve a exportar los datos de Google Fotos, guárdalos en Drive y después revisa la carpeta.',
     UNREADABLE_METADATA:
       'La foto se conservó. Vuelve a revisar la carpeta para intentar leer su información otra vez.',
+    UNSUPPORTED_MEDIA:
+      'Si se trata de una foto, cambia su formato en Drive y vuelve a revisar. Este archivo no se ha alterado.',
+    LIMIT_REACHED:
+      'Reduce el alcance de la revisión o divide el archivo antes de volver a intentarlo.',
     UNKNOWN: 'Prueba con una carpeta más pequeña o revisa sus subcarpetas por separado.',
   })[issue.code ?? ''] ?? 'Vuelve a revisar la carpeta para intentarlo otra vez.';
 
@@ -280,6 +313,7 @@ export function ArchiveWorkspace({
   const [sources, setSources] = useState<Source[]>([]);
   const [organizeTab, setOrganizeTab] = useState<'folders' | 'pending' | 'dates'>('folders');
   const [sourceOverviews, setSourceOverviews] = useState<Record<string, SourceOverview>>({});
+  const sourceOverviewsRef = useRef(sourceOverviews);
   const [selectedSourceId, setSelectedSourceId] = useState<string | null>(null);
   const [folderId, setFolderId] = useState('');
   const [sourceName, setSourceName] = useState('');
@@ -309,7 +343,6 @@ export function ArchiveWorkspace({
   const [issues, setIssues] = useState<SyncIssue[]>([]);
   const [issueCursor, setIssueCursor] = useState<string | null>(null);
   const [issueTotalCount, setIssueTotalCount] = useState(0);
-  const [issueCountsByCode, setIssueCountsByCode] = useState<Record<string, number>>({});
   const [loadingIssues, setLoadingIssues] = useState(false);
   const [loadingMoreIssues, setLoadingMoreIssues] = useState(false);
   const [issuesError, setIssuesError] = useState(false);
@@ -352,13 +385,18 @@ export function ArchiveWorkspace({
   const sourcePendingRemoval =
     sources.find((source) => source.id === confirmRemoveSourceId) ?? null;
   const selectedFolder = folders.find((folder) => folder.id === selectedFolderId) ?? null;
-  const groupedIssues = useMemo(() => {
-    const groups = new Map<string, SyncIssue[]>();
+  const issueAreas = useMemo(() => {
+    const areas = {
+      folders: [] as SyncIssue[],
+      photos: [] as SyncIssue[],
+      review: [] as SyncIssue[],
+    };
     for (const issue of issues) {
-      const code = issue.code ?? 'UNKNOWN';
-      groups.set(code, [...(groups.get(code) ?? []), issue]);
+      if (issue.indexedPhotoId) areas.photos.push(issue);
+      else if (issue.driveFolderId) areas.folders.push(issue);
+      else areas.review.push(issue);
     }
-    return [...groups.entries()];
+    return areas;
   }, [issues]);
 
   const folderRelations = useMemo(() => {
@@ -418,6 +456,10 @@ export function ArchiveWorkspace({
 
   const announce = (message: string, tone: Notice['tone'] = 'info') => setNotice({ message, tone });
 
+  useEffect(() => {
+    sourceOverviewsRef.current = sourceOverviews;
+  }, [sourceOverviews]);
+
   const restoreOrganizeReturn = () => {
     const context = organizeReturnRestoreRef.current;
     if (!context) return;
@@ -463,6 +505,38 @@ export function ArchiveWorkspace({
       );
   };
 
+  const openIssueFolder = (issue: SyncIssue) => {
+    const folder =
+      folders.find((candidate) => candidate.id === issue.indexedFolderId) ??
+      folders.find((candidate) => candidate.driveFolderId === issue.driveFolderId);
+    if (!folder || !activeSource) {
+      announce(
+        'Esta carpeta aún no está disponible en el índice. Comprueba el acceso en Drive y vuelve a revisar la fuente.',
+        'warning',
+      );
+      return;
+    }
+    setOrganizeTab('folders');
+    pendingViewRef.current = false;
+    setPendingView(false);
+    setSearchMode(false);
+    setAppliedSearch('');
+    setSearchText('');
+    setSelectedFolderId(folder.id);
+    selectedFolderIdRef.current = folder.id;
+    setSelectedPhotos(new Set());
+    void loadPhotos(activeSource.id, folder.id, 'ALL').catch((error) =>
+      announce(errorCopy(error, 'No se pudieron abrir las fotos de esta carpeta.'), 'error'),
+    );
+    requestAnimationFrame(() => {
+      const row = [...document.querySelectorAll<HTMLElement>('[data-folder-id]')].find(
+        (element) => element.dataset.folderId === folder.id,
+      );
+      row?.scrollIntoView?.({ block: 'center' });
+      row?.focus({ preventScroll: true });
+    });
+  };
+
   const loadMoreIssues = async () => {
     if (!activeSource || !issueCursor || loadingMoreIssues) return;
     setLoadingMoreIssues(true);
@@ -478,7 +552,6 @@ export function ArchiveWorkspace({
       ]);
       setIssueCursor(page.nextCursor);
       setIssueTotalCount(page.totalCount);
-      setIssueCountsByCode(page.countsByCode);
       setIssuesError(false);
     } catch (error) {
       setIssuesError(true);
@@ -1074,38 +1147,65 @@ export function ArchiveWorkspace({
   }, [manualYear, manualMonth, selectedPhotos]);
 
   useEffect(() => {
-    const sourceId = activeSource?.id;
-    if (!sourceId || !run || TERMINAL_SYNC_STATUSES.includes(run.status)) return;
-    const runId = run.id;
+    if (area !== 'organize') return;
     const controller = new AbortController();
-    const timer = window.setInterval(() => {
-      void apiJson<SyncRun>(settingsEndpoint.run(runId), { signal: controller.signal })
-        .then((nextRun) => {
-          if (!controller.signal.aborted && activeSourceIdRef.current === sourceId) {
-            setRun(nextRun);
-            setSourceOverviews((current) => ({
-              ...current,
-              [sourceId]: {
-                summary: current[sourceId]?.summary ?? null,
-                latestRun: nextRun,
-                error: current[sourceId]?.error ?? false,
-              },
-            }));
+    let timer: number | null = null;
+    let polling = false;
+    const pollActiveRuns = async () => {
+      if (controller.signal.aborted || polling) return;
+      const activeRuns = Object.entries(sourceOverviewsRef.current).flatMap(
+        ([sourceId, overview]) =>
+          overview.latestRun && isSyncActive(overview.latestRun)
+            ? [{ sourceId, run: overview.latestRun }]
+            : [],
+      );
+      if (!activeRuns.length) {
+        if (!controller.signal.aborted) timer = window.setTimeout(pollActiveRuns, 2500);
+        return;
+      }
+      polling = true;
+      await Promise.allSettled(
+        activeRuns.map(async ({ sourceId, run: currentRun }) => {
+          try {
+            const nextRun = await apiJson<SyncRun>(settingsEndpoint.run(currentRun.id), {
+              signal: controller.signal,
+            });
+            if (controller.signal.aborted) return;
+            setSourceOverviews((current) => {
+              if (current[sourceId]?.latestRun?.id !== currentRun.id) return current;
+              return {
+                ...current,
+                [sourceId]: {
+                  ...current[sourceId]!,
+                  latestRun: nextRun,
+                  error: false,
+                  pollError: false,
+                },
+              };
+            });
+            if (activeSourceIdRef.current === sourceId)
+              setRun((current) => (current?.id === currentRun.id ? nextRun : current));
+          } catch (error) {
+            if (!isAbortError(error) && !controller.signal.aborted)
+              setSourceOverviews((current) => {
+                if (current[sourceId]?.latestRun?.id !== currentRun.id) return current;
+                return {
+                  ...current,
+                  [sourceId]: { ...current[sourceId]!, pollError: true },
+                };
+              });
           }
-        })
-        .catch((error) => {
-          if (!isAbortError(error) && activeSourceIdRef.current === sourceId)
-            announce(
-              errorCopy(error, 'No se pudo consultar el avance. La revisión puede seguir activa.'),
-              'error',
-            );
-        });
-    }, 2500);
-    return () => {
-      window.clearInterval(timer);
-      controller.abort();
+        }),
+      );
+      polling = false;
+      if (!controller.signal.aborted) timer = window.setTimeout(pollActiveRuns, 2500);
     };
-  }, [activeSource?.id, run?.id, run?.status]);
+    void pollActiveRuns();
+    return () => {
+      controller.abort();
+      if (timer !== null) window.clearTimeout(timer);
+    };
+  }, [area]);
 
   useEffect(() => {
     const sourceId = activeSource?.id;
@@ -1113,7 +1213,6 @@ export function ArchiveWorkspace({
       setIssues([]);
       setIssueCursor(null);
       setIssueTotalCount(0);
-      setIssueCountsByCode({});
       setLoadingIssues(false);
       setIssuesError(false);
       return;
@@ -1122,7 +1221,6 @@ export function ArchiveWorkspace({
     setIssues([]);
     setIssueCursor(null);
     setIssueTotalCount(0);
-    setIssueCountsByCode({});
     setLoadingIssues(true);
     setIssuesError(false);
     void apiJson<{
@@ -1138,7 +1236,6 @@ export function ArchiveWorkspace({
           setIssues(page.items);
           setIssueCursor(page.nextCursor);
           setIssueTotalCount(page.totalCount);
-          setIssueCountsByCode(page.countsByCode);
           setLoadingIssues(false);
           setIssuesError(false);
         }
@@ -1174,9 +1271,15 @@ export function ArchiveWorkspace({
       void loadSources();
     } else if (run?.status === 'FAILED') {
       announce(
-        'No se pudo actualizar el archivo. Revisa la incidencia y vuelve a intentarlo.',
+        'No se pudo completar la revisión. No se confirmaron ausencias en el archivo; revisa la incidencia. Drive no se modificó.',
         'error',
       );
+      if (activeSourceIdRef.current === sourceId) {
+        void loadArchive(sourceId);
+        if (selectedFolderIdRef.current)
+          void loadPhotos(sourceId, selectedFolderIdRef.current, photoFilterRef.current);
+      }
+      void loadSources();
     }
     return () => controller.abort();
   }, [activeSource?.id, run?.id, run?.status]);
@@ -2201,6 +2304,43 @@ export function ArchiveWorkspace({
                             ? 'Todavía no se ha iniciado una revisión.'
                             : null}
                       </p>
+                      {sourceSyncing && latestRun ? (
+                        <div className={styles.sourceProgress} aria-live="polite">
+                          <p className={styles.sourceProgressLine}>
+                            {syncPhaseLabel(latestRun.phase)}
+                            {latestRun.foundCount
+                              ? ` · ${pluralize(latestRun.processedCount ?? 0, 'foto revisada', 'fotos revisadas')} de ${latestRun.foundCount.toLocaleString('es-ES')}`
+                              : ' · Aún buscando fotografías'}
+                          </p>
+                          {latestRun.foundCount ? (
+                            <progress
+                              max={latestRun.foundCount}
+                              value={Math.min(latestRun.processedCount ?? 0, latestRun.foundCount)}
+                              aria-label={`Avance de revisión de ${source.name}`}
+                            />
+                          ) : (
+                            <progress
+                              className={styles.indeterminateProgress}
+                              aria-label={`Preparando revisión de ${source.name}`}
+                            />
+                          )}
+                        </div>
+                      ) : latestRun && syncResultSummary(latestRun) ? (
+                        <p className={styles.sourceOverviewHint}>{syncResultSummary(latestRun)}</p>
+                      ) : null}
+                      {sourceSyncing && overview?.pollError && (
+                        <p className={styles.sourceOverviewHint} role="status">
+                          No se pudo consultar el avance; la revisión puede seguir activa.{' '}
+                          <button
+                            type="button"
+                            className={styles.textButton}
+                            onClick={() => void loadSources()}
+                            disabled={loadingSources}
+                          >
+                            Actualizar estado
+                          </button>
+                        </p>
+                      )}
                     </div>
                     <div className={styles.sourceOverviewActions}>
                       {overview?.error && (
@@ -2375,9 +2515,14 @@ export function ArchiveWorkspace({
               </div>
             ) : null}
 
-            {!loadingIssues && !!groupedIssues.length ? (
+            {!loadingIssues && issueTotalCount > 0 ? (
               <div className={styles.reviewIssues}>
                 <h3>Problemas que siguen pendientes</h3>
+                <p className={styles.reviewQueueHint}>
+                  Abrir una carpeta solo te lleva al contexto; no cierra el problema. Solo una
+                  revisión completa y exitosa puede confirmar ausencias en el archivo y retirar
+                  incidencias. Drive no se modifica.
+                </p>
                 {issueTotalCount > issues.length ? (
                   <p className={styles.reviewQueueHint}>
                     {pluralize(
@@ -2389,35 +2534,65 @@ export function ArchiveWorkspace({
                     resolvió no aparecen aquí.
                   </p>
                 ) : null}
-                <ul className={styles.reviewIssueList}>
-                  {groupedIssues.map(([code, group]) => (
-                    <li key={code}>
-                      <div>
-                        <strong>{issueCopy(group[0]!)}</strong>
-                        <span>{issueActionCopy(group[0]!)}</span>
-                        <span>
-                          {pluralize(
-                            issueCountsByCode[code] ?? group.length,
-                            code === 'ACCESS_DENIED'
-                              ? 'carpeta o elemento pendiente'
-                              : 'elemento pendiente',
-                            code === 'ACCESS_DENIED'
-                              ? 'carpetas o elementos pendientes'
-                              : 'elementos pendientes',
-                          )}
-                        </span>
-                      </div>
-                      <button
-                        type="button"
-                        className={styles.textButton}
-                        onClick={() => activeSource && void sync(activeSource)}
-                        disabled={busy || isSyncActive(run)}
-                      >
-                        Volver a revisar
-                      </button>
-                    </li>
+                {[
+                  { key: 'folders', title: 'Problemas de carpeta', items: issueAreas.folders },
+                  { key: 'photos', title: 'Problemas de foto', items: issueAreas.photos },
+                  { key: 'review', title: 'Otros problemas de revisión', items: issueAreas.review },
+                ]
+                  .filter((section) => section.items.length > 0)
+                  .map((section) => (
+                    <section className={styles.reviewIssueSection} key={section.key}>
+                      <h4>{section.title}</h4>
+                      <ul className={styles.reviewIssueList}>
+                        {section.items.map((issue) => {
+                          const folder =
+                            folders.find((candidate) => candidate.id === issue.indexedFolderId) ??
+                            folders.find(
+                              (candidate) => candidate.driveFolderId === issue.driveFolderId,
+                            );
+                          const hasFolderAction = Boolean(folder && issue.driveFolderId);
+                          return (
+                            <li key={issue.id}>
+                              <div>
+                                <strong>{issueCopy(issue)}</strong>
+                                <span>{issueActionCopy(issue)}</span>
+                                {issue.fileName && (
+                                  <span>
+                                    Foto: {issue.fileName}
+                                    {folder ? ` · ${folder.path.join(' / ')}` : ''}
+                                  </span>
+                                )}
+                                {!issue.fileName && folder && (
+                                  <span>Carpeta: {folder.path.join(' / ')}</span>
+                                )}
+                              </div>
+                              {hasFolderAction ? (
+                                <button
+                                  type="button"
+                                  className={styles.textButton}
+                                  onClick={() => openIssueFolder(issue)}
+                                  disabled={busy || loadingPhotos}
+                                >
+                                  {issue.indexedPhotoId
+                                    ? 'Abrir carpeta de la foto'
+                                    : 'Abrir carpeta'}
+                                </button>
+                              ) : (
+                                <button
+                                  type="button"
+                                  className={styles.textButton}
+                                  onClick={() => activeSource && void sync(activeSource)}
+                                  disabled={busy || isSyncActive(run)}
+                                >
+                                  Volver a revisar
+                                </button>
+                              )}
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    </section>
                   ))}
-                </ul>
                 {issueCursor && (
                   <button
                     type="button"
@@ -2442,7 +2617,7 @@ export function ArchiveWorkspace({
               !issuesError &&
               summary &&
               !summary.unclassified &&
-              !groupedIssues.length && (
+              issueTotalCount === 0 && (
                 <div className={styles.reviewComplete}>
                   <h3>Todo revisado en esta carpeta</h3>
                   <p>No hay fotos sin fecha ni problemas registrados en la última revisión.</p>
@@ -2673,9 +2848,11 @@ export function ArchiveWorkspace({
                   Quitar “{sourcePendingRemoval.name}” de Línea de vida
                 </h3>
                 <p>
-                  Sus fotos dejarán de aparecer aquí y se quitarán las fechas corregidas y el
-                  historial de revisión de esta carpeta. Los archivos originales seguirán intactos
-                  en Drive. Si la añades de nuevo, se volverá a revisar como una carpeta nueva.
+                  Sus fotos dejarán de aparecer aquí y se quitarán las correcciones manuales, las
+                  reglas de fecha de carpeta y el historial de revisión. Los archivos originales
+                  seguirán intactos en Drive. Si la añades de nuevo, se revisará como una carpeta
+                  nueva; las fotos que hayas excluido previamente seguirán fuera hasta que las
+                  restaures.
                 </p>
               </div>
               <div className={styles.buttonRow}>
@@ -2844,7 +3021,10 @@ export function ArchiveWorkspace({
                     <h3>Carpetas</h3>
                     <span>{pluralize(folders.length, 'carpeta', 'carpetas')}</span>
                   </div>
-                  <span>Usa ← y → para plegar</span>
+                  <span id="folder-tree-keyboard-help">
+                    ↑/↓ moverse · ← plegar o subir · → desplegar o entrar · Inicio/Fin ir al
+                    primero/último
+                  </span>
                 </div>
                 {summary && summary.unclassified > 0 && (
                   <button
@@ -2865,7 +3045,12 @@ export function ArchiveWorkspace({
                     </span>
                   </button>
                 )}
-                <nav className={styles.tree} aria-label="Carpetas indexadas" role="tree">
+                <nav
+                  className={styles.tree}
+                  aria-label="Carpetas indexadas"
+                  aria-describedby="folder-tree-keyboard-help"
+                  role="tree"
+                >
                   {visibleFolders.map((folder) => {
                     const children = folderRelations.childrenById.get(folder.id) ?? [];
                     const hasChildren = children.length > 0;

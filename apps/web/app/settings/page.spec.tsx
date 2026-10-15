@@ -46,6 +46,7 @@ describe('mounted archive removal', () => {
   let remove: () => Promise<unknown>;
   let sourceRemoved: boolean;
   let sourceStatus: string;
+  let folderItems: Array<Record<string, unknown>>;
   let historyRun: Record<string, unknown> | null;
   let excludedItems: Array<Record<string, unknown>>;
   const button = (text: string) => {
@@ -104,6 +105,20 @@ describe('mounted archive removal', () => {
     remove = async () => ({ results: [] });
     sourceRemoved = false;
     sourceStatus = 'ACTIVE';
+    folderItems = [
+      {
+        id: 'folder',
+        driveFolderId: 'drive-folder',
+        parentId: null,
+        name: 'Family',
+        path: ['Family'],
+        status: 'ACTIVE',
+        photoCount: 2,
+        classifiedPhotoCount: 0,
+        unclassifiedPhotoCount: 2,
+        dateRule: null,
+      },
+    ];
     historyRun = null;
     excludedItems = [];
     request.mockImplementation(async (path, init) => {
@@ -119,27 +134,31 @@ describe('mounted archive removal', () => {
         return { id: 'run', status: 'QUEUED', createdAt: '2026-10-14T00:00:00.000Z' };
       if (path.includes('/indexed-folders?'))
         return {
-          items: [
-            {
-              id: 'folder',
-              parentId: null,
-              name: 'Family',
-              path: ['Family'],
-              status: 'ACTIVE',
-              photoCount: 2,
-              classifiedPhotoCount: 0,
-              unclassifiedPhotoCount: 2,
-              dateRule: null,
-            },
-          ],
+          items: folderItems,
           nextCursor: null,
         };
       if (path.includes('/sync-runs?')) return { items: historyRun ? [historyRun] : [] };
       if (path.includes('/issues?'))
         return {
-          items: [{ id: 'issue-1', code: 'ACCESS_DENIED', details: 'Drive denied access.' }],
-          totalCount: 1,
-          countsByCode: { ACCESS_DENIED: 1 },
+          items: [
+            {
+              id: 'issue-1',
+              code: 'ACCESS_DENIED',
+              details: 'Drive denied access.',
+              driveFolderId: 'drive-folder',
+            },
+            {
+              id: 'issue-2',
+              code: 'UNREADABLE_METADATA',
+              driveFileId: 'drive-file',
+              driveFolderId: 'drive-folder',
+              indexedPhotoId: 'photo-a',
+              indexedFolderId: 'folder',
+              fileName: 'damaged.jpg',
+            },
+          ],
+          totalCount: 2,
+          countsByCode: { ACCESS_DENIED: 1, UNREADABLE_METADATA: 1 },
           nextCursor: null,
         };
       if (path.endsWith('/classification-summary'))
@@ -215,6 +234,12 @@ describe('mounted archive removal', () => {
     await mount();
     await click(button('Quitar esta carpeta del archivo'));
     expect(container.textContent).toContain('Los archivos originales seguirán intactos en Drive.');
+    expect(container.textContent).toContain(
+      'se quitarán las correcciones manuales, las reglas de fecha de carpeta y el historial de revisión',
+    );
+    expect(container.textContent).toContain(
+      'las fotos que hayas excluido previamente seguirán fuera',
+    );
     await click(button('Quitar carpeta'));
     expect(request).toHaveBeenCalledWith('/photo-sources/source', { method: 'DELETE' });
     expect(container.textContent).toContain('Drive no se ha modificado');
@@ -231,6 +256,50 @@ describe('mounted archive removal', () => {
 
     await click(button('Buscar cambios'));
     expect(request).toHaveBeenCalledWith('/photo-sources/source/sync-runs', { method: 'POST' });
+  });
+
+  it('explains and supports the folder tree keyboard controls', async () => {
+    folderItems.push({
+      id: 'child',
+      driveFolderId: 'drive-child',
+      parentId: 'folder',
+      name: 'Summer',
+      path: ['Family', 'Summer'],
+      status: 'ACTIVE',
+      photoCount: 0,
+      classifiedPhotoCount: 0,
+      unclassifiedPhotoCount: 0,
+      dateRule: null,
+    });
+    await mount();
+
+    const parent = treeRow();
+    const key = async (element: HTMLElement, value: string) => {
+      await act(async () => {
+        element.dispatchEvent(new KeyboardEvent('keydown', { key: value, bubbles: true }));
+      });
+    };
+    expect(container.querySelector('[role="tree"]')?.getAttribute('aria-describedby')).toBe(
+      'folder-tree-keyboard-help',
+    );
+    expect(container.textContent).toContain('Inicio/Fin ir al primero/último');
+    expect(container.querySelector('[data-tree-disclosure]')?.className).toContain('size-11');
+    expect(
+      container.querySelector('#folder-tree-keyboard-help')?.parentElement?.className,
+    ).toContain('leading-relaxed');
+
+    parent.focus();
+    await key(parent, 'ArrowLeft');
+    expect(parent.getAttribute('aria-expanded')).toBe('false');
+    expect(container.querySelector('[data-folder-id="child"]')).toBeNull();
+
+    await key(parent, 'ArrowRight');
+    expect(parent.getAttribute('aria-expanded')).toBe('true');
+    const child = container.querySelector<HTMLElement>('[data-folder-id="child"]')!;
+    await key(parent, 'ArrowRight');
+    expect(document.activeElement).toBe(child);
+    await key(child, 'ArrowLeft');
+    expect(document.activeElement).toBe(parent);
   });
 
   it('offers a safe Drive review from the selected folder context', async () => {
@@ -283,6 +352,23 @@ describe('mounted archive removal', () => {
     );
     expect(container.textContent).toContain('Falta una fecha');
     expect(container.textContent).toContain('Ver fotos sin fecha');
+  });
+
+  it('separates folder and photo problems and opens the affected folder context', async () => {
+    await mount();
+    await click(button('Fotos por revisar'));
+
+    expect(container.textContent).toContain('Problemas de carpeta');
+    expect(container.textContent).toContain('Problemas de foto');
+    expect(container.textContent).toContain('damaged.jpg');
+    expect(container.textContent).toContain('no cierra el problema');
+    await click(button('Abrir carpeta de la foto'));
+
+    expect(request).toHaveBeenCalledWith(
+      '/indexed-folders/folder/photos?limit=30',
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
+    expect(container.textContent).toContain('Family');
   });
 
   it('previews a manual correction before enabling the apply action', async () => {
@@ -364,9 +450,48 @@ describe('mounted archive removal', () => {
     expect(container.textContent).toContain('Problemas que siguen pendientes');
     expect(container.textContent).toContain('No se pudo acceder a la carpeta configurada.');
     expect(container.textContent).toContain('Comprueba que la carpeta siga disponible en Drive');
+    expect(container.textContent).toContain('Revisión parcial');
+    expect(container.textContent).toContain('No se confirmaron las ausencias');
     expect(request).toHaveBeenCalledWith('/photo-sources/source/issues?limit=30', {
       signal: expect.any(AbortSignal),
     });
+  });
+
+  it('shows real progress for an active source in Mis carpetas', async () => {
+    historyRun = {
+      id: 'run-active',
+      status: 'RUNNING',
+      phase: 'SCANNING',
+      foundCount: 4,
+      processedCount: 1,
+      indexedCount: 1,
+      issueCount: 0,
+      createdAt: '2026-10-14T00:00:00.000Z',
+    };
+    await mount();
+
+    expect(container.textContent).toContain('Revisando carpetas y fotografías');
+    expect(container.textContent).toContain('1 foto revisada de 4');
+    expect(
+      container.querySelector('progress[aria-label="Avance de revisión de Archive"]'),
+    ).toBeTruthy();
+  });
+
+  it('reports a failed review without implying that missing photos were confirmed', async () => {
+    historyRun = {
+      id: 'run-failed',
+      status: 'FAILED',
+      foundCount: 3,
+      processedCount: 1,
+      indexedCount: 1,
+      issueCount: 1,
+      createdAt: '2026-10-14T00:00:00.000Z',
+    };
+    await mount();
+
+    expect(container.textContent).toContain('Revisión fallida');
+    expect(container.textContent).toContain('No se confirmó ninguna ausencia');
+    expect(container.textContent).toContain('Drive no se modificó');
   });
 
   it('searches the source across folders and filters locally excluded photos into a recoverable bin', async () => {
