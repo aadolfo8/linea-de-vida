@@ -578,39 +578,50 @@ export class SyncService {
         partial || checkpoint.pendingFolders.length
           ? SyncRunStatus.PARTIAL
           : SyncRunStatus.SUCCEEDED;
-      if (status === SyncRunStatus.SUCCEEDED) {
-        await this.prisma.$transaction([
-          this.prisma.photo.updateMany({
-            where: { sourceId: run.source.id, lastSeenSyncRunId: { not: run.id } },
+      await this.prisma.$transaction(async (tx) => {
+        let removedCount = 0;
+        if (status === SyncRunStatus.SUCCEEDED) {
+          const removed = await tx.photo.updateMany({
+            where: {
+              sourceId: run.source.id,
+              status: PhotoStatus.ACTIVE,
+              lastSeenSyncRunId: { not: run.id },
+            },
             data: { status: PhotoStatus.MISSING },
-          }),
-          this.prisma.indexedFolder.updateMany({
-            where: { sourceId: run.source.id, lastSeenSyncRunId: { not: run.id } },
+          });
+          removedCount = removed.count;
+          await tx.indexedFolder.updateMany({
+            where: {
+              sourceId: run.source.id,
+              status: 'ACTIVE',
+              lastSeenSyncRunId: { not: run.id },
+            },
             data: { status: 'MISSING' },
-          }),
-          this.prisma.syncIssue.updateMany({
+          });
+          await tx.syncIssue.updateMany({
             where: {
               resolvedAt: null,
               syncRunId: { not: run.id },
               run: { is: { photoSourceId: run.source.id } },
             },
             data: { resolvedAt: new Date() },
-          }),
-        ]);
-      }
-      await this.prisma.syncRun.update({
-        where: { id: run.id },
-        data: {
-          status,
-          phase: SyncPhase.PROCESSING,
-          checkpoint: Prisma.JsonNull,
-          cursorCompletedAt: null,
-          foundCount: counts.found,
-          processedCount: counts.processed,
-          scannedCount: counts.found,
-          indexedCount: counts.indexed,
-          issueCount: counts.issues,
-        },
+          });
+        }
+        await tx.syncRun.update({
+          where: { id: run.id },
+          data: {
+            status,
+            phase: SyncPhase.PROCESSING,
+            checkpoint: Prisma.JsonNull,
+            cursorCompletedAt: null,
+            foundCount: counts.found,
+            processedCount: counts.processed,
+            scannedCount: counts.found,
+            indexedCount: counts.indexed,
+            issueCount: counts.issues,
+            removedCount,
+          },
+        });
       });
     } catch (error) {
       const transient =
