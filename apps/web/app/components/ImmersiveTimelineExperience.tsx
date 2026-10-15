@@ -7,6 +7,8 @@ import { api, ApiError, apiJson } from '../../lib/api';
 import { mediaUrl } from '../../lib/media';
 import { TemporalCarousel, type TemporalCarouselItem } from './TemporalCarousel';
 import { TimelinePhotoViewer } from './TimelinePhotoViewer';
+import { TimelineNavigation } from './TimelineNavigation';
+import { useTimelinePosition } from './useTimelinePosition';
 import {
   collectTimelineYears,
   groupTimelineGalleryRows,
@@ -69,6 +71,7 @@ function parseMonthKey(key: string): TimelineMonth {
 
 export function ImmersiveTimelineExperience() {
   const pathname = usePathname();
+  useTimelinePosition(`immersive:${pathname}`);
   const router = useRouter();
   const reduceMotion = useReducedMotion();
   const route = parseTimelineRoute(pathname);
@@ -226,6 +229,15 @@ export function ImmersiveTimelineExperience() {
 
   return (
     <main className={styles.experience}>
+      <TimelineNavigation
+        years={years?.items ?? []}
+        year={selectedSettledYear}
+        month={route.unknown ? 'sin-mes' : route.month}
+        onYear={(year) => router.push(timelineHref({ year }), { scroll: false })}
+        onMonth={(month) =>
+          router.push(timelineHref({ year: selectedSettledYear, month }), { scroll: false })
+        }
+      />
       <a className={styles.skipLink} href="#timeline-focus">
         Saltar a la selección temporal
       </a>
@@ -239,10 +251,10 @@ export function ImmersiveTimelineExperience() {
             <h1>Cronología</h1>
             <p>
               {isMonthRoute
-                ? 'Recorre los meses sin perder el año de referencia.'
+                ? `${selectedMonthLabel} de ${route.year}`
                 : route.year
                   ? 'Elige un mes para abrir sus fotografías.'
-                  : 'Arrastra para elegir un año y entra para recorrer sus meses.'}
+                  : 'Un archivo de momentos compartidos.'}
             </p>
           </header>
 
@@ -275,12 +287,10 @@ export function ImmersiveTimelineExperience() {
                 <motion.div
                   className={styles.monthFocus}
                   key={`month-${route.year}-${selectedMonthLabel}`}
-                  initial={reduceMotion ? false : { opacity: 0, scale: 0.96, filter: 'blur(8px)' }}
-                  animate={{ opacity: 1, scale: 1, filter: 'blur(0px)' }}
-                  exit={
-                    reduceMotion ? { opacity: 0 } : { opacity: 0, scale: 1.03, filter: 'blur(8px)' }
-                  }
-                  transition={{ duration: reduceMotion ? 0 : 0.36, ease: 'easeOut' }}
+                  initial={reduceMotion ? false : { opacity: 0, y: 6 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0 }}
+                  transition={{ duration: reduceMotion ? 0 : 0.16, ease: 'easeOut' }}
                 >
                   <motion.h2
                     className={styles.monthTitle}
@@ -290,18 +300,20 @@ export function ImmersiveTimelineExperience() {
                   </motion.h2>
                   <p>
                     {route.unknown
-                      ? 'Fotografías con precisión de año, sin un mes asignado.'
-                      : 'Fotografías del mes, sin navegación por días.'}
+                      ? 'Conocemos el año, pero no el mes.'
+                      : summary
+                        ? `${summary.months.find((item) => item.month === route.month)?.photoCount ?? 0} fotografías`
+                        : 'Cargando fotografías…'}
                   </p>
                 </motion.div>
               ) : selectedSettledYear ? (
                 <motion.div
                   className={styles.yearFocus}
                   key={`year-${selectedSettledYear}`}
-                  initial={reduceMotion ? false : { opacity: 0, filter: 'blur(10px)' }}
-                  animate={{ opacity: 1, filter: 'blur(0px)' }}
-                  exit={reduceMotion ? { opacity: 0 } : { opacity: 0, filter: 'blur(10px)' }}
-                  transition={{ duration: reduceMotion ? 0 : 0.42, ease: 'easeOut' }}
+                  initial={reduceMotion ? false : { opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  transition={{ duration: reduceMotion ? 0 : 0.16, ease: 'easeOut' }}
                 >
                   <YearCollage
                     summary={summary}
@@ -347,9 +359,9 @@ export function ImmersiveTimelineExperience() {
           <motion.section
             className={styles.monthLevel}
             layout={reduceMotion ? false : true}
-            initial={reduceMotion ? false : { opacity: 0, y: 34, clipPath: 'inset(8% 0 0 0)' }}
-            animate={{ opacity: 1, y: 0, clipPath: 'inset(0% 0 0 0)' }}
-            transition={{ duration: reduceMotion ? 0 : 0.42, ease: 'easeOut' }}
+            initial={reduceMotion ? false : { opacity: 0, y: 6 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: reduceMotion ? 0 : 0.16, ease: 'easeOut' }}
             aria-labelledby="month-level-title"
           >
             <header className={styles.monthHeader}>
@@ -357,9 +369,7 @@ export function ImmersiveTimelineExperience() {
                 <h2 id="month-level-title">
                   {isMonthRoute ? `Meses de ${route.year}` : `${route.year} por meses`}
                 </h2>
-                <p>
-                  La categoría “Sin mes” aparece solo cuando la fecha conserva precisión de año.
-                </p>
+                <p>Cada mes, un lugar al que volver.</p>
               </div>
               {isMonthRoute && (
                 <button
@@ -392,9 +402,9 @@ export function ImmersiveTimelineExperience() {
           <motion.div
             className={styles.galleryWrap}
             layout={reduceMotion ? false : true}
-            initial={reduceMotion ? false : { opacity: 0, y: 24 }}
+            initial={reduceMotion ? false : { opacity: 0, y: 6 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: reduceMotion ? 0 : 0.36, ease: 'easeOut' }}
+            transition={{ duration: reduceMotion ? 0 : 0.16, ease: 'easeOut' }}
           >
             <ImmersiveMonthGallery
               year={route.year}
@@ -607,11 +617,7 @@ function ImmersiveMonthGallery({
         <h2 id="month-gallery-title">
           {label} de {year}
         </h2>
-        <p>
-          {month === 'sin-mes'
-            ? 'Estas fotografías conservan precisión de año y no reciben un mes inventado.'
-            : 'Galería completa del mes, ordenada sin añadir navegación por días.'}
-        </p>
+        {month === 'sin-mes' && <p>Conocemos el año, pero no el mes.</p>}
       </header>
       {state === 'loading' && !photos.length && <GallerySkeleton />}
       {photos.length > 0 && (
@@ -726,8 +732,9 @@ function EmptyArchive() {
   return (
     <section className={styles.emptyArchive}>
       <h1>Tu archivo todavía no tiene fechas disponibles.</h1>
-      <p>Selecciona una fuente y ejecuta una sincronización desde Ajustes.</p>
-      <a href="/settings">Ir a Ajustes</a>
+      <p>Añade una carpeta o revisa las fotografías que todavía no tienen fecha.</p>
+      <a href="/organizar">Ir a Organizar</a>
+      <a href="/organizar?filter=undated#photos-workspace">Fotografías sin fecha</a>
     </section>
   );
 }

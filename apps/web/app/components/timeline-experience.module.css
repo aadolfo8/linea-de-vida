@@ -30,23 +30,23 @@
   top: 1rem;
 }
 .intro {
-  min-height: clamp(18rem, 47vh, 35rem);
+  min-height: auto;
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(12rem, 24vw);
   gap: 3rem;
   align-items: end;
-  padding: clamp(3rem, 8vw, 8rem) max(1.25rem, 8vw) clamp(2rem, 5vw, 5rem);
+  padding: clamp(2rem, 4vw, 4rem) max(1.25rem, 8vw);
   background: var(--paper-deep);
   border-bottom: 1px solid var(--line);
 }
 .intro h1 {
   max-width: 10ch;
   margin: 0;
-  font-family: ui-sans-serif, system-ui, sans-serif;
-  font-size: clamp(3rem, 8vw, 7.4rem);
+  font-family: Georgia, 'Times New Roman', serif;
+  font-size: clamp(2.5rem, 6vw, 5rem);
   font-weight: 400;
   line-height: 0.88;
-  letter-spacing: -0.045em;
+  letter-spacing: -0.03em;
   text-wrap: balance;
 }
 .intro p {
@@ -64,14 +64,12 @@
   font-variant-numeric: tabular-nums;
 }
 .railWrap {
-  position: sticky;
+  position: relative;
   z-index: 10;
-  top: 72px;
   display: grid;
   grid-template-columns: 44px minmax(0, 1fr) 44px;
-  background: rgb(245 239 226 / 0.96);
+  background: var(--paper);
   border-bottom: 1px solid var(--line);
-  backdrop-filter: blur(10px);
 }
 .railWrap > button {
   border: 0;
