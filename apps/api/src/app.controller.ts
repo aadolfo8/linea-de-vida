@@ -170,6 +170,16 @@ export class AppController {
     });
   }
   @UseGuards(CsrfGuard)
+  @Post('auth/logout')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  logout(@Res({ passthrough: true }) response: Response) {
+    response.clearCookie('lv_session', {
+      path: '/',
+      sameSite: 'lax',
+      secure: process.env.NODE_ENV === 'production',
+    });
+  }
+  @UseGuards(CsrfGuard)
   @Post('auth/google/authorize')
   async googleLoginAuthorize(@Res({ passthrough: true }) response: Response) {
     if (!process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET)

@@ -462,6 +462,28 @@ describe('Phase 1 HTTP contracts', () => {
     }
   });
 
+  it('clears the application session cookie on logout and enforces CSRF origin checks', async () => {
+    await createApp('owner', { csrf: true });
+
+    await request(app.getHttpServer())
+      .post('/v1/auth/logout')
+      .set('Origin', 'http://attacker.example.test')
+      .expect(403)
+      .expect(({ body }) => expect(body.code).toBe('CSRF_ORIGIN_REJECTED'));
+
+    await request(app.getHttpServer())
+      .post('/v1/auth/logout')
+      .set('Origin', 'http://localhost:3000')
+      .set('Cookie', 'lv_session=signed-session')
+      .expect(204)
+      .expect(({ headers }) => {
+        const cookies = [headers['set-cookie']].flat();
+        expect(cookies[0]).toMatch(/^lv_session=;/);
+        expect(cookies.join(';')).toContain('Path=/');
+        expect(cookies.join(';')).toContain('SameSite=Lax');
+      });
+  });
+
   it('persists and consumes login state through the HTTP authorization flow without exposing secrets', async () => {
     const previousClientId = process.env.GOOGLE_CLIENT_ID;
     const previousClientSecret = process.env.GOOGLE_CLIENT_SECRET;
