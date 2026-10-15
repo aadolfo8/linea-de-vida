@@ -1,6 +1,7 @@
 import { EventEmitter } from 'node:events';
 import { Readable, Writable } from 'node:stream';
 import { describe, expect, it, vi } from 'vitest';
+import sharp from 'sharp';
 import { DriveAdapter, DriveRequestError } from '../src/drive';
 import { MediaProxyService, PrivateThumbnailCache } from '../src/media-proxy.service';
 
@@ -42,7 +43,8 @@ class FakeDrive extends DriveAdapter {
   }
 }
 
-const request = () => new EventEmitter() as unknown as import('express').Request;
+const request = (query: Record<string, string> = {}) =>
+  Object.assign(new EventEmitter(), { query }) as unknown as import('express').Request;
 const ownerPhoto = (overrides: Record<string, unknown> = {}) => ({
   id: 'photo-owner',
   userId: 'owner',
@@ -72,6 +74,82 @@ describe('media proxy', () => {
     await proxy.thumbnail('owner', 'photo-owner', request(), response as any);
     expect(response.headers.get('Content-Type')).toBe('image/jpeg');
     expect(response.body()).toBe('thumbnail-stream');
+  });
+
+  it('serves bounded responsive WebP thumbnails from the original image', async () => {
+    const source = await sharp({
+      create: { width: 1800, height: 1200, channels: 3, background: '#6b8e23' },
+    })
+      .jpeg()
+      .toBuffer();
+    const { service: proxy, drive } = service(ownerPhoto());
+    drive.getContentStream = async () => {
+      drive.contentCalls++;
+      return { stream: Readable.from(source), contentType: 'image/jpeg' };
+    };
+    const response = new ResponseMock();
+
+    await proxy.thumbnail('owner', 'photo-owner', request({ width: '640' }), response as any);
+
+    const output = Buffer.concat(response.chunks);
+    const metadata = await sharp(output).metadata();
+    expect(metadata).toMatchObject({ format: 'webp', width: 640, height: 427 });
+    expect(response.headers.get('Content-Type')).toBe('image/webp');
+    expect(response.headers.get('Cache-Control')).toBe('private, max-age=60, no-transform');
+    expect(drive.contentCalls).toBe(1);
+    expect(drive.thumbnailCalls).toBe(0);
+  });
+
+  it('keeps responsive cache variants separate by requested width', async () => {
+    const previous = process.env.MEDIA_THUMBNAIL_CACHE_ENABLED;
+    process.env.MEDIA_THUMBNAIL_CACHE_ENABLED = 'true';
+    const source = await sharp({
+      create: { width: 1800, height: 1200, channels: 3, background: '#6b8e23' },
+    })
+      .jpeg()
+      .toBuffer();
+    const { service: proxy, drive } = service(ownerPhoto());
+    drive.getContentStream = async () => {
+      drive.contentCalls++;
+      return { stream: Readable.from(source), contentType: 'image/jpeg' };
+    };
+
+    const first640 = new ResponseMock();
+    await proxy.thumbnail('owner', 'photo-owner', request({ width: '640' }), first640 as any);
+    const cached640 = new ResponseMock();
+    await proxy.thumbnail('owner', 'photo-owner', request({ width: '640' }), cached640 as any);
+    const image1280 = new ResponseMock();
+    await proxy.thumbnail('owner', 'photo-owner', request({ width: '1280' }), image1280 as any);
+
+    expect(drive.contentCalls).toBe(2);
+    expect(cached640.chunks).toEqual(first640.chunks);
+    expect((await sharp(Buffer.concat(image1280.chunks)).metadata()).width).toBe(1280);
+    if (previous === undefined) delete process.env.MEDIA_THUMBNAIL_CACHE_ENABLED;
+    else process.env.MEDIA_THUMBNAIL_CACHE_ENABLED = previous;
+  });
+
+  it('rejects arbitrary responsive widths before requesting Drive', async () => {
+    const { service: proxy, drive } = service(ownerPhoto());
+    await expect(
+      proxy.thumbnail(
+        'owner',
+        'photo-owner',
+        request({ width: '999999' }),
+        new ResponseMock() as any,
+      ),
+    ).rejects.toMatchObject({ status: 400 });
+    expect(drive.contentCalls + drive.thumbnailCalls).toBe(0);
+  });
+
+  it('uses Drive-generated browser thumbnails for HEIC responsive requests', async () => {
+    const { service: proxy, drive } = service(ownerPhoto({ mimeType: 'image/heic' }));
+    const response = new ResponseMock();
+
+    await proxy.thumbnail('owner', 'photo-owner', request({ width: '1280' }), response as any);
+
+    expect(drive.contentCalls).toBe(1);
+    expect(drive.thumbnailCalls).toBe(1);
+    expect(response.headers.get('Content-Type')).toBe('image/jpeg');
   });
 
   it.each(['image/heic', 'image/heif'])(
@@ -119,6 +197,17 @@ describe('media proxy', () => {
     expect(drive.contentCalls).toBe(1);
   });
 
+  it('serves browser-supported GIF originals inline', async () => {
+    const { service: proxy } = service(ownerPhoto({ mimeType: 'image/gif' }));
+    const response = new ResponseMock();
+
+    await proxy.content('owner', 'photo-owner', request(), response as any);
+
+    expect(response.headers.get('Content-Type')).toBe('image/gif');
+    expect(response.headers.get('Content-Disposition')).toBe('inline');
+    expect(response.body()).toBe('original-stream');
+  });
+
   it('shows a browser thumbnail for HEIC and keeps its original downloadable', async () => {
     const { service: proxy, drive } = service(ownerPhoto({ mimeType: 'image/heic' }));
     const thumbnail = new ResponseMock();
@@ -153,6 +242,7 @@ describe('media proxy', () => {
       MEDIA_THUMBNAIL_CACHE_TTL_MS: '1000',
       MEDIA_THUMBNAIL_CACHE_MAX_BYTES: '16384',
       MEDIA_THUMBNAIL_CACHE_MAX_ENTRIES: '1',
+      MEDIA_THUMBNAIL_CACHE_TOTAL_MAX_BYTES: '16384',
     });
     cache.set('private-photo-id', Buffer.from('thumbnail'), 'image/jpeg');
     expect(cache.get('private-photo-id')?.body.toString()).toBe('thumbnail');

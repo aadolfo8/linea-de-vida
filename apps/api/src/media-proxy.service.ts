@@ -1,6 +1,7 @@
 import {
   GoneException,
   Injectable,
+  BadRequestException,
   NotFoundException,
   ServiceUnavailableException,
   UnsupportedMediaTypeException,
@@ -8,12 +9,23 @@ import {
 import { createHash } from 'node:crypto';
 import { Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
+import sharp from 'sharp';
 import { Request, Response } from 'express';
 import { DriveAdapter, DriveRequestError } from './drive';
 import { PrismaService } from './prisma.service';
 
-const BROWSER_IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
+const BROWSER_IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif']);
 const CONTENT_TYPES = new Set([...BROWSER_IMAGE_TYPES, 'image/heic', 'image/heif']);
+const RESPONSIVE_THUMBNAIL_WIDTHS = new Set([640, 1280]);
+const RESIZABLE_IMAGE_TYPES = new Set([
+  'image/jpeg',
+  'image/png',
+  'image/webp',
+  'image/heic',
+  'image/heif',
+]);
+const MAX_RESIZE_INPUT_BYTES = 24 * 1024 * 1024;
+const MAX_RESIZE_INPUT_PIXELS = 80_000_000;
 type ThumbnailCacheEntry = { expiresAt: number; body: Buffer; contentType: string };
 
 export class PrivateThumbnailCache {
@@ -22,6 +34,8 @@ export class PrivateThumbnailCache {
   private readonly ttlMs: number;
   private readonly maxBytes: number;
   private readonly maxEntries: number;
+  private readonly maxTotalBytes: number;
+  private totalBytes = 0;
 
   constructor(env: NodeJS.ProcessEnv = process.env) {
     this.enabled = env.MEDIA_THUMBNAIL_CACHE_ENABLED === 'true';
@@ -33,38 +47,61 @@ export class PrivateThumbnailCache {
       5_242_880,
     );
     this.maxEntries = boundedNumber(env.MEDIA_THUMBNAIL_CACHE_MAX_ENTRIES, 100, 1, 1_000);
+    this.maxTotalBytes = boundedNumber(
+      env.MEDIA_THUMBNAIL_CACHE_TOTAL_MAX_BYTES,
+      32 * 1024 * 1024,
+      1_048_576,
+      128 * 1024 * 1024,
+    );
   }
 
-  get(photoId: string) {
+  get(photoId: string, width?: number) {
     if (!this.enabled) return undefined;
-    const key = this.key(photoId);
+    const key = this.key(photoId, width);
     const entry = this.entries.get(key);
     if (!entry || entry.expiresAt <= Date.now()) {
-      this.entries.delete(key);
+      this.delete(key);
       return undefined;
     }
     return entry;
   }
 
-  set(photoId: string, body: Buffer, contentType: string) {
-    if (!this.enabled || body.length > this.maxBytes) return;
+  set(photoId: string, body: Buffer, contentType: string, width?: number) {
+    if (!this.enabled || body.length > this.maxBytes || body.length > this.maxTotalBytes) return;
     this.prune();
-    const oldestKey = this.entries.keys().next().value;
-    if (this.entries.size >= this.maxEntries && oldestKey) this.entries.delete(oldestKey);
-    this.entries.set(this.key(photoId), { body, contentType, expiresAt: Date.now() + this.ttlMs });
+    const key = this.key(photoId, width);
+    this.delete(key);
+    while (
+      this.entries.size >= this.maxEntries ||
+      this.totalBytes + body.length > this.maxTotalBytes
+    ) {
+      const oldestKey = this.entries.keys().next().value;
+      if (!oldestKey) return;
+      this.delete(oldestKey);
+    }
+    this.entries.set(key, { body, contentType, expiresAt: Date.now() + this.ttlMs });
+    this.totalBytes += body.length;
   }
 
   canStore(size: number) {
     return this.enabled && size <= this.maxBytes;
   }
 
-  private key(photoId: string) {
-    return createHash('sha256').update(`thumbnail:${photoId}`).digest('base64url');
+  private key(photoId: string, width?: number) {
+    return createHash('sha256')
+      .update(`thumbnail:${photoId}:${width ?? 'drive'}`)
+      .digest('base64url');
   }
 
   private prune() {
     const now = Date.now();
-    for (const [key, value] of this.entries) if (value.expiresAt <= now) this.entries.delete(key);
+    for (const [key, value] of this.entries) if (value.expiresAt <= now) this.delete(key);
+  }
+
+  private delete(key: string) {
+    const entry = this.entries.get(key);
+    if (entry) this.totalBytes -= entry.body.length;
+    this.entries.delete(key);
   }
 }
 
@@ -86,6 +123,11 @@ export class MediaProxyService {
   async thumbnail(userId: string, photoId: string, request: Request, response: Response) {
     const photo = await this.authorize(userId, photoId);
     const mimeType = normalizeMimeType(photo.mimeType);
+    const width = requestedThumbnailWidth(request.query.width);
+    if (width && RESIZABLE_IMAGE_TYPES.has(mimeType)) {
+      await this.responsiveThumbnail(request, response, photo, width);
+      return;
+    }
     const hasBrowserThumbnail = BROWSER_IMAGE_TYPES.has(mimeType);
     const hasConvertibleDriveThumbnail = /^image\/(heic|heif)$/i.test(mimeType);
     if (!hasBrowserThumbnail && !hasConvertibleDriveThumbnail) {
@@ -103,6 +145,74 @@ export class MediaProxyService {
     await this.stream(request, response, photo, 'thumbnail', mimeType, (body, contentType) =>
       this.thumbnailCache.set(photo.id, body, contentType),
     );
+  }
+
+  private async responsiveThumbnail(
+    request: Request,
+    response: Response,
+    photo: any,
+    width: number,
+  ) {
+    const cached = this.thumbnailCache.get(photo.id, width);
+    if (cached) {
+      this.headers(response, cached.contentType, true);
+      response.end(cached.body);
+      return;
+    }
+
+    const controller = new AbortController();
+    let timedOut = false;
+    const timeout = setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, this.timeoutMs);
+    const abort = () => controller.abort();
+    request.once('aborted', abort);
+    response.once('close', abort);
+    try {
+      const media = await withAbort(
+        this.drive.getContentStream(photo.source.connection, photo.driveFileId, controller.signal),
+        controller.signal,
+        (value) => value.stream.destroy(),
+      );
+      const input = await readBoundedStream(
+        media.stream,
+        MAX_RESIZE_INPUT_BYTES,
+        controller.signal,
+      );
+      const output = await sharp(input, { limitInputPixels: MAX_RESIZE_INPUT_PIXELS })
+        .rotate()
+        .resize({ width, withoutEnlargement: true, fit: 'inside' })
+        .webp({ quality: 86, effort: 4 })
+        .toBuffer();
+      if (controller.signal.aborted) {
+        if (timedOut) throw new DriveRequestError(504, 'Image processing timed out.');
+        return;
+      }
+      this.thumbnailCache.set(photo.id, output, 'image/webp', width);
+      this.headers(response, 'image/webp', true);
+      response.end(output);
+    } catch (error) {
+      if (response.headersSent || (controller.signal.aborted && !timedOut)) return;
+      if (timedOut) throw this.driveError(error);
+      // Older images and unusual encodings may not be supported by the installed codecs.
+      // Keep the established Drive thumbnail path as a safe browser-compatible fallback.
+      await this.stream(
+        request,
+        response,
+        photo,
+        'thumbnail',
+        normalizeMimeType(photo.mimeType),
+        (body, contentType) => {
+          this.thumbnailCache.set(photo.id, body, contentType);
+          this.thumbnailCache.set(photo.id, body, contentType, width);
+        },
+      );
+    } finally {
+      clearTimeout(timeout);
+      request.removeListener('aborted', abort);
+      response.removeListener('close', abort);
+    }
   }
 
   async content(userId: string, photoId: string, request: Request, response: Response) {
@@ -261,6 +371,41 @@ export class MediaProxyService {
 
 function normalizeMimeType(value: string) {
   return value.toLowerCase().split(';', 1)[0];
+}
+
+function requestedThumbnailWidth(value: unknown): number | undefined {
+  if (value === undefined) return undefined;
+  const raw = Array.isArray(value) ? value[0] : value;
+  const width = typeof raw === 'string' ? Number(raw) : NaN;
+  if (!RESPONSIVE_THUMBNAIL_WIDTHS.has(width))
+    throw new BadRequestException({
+      code: 'INVALID_THUMBNAIL_WIDTH',
+      message: 'Choose a supported thumbnail width.',
+    });
+  return width;
+}
+
+async function readBoundedStream(
+  stream: NodeJS.ReadableStream,
+  maxBytes: number,
+  signal: AbortSignal,
+) {
+  const chunks: Buffer[] = [];
+  let size = 0;
+  try {
+    for await (const chunk of stream as AsyncIterable<Buffer | Uint8Array>) {
+      signal.throwIfAborted();
+      const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      size += buffer.length;
+      if (size > maxBytes) throw new Error('Image exceeds the resize input limit.');
+      chunks.push(buffer);
+    }
+  } finally {
+    if (signal.aborted || size > maxBytes)
+      (stream as NodeJS.ReadableStream & { destroy?: () => void }).destroy?.();
+  }
+  if (size === 0) throw new Error('Image is empty.');
+  return Buffer.concat(chunks, size);
 }
 
 function boundedNumber(
