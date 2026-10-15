@@ -145,6 +145,14 @@ function controllerFixture() {
 describe('indexed archive management', () => {
   it('removes only an owned, idle source and its local index', async () => {
     const fixture = controllerFixture();
+    fixture.exclusions.push({
+      create: {
+        userId: 'owner',
+        driveFileId: 'previously-excluded',
+        sourceId: 'source',
+        sourceName: 'Family archive',
+      },
+    });
     await expect(fixture.controller.removeSource('owner', 'source')).resolves.toBeUndefined();
     expect(fixture.prisma.photo.deleteMany).toHaveBeenCalledWith({
       where: { userId: 'owner', sourceId: 'source' },
@@ -153,7 +161,11 @@ describe('indexed archive management', () => {
       where: { userId: 'owner', sourceId: 'source' },
     });
     expect(fixture.prisma.photoSource.delete).toHaveBeenCalledWith({ where: { id: 'source' } });
-    expect(fixture.exclusions).toHaveLength(0);
+    expect(fixture.exclusions).toHaveLength(1);
+    expect(fixture.exclusions[0].create).toMatchObject({
+      driveFileId: 'previously-excluded',
+      sourceId: 'source',
+    });
   });
 
   it('does not remove a source while a sync is queued or running', async () => {

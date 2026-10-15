@@ -728,16 +728,18 @@ describe('robust sync', () => {
     });
   });
 
-  it('does not recreate an excluded Drive file', async () => {
+  it('keeps a user exclusion when the same Drive folder is re-added as a new source', async () => {
     const f = fixture({ 'root:': { items: [image('removed')] } });
     f.exclusions.add('removed');
+    f.run.source.id = 're-added-source';
     await f.service.execute('run');
     expect(f.photos.has('removed')).toBe(false);
     expect(f.run.status).toBe('SUCCEEDED');
   });
 
-  it('reindexes a restored exclusion and preserves its manual date correction', async () => {
+  it('restores an excluded photo into a re-added source with its saved manual date', async () => {
     const f = fixture({ 'root:': { items: [image('restored')] } });
+    f.run.source.id = 're-added-source';
     f.restoredExclusions.set('restored', {
       id: 'exclusion-restored',
       restoredAt: new Date('2026-10-14T00:00:00.000Z'),
