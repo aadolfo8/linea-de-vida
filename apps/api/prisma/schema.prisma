@@ -156,9 +156,10 @@ model SyncRun {
   foundCount Int @default(0)
   processedCount Int @default(0)
   scannedCount Int @default(0)
- indexedCount Int @default(0)
- issueCount Int @default(0)
- createdAt DateTime @default(now())
+  indexedCount Int @default(0)
+  issueCount Int @default(0)
+  removedCount Int @default(0)
+  createdAt DateTime @default(now())
  updatedAt DateTime @updatedAt
  source PhotoSource @relation(fields:[photoSourceId],references:[id],onDelete:Cascade)
  issues SyncIssue[]
