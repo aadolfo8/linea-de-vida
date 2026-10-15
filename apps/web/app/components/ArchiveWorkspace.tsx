@@ -625,10 +625,19 @@ export function ArchiveWorkspace({
     setLoadingPhotos(false);
     setLoadingArchive(Boolean(sourceId));
     if (!sourceId) return;
-    void loadArchive(sourceId).catch((error) => {
-      if (!isAbortError(error) && activeSourceIdRef.current === sourceId)
-        announce(errorCopy(error, 'No se pudo cargar el archivo indexado. Reintenta.'), 'error');
-    });
+    void loadArchive(sourceId)
+      .then(async () => {
+        if (activeSourceIdRef.current !== sourceId) return;
+        if (new URLSearchParams(window.location.search).get('filter') === 'undated') {
+          await loadPending(sourceId);
+          if (activeSourceIdRef.current === sourceId)
+            document.getElementById('photos-workspace')?.scrollIntoView({ block: 'start' });
+        }
+      })
+      .catch((error) => {
+        if (!isAbortError(error) && activeSourceIdRef.current === sourceId)
+          announce(errorCopy(error, 'No se pudo cargar el archivo indexado. Reintenta.'), 'error');
+      });
   }, [activeSource?.id]);
 
   useEffect(() => {
