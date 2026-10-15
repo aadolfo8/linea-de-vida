@@ -33,11 +33,7 @@ export function TimelineNavigation({
         {year && (
           <>
             <span aria-hidden="true">/</span>
-            <Link
-              href={timelineHref({ year })}
-              scroll={false}
-              aria-label={`Volver a ${year}`}
-            >
+            <Link href={timelineHref({ year })} scroll={false} aria-label={`Volver a ${year}`}>
               {year}
             </Link>
           </>
