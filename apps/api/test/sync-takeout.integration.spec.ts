@@ -57,7 +57,35 @@ describe('Takeout sync integration', () => {
         }),
         update: async () => undefined,
       },
-      syncIssue: { create: async ({ data }: any) => issues.push(data) },
+      syncIssue: {
+        findFirst: async ({ where }: any) =>
+          issues.find(
+            (issue) =>
+              issue.code === where.code &&
+              issue.driveFileId === where.driveFileId &&
+              issue.driveFolderId === where.driveFolderId &&
+              issue.resolvedAt === null,
+          ) ?? null,
+        create: async ({ data }: any) => {
+          const issue = {
+            ...data,
+            driveFileId: data.driveFileId ?? null,
+            driveFolderId: data.driveFolderId ?? null,
+            resolvedAt: null,
+          };
+          issues.push(issue);
+          return issue;
+        },
+        update: async ({ where, data }: any) => {
+          const issue = issues.find((candidate) => candidate.id === where.id)!;
+          Object.assign(issue, data);
+          return issue;
+        },
+        updateMany: async ({ where, data }: any) => {
+          for (const issue of issues)
+            if (issue.resolvedAt === where.resolvedAt) Object.assign(issue, data);
+        },
+      },
       photoExclusion: { findUnique: async () => null },
       indexedFolder: {
         findUnique: async () => null,

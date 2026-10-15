@@ -4,6 +4,7 @@ import Link from 'next/link';
 import {
   monthLabel,
   timelineHref,
+  timelineHrefWithReturn,
   type TimelineMonth,
   type TimelineYearItem,
 } from './timeline-model';
@@ -12,12 +13,16 @@ export function TimelineNavigation({
   years,
   year,
   month,
+  organizeReturnTo,
+  organizeReturnLabel,
   onYear,
   onMonth,
 }: {
   years: TimelineYearItem[];
   year: number | null;
   month: TimelineMonth | null;
+  organizeReturnTo?: string | null;
+  organizeReturnLabel?: string | null;
   onYear: (year: number) => void;
   onMonth: (month: TimelineMonth) => void;
 }) {
@@ -27,13 +32,28 @@ export function TimelineNavigation({
       aria-label="Navegación temporal directa"
     >
       <div className="flex flex-wrap items-center gap-3 tabular-nums max-[600px]:w-full">
-        <Link href={timelineHref()} scroll={false}>
+        <Link
+          href={timelineHrefWithReturn(
+            timelineHref(),
+            organizeReturnTo ?? null,
+            organizeReturnLabel,
+          )}
+          scroll={false}
+        >
           Cronología
         </Link>
         {year && (
           <>
             <span aria-hidden="true">/</span>
-            <Link href={timelineHref({ year })} scroll={false} aria-label={`Volver a ${year}`}>
+            <Link
+              href={timelineHrefWithReturn(
+                timelineHref({ year }),
+                organizeReturnTo ?? null,
+                organizeReturnLabel,
+              )}
+              scroll={false}
+              aria-label={`Volver a ${year}`}
+            >
               {year}
             </Link>
           </>
