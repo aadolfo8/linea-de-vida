@@ -223,10 +223,9 @@ export function ImmersiveTimelineExperience({
   useEffect(() => {
     if (!years?.items.length || !route.year) return;
     if (!years.items.some((item) => item.year === route.year)) {
-      router.replace(
-        timelineHrefWithReturn('/timeline', organizeReturnTo, organizeReturnLabel),
-        { scroll: false },
-      );
+      router.replace(timelineHrefWithReturn('/timeline', organizeReturnTo, organizeReturnLabel), {
+        scroll: false,
+      });
     }
   }, [organizeReturnLabel, organizeReturnTo, route.year, router, years]);
 

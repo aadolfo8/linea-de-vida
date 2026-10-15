@@ -18,7 +18,9 @@ export function TimelineRoute() {
   const pathname = usePathname();
   const router = useRouter();
   const { focused, setFocused } = useTimelineFocus();
-  const [organizeReturn, setOrganizeReturn] = useState<{ href: string; label: string } | null>(null);
+  const [organizeReturn, setOrganizeReturn] = useState<{ href: string; label: string } | null>(
+    null,
+  );
   const enterRef = useRef<HTMLButtonElement>(null);
   const exitRef = useRef<HTMLButtonElement>(null);
   const previousFocus = useRef(focused);
