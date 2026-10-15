@@ -166,16 +166,20 @@ model SyncRun {
  @@index([status,createdAt])
 }
 model SyncIssue {
- id String @id @default(cuid())
- syncRunId String
- driveFileId String?
- code SyncIssueCode
- severity SyncIssueSeverity
- details String
- createdAt DateTime @default(now())
+  id String @id @default(cuid())
+  syncRunId String
+  driveFileId String?
+  driveFolderId String?
+  code SyncIssueCode
+  severity SyncIssueSeverity
+  details String
+  resolvedAt DateTime?
+  createdAt DateTime @default(now())
  run SyncRun @relation(fields:[syncRunId],references:[id],onDelete:Cascade)
- @@index([syncRunId,severity])
- @@index([driveFileId])
+  @@index([syncRunId,severity])
+  @@index([driveFileId])
+  @@index([driveFolderId])
+  @@index([resolvedAt,syncRunId])
 }
 model Photo {
  id String @id @default(cuid())

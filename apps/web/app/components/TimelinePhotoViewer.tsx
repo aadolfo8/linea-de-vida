@@ -57,7 +57,7 @@ export function TimelinePhotoViewer({
   const [loadingMore, setLoadingMore] = useState(false);
   const [loadMoreError, setLoadMoreError] = useState(false);
   const [index, setIndex] = useState(initialIndex);
-  const [originalPhotoId, setOriginalPhotoId] = useState<string | null>(null);
+  const [thumbnailFallbackPhotoId, setThumbnailFallbackPhotoId] = useState<string | null>(null);
   const dialog = useRef<HTMLElement>(null);
   const backdrop = useRef<HTMLDivElement>(null);
 
@@ -66,7 +66,7 @@ export function TimelinePhotoViewer({
     embla.scrollTo(initialIndex, true);
     const select = () => {
       setIndex(embla.selectedScrollSnap());
-      setOriginalPhotoId(null);
+      setThumbnailFallbackPhotoId(null);
     };
     embla.on('select', select);
     return () => {
@@ -131,8 +131,6 @@ export function TimelinePhotoViewer({
   const selected = loadedPhotos[index];
   if (!selected) return null;
   const isDownloadOnly = /^image\/(heic|heif)$/i.test(selected.mimeType);
-  const canViewOriginal = /^image\/(jpeg|png|webp)$/i.test(selected.mimeType);
-  const selectedOriginalRequested = originalPhotoId === selected.id;
   const eagerIndexes = galleryEagerIndexes(index, loadedPhotos.length);
 
   const fetchNextPage = async () => {
@@ -227,8 +225,12 @@ export function TimelinePhotoViewer({
                 photo={photo}
                 active={photoIndex === index}
                 eager={eagerIndexes.has(photoIndex)}
-                requestOriginal={photo.id === originalPhotoId}
-                onOriginalUnavailable={() => setOriginalPhotoId(null)}
+                requestOriginal={
+                  photoIndex === index &&
+                  /^image\/(jpeg|png|webp)$/i.test(photo.mimeType) &&
+                  thumbnailFallbackPhotoId !== photo.id
+                }
+                onOriginalUnavailable={() => setThumbnailFallbackPhotoId(photo.id)}
               />
             ))}
           </div>
@@ -243,17 +245,6 @@ export function TimelinePhotoViewer({
             </span>
           </div>
           <div className="flex items-center gap-2 max-[42rem]:flex-wrap max-[42rem]:justify-end">
-            {canViewOriginal && (
-              <Button
-                type="button"
-                variant="outline"
-                className="min-w-11 rounded-xl border-[#66705f] bg-transparent px-3 text-[#151a16] hover:bg-[#151a16] hover:text-[#f3f0e8] focus-visible:outline-[#b7d43b]"
-                aria-pressed={selectedOriginalRequested}
-                onClick={() => setOriginalPhotoId(selectedOriginalRequested ? null : selected.id)}
-              >
-                {selectedOriginalRequested ? 'Volver a vista previa' : 'Ver original'}
-              </Button>
-            )}
             {isDownloadOnly && (
               <a
                 className="inline-flex min-h-11 items-center px-3 text-[0.8rem] text-inherit underline-offset-4 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#b7d43b]"
@@ -357,12 +348,28 @@ function ViewerPhotoSlide({
     api,
     variant === 'original' ? `/v1/photos/${photo.id}/content` : photo.thumbnailUrl,
   );
+  const thumbnailSrc = mediaUrl(api, photo.thumbnailUrl);
 
   return (
     <div
       className="relative grid min-h-0 min-w-full place-items-center bg-[#080c09]"
       aria-hidden={!active}
     >
+      {variant === 'original' && status === 'loading' && (
+        <>
+          {/* Keep the small preview visible until the full image is ready. */}
+          {/* eslint-disable-next-line @next/next/no-img-element -- Private media URLs rely on the browser's session cookies. */}
+          <img
+            src={thumbnailSrc}
+            alt=""
+            aria-hidden="true"
+            width={photo.dimensions?.width}
+            height={photo.dimensions?.height}
+            className="absolute left-1/2 top-1/2 z-0 max-h-[min(68dvh,45rem)] max-w-full -translate-x-1/2 -translate-y-1/2 object-contain"
+            loading="eager"
+          />
+        </>
+      )}
       {/* eslint-disable-next-line @next/next/no-img-element -- Private media URLs rely on the browser's session cookies. */}
       <img
         key={`${photo.id}-${variant}-${retryKey}`}
@@ -370,7 +377,7 @@ function ViewerPhotoSlide({
         alt={active ? photo.fileName : ''}
         width={photo.dimensions?.width}
         height={photo.dimensions?.height}
-        className="max-h-[min(68dvh,45rem)] max-w-full object-contain"
+        className="relative z-10 max-h-[min(68dvh,45rem)] max-w-full object-contain"
         loading={eager ? 'eager' : 'lazy'}
         onLoad={() => setStatus('ready')}
         onError={handleError}
@@ -381,7 +388,7 @@ function ViewerPhotoSlide({
           role="status"
           aria-live="polite"
         >
-          Cargando fotografía…
+          {variant === 'original' ? 'Cargando fotografía en alta calidad…' : 'Cargando fotografía…'}
         </span>
       )}
       {active && status === 'ready' && originalFallback && (

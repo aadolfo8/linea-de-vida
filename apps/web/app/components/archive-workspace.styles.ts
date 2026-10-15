@@ -5,6 +5,11 @@ export const archiveStyles: Record<string, string> = {
   intro:
     'max-w-[72ch] py-2 pb-12 [&_h1]:mb-5 [&_h1]:max-w-[18ch] [&_h1]:text-[clamp(2.4rem,5vw,3.5rem)] [&_h1]:font-semibold [&_h1]:leading-none [&_h1]:tracking-[-0.04em] [&_p]:mb-0 [&_p]:max-w-[70ch] [&_p]:text-base',
   taskRail: 'mb-2 flex flex-wrap items-center gap-x-6 gap-y-2 border-y border-map-line py-3.5',
+  organizeNav:
+    'sticky top-0 z-20 mb-2 flex flex-wrap items-center gap-1 border-y border-map-line bg-map-paper py-2 max-[600px]:-mx-5 max-[600px]:px-3',
+  organizeTab:
+    'inline-flex min-h-11 items-center justify-center rounded-md px-3 text-sm font-semibold text-map-muted transition-colors hover:bg-map-panel hover:text-map-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-map-active',
+  organizeTabActive: 'bg-map-route-soft text-map-ink',
   taskPrimary:
     'inline-flex min-h-11 items-center justify-center gap-2 rounded-md bg-map-active px-4 py-2 text-sm font-semibold text-map-ink no-underline transition-colors hover:bg-map-ink hover:text-map-paper focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-map-active',
   taskLink:
@@ -15,6 +20,10 @@ export const archiveStyles: Record<string, string> = {
   notice_success: 'border-[#4c8068] bg-map-panel',
   notice_warning: 'border-[#97721d] bg-map-panel [&_span]:bg-[#d49a27]',
   notice_error: 'border-map-danger bg-[#f8e9e4] [&_span]:bg-map-danger',
+  dateResult:
+    'mb-8 flex flex-wrap items-center justify-between gap-6 border-y border-map-route bg-map-panel/70 px-4 py-5 [&_h2]:m-0 [&_h2]:text-xl [&_h2]:font-semibold [&_p]:mb-0 [&_p]:mt-2 [&_p]:max-w-[68ch] [&_p]:text-sm [&_p]:text-map-muted',
+  dateResultEyebrow: 'm-0 mb-2 text-xs font-bold uppercase tracking-[0.08em] text-map-route',
+  dateResultActions: 'flex flex-wrap items-center gap-2',
   connectionSection: 'border-t border-map-line py-10 pb-13',
   sourceSetup: 'border-t border-map-line py-10 pb-13',
   archiveSection: 'border-t border-map-line py-10 pb-13',
@@ -76,6 +85,17 @@ export const archiveStyles: Record<string, string> = {
   sourceOverviewHint: 'mt-3 text-sm leading-relaxed text-map-muted',
   sourceOverviewRun: 'mt-3 text-xs text-map-muted',
   sourceOverviewActions: 'flex flex-wrap items-start justify-end gap-2 max-[680px]:justify-start',
+  reviewQueue: 'grid scroll-mt-24 gap-5 border-y border-map-line py-8',
+  reviewQueueRow:
+    'flex flex-wrap items-center justify-between gap-4 border-y border-map-line py-4 [&_h3]:m-0 [&_h3]:text-base [&_h3]:font-semibold [&_p]:mb-0 [&_p]:mt-1 [&_p]:text-sm [&_p]:text-map-muted',
+  reviewIssues: 'grid gap-3 [&_h3]:m-0 [&_h3]:text-base [&_h3]:font-semibold',
+  reviewQueueHint: 'm-0 text-sm text-map-muted',
+  reviewQueueError:
+    'flex flex-wrap items-center justify-between gap-3 border-y border-map-danger bg-[#f8e9e4] px-4 py-3 text-sm text-map-danger [&_p]:m-0 [&_p]:max-w-[68ch]',
+  reviewIssueList:
+    'm-0 grid list-none gap-0 divide-y divide-map-line p-0 [&_li]:flex [&_li]:flex-wrap [&_li]:items-center [&_li]:justify-between [&_li]:gap-3 [&_li]:py-3 [&_li>div]:grid [&_li>div]:gap-1 [&_li>div]:max-w-[72ch] [&_li_span]:text-xs [&_li_span]:text-map-muted',
+  reviewComplete:
+    'grid justify-items-start gap-2 py-4 [&_h3]:m-0 [&_h3]:text-lg [&_h3]:font-semibold [&_p]:m-0 [&_p]:max-w-[60ch] [&_p]:text-sm [&_p]:text-map-muted',
   loadingLine: 'flex min-h-11 items-center gap-3 text-sm text-map-muted',
   emptyState:
     'grid justify-items-center gap-3 border-y border-map-line py-12 text-center [&_p]:m-0 [&_p]:max-w-[55ch] [&_p]:text-map-muted [&_h2]:m-0 [&_h2]:text-xl [&_h2]:font-semibold',
@@ -167,6 +187,8 @@ export const archiveStyles: Record<string, string> = {
   dateFields: 'grid grid-cols-[repeat(auto-fit,minmax(9rem,1fr))] gap-3',
   fieldError: 'mt-2 text-sm font-medium text-map-danger',
   folderDateSection: 'my-5 border-y border-map-line py-5',
+  folderReview:
+    'my-4 flex flex-wrap items-center justify-between gap-4 border-y border-map-line bg-map-panel/40 px-4 py-4 [&_strong]:text-sm [&_p]:mb-0 [&_p]:mt-1 [&_p]:max-w-[68ch] [&_p]:text-sm [&_p]:text-map-muted',
   folderDateHeading:
     'mb-4 flex flex-wrap items-start justify-between gap-3 [&_h3]:m-0 [&_h3]:text-lg [&_h3]:font-semibold [&_p]:m-0 [&_p]:text-sm [&_p]:text-map-muted',
   scopeOptions:

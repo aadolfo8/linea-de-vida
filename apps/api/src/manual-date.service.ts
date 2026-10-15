@@ -129,6 +129,42 @@ export function photoDateResponse<T extends DateEvidence & Record<string, unknow
 export class ManualDateService {
   constructor(private readonly prisma: PrismaService) {}
 
+  async preview(userId: string, photoIds: string[], input: ManualDateInput) {
+    const manual = validateManualDate(input);
+    const ids = [...new Set(photoIds)];
+    if (!ids.length || ids.length !== photoIds.length)
+      invalid('INVALID_PHOTO_IDS', 'Photo IDs must be a non-empty unique list.');
+    if (ids.length > MANUAL_DATE_BULK_LIMIT)
+      invalid(
+        'BULK_LIMIT_EXCEEDED',
+        `A maximum of ${MANUAL_DATE_BULK_LIMIT} photos can be edited at once.`,
+      );
+    const photos = await this.prisma.photo.findMany({
+      where: { id: { in: ids }, userId },
+      include: { override: true },
+    });
+    if (photos.length !== ids.length)
+      throw new NotFoundException({ code: 'PHOTO_NOT_FOUND', message: 'Photo not found.' });
+    const projected = { value: manual.dateValue, precision: manual.precision, origin: 'MANUAL' };
+    const alreadySame = photos.filter((photo) => {
+      const current = effectiveDate({ ...photo, override: photo.override });
+      return (
+        current.value?.getTime() === projected.value.getTime() &&
+        current.precision === projected.precision &&
+        current.origin === projected.origin
+      );
+    }).length;
+    const currentlyDated = photos.filter(
+      (photo) => effectiveDate({ ...photo, override: photo.override }).value !== null,
+    ).length;
+    return {
+      selectedCount: photos.length,
+      willChangeCount: photos.length - alreadySame,
+      alreadySameCount: alreadySame,
+      alreadyDatedCount: currentlyDated,
+    };
+  }
+
   async set(userId: string, photoIds: string[], input: ManualDateInput) {
     const manual = validateManualDate(input);
     const ids = [...new Set(photoIds)];

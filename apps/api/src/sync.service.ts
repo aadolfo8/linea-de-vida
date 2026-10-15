@@ -174,6 +174,39 @@ export class SyncService {
     });
   }
 
+  private async recordIssue(
+    runId: string,
+    sourceId: string,
+    issue: {
+      code: SyncIssueCode;
+      severity: SyncIssueSeverity;
+      details: string;
+      driveFileId?: string;
+      driveFolderId?: string;
+    },
+  ) {
+    const identity = {
+      code: issue.code,
+      driveFileId: issue.driveFileId ?? null,
+      driveFolderId: issue.driveFolderId ?? null,
+      resolvedAt: null,
+      run: { is: { photoSourceId: sourceId } },
+    };
+    const existing = await this.prisma.syncIssue.findFirst({ where: identity });
+    const data = {
+      syncRunId: runId,
+      code: issue.code,
+      severity: issue.severity,
+      details: issue.details,
+      driveFileId: issue.driveFileId,
+      driveFolderId: issue.driveFolderId,
+      resolvedAt: null,
+      createdAt: new Date(),
+    };
+    if (existing) return this.prisma.syncIssue.update({ where: { id: existing.id }, data });
+    return this.prisma.syncIssue.create({ data });
+  }
+
   async execute(syncRunId: string) {
     const run = await this.prisma.syncRun.findUnique({
       where: { id: syncRunId },
@@ -191,21 +224,14 @@ export class SyncService {
           this.drive.getFolder(run.source.connection, run.source.driveFolderId),
         );
       } catch (error) {
-        if (error instanceof DriveRequestError && error.status === 404)
-          await this.prisma.indexedFolder.updateMany({
-            where: { sourceId: run.source.id },
-            data: { status: 'MISSING' },
-          });
         const transient =
           error instanceof DriveRequestError && [429, 500, 502, 503, 504].includes(error.status);
         if (transient) throw error;
-        await this.prisma.syncIssue.create({
-          data: {
-            syncRunId: run.id,
-            code: SyncIssueCode.ACCESS_DENIED,
-            severity: SyncIssueSeverity.ERROR,
-            details: 'The configured root folder is unavailable.',
-          },
+        await this.recordIssue(run.id, run.source.id, {
+          code: SyncIssueCode.ACCESS_DENIED,
+          severity: SyncIssueSeverity.ERROR,
+          details: 'The configured root folder is unavailable.',
+          driveFolderId: run.source.driveFolderId,
         });
         await this.prisma.syncRun.update({
           where: { id: run.id },
@@ -214,17 +240,11 @@ export class SyncService {
         return;
       }
       if (!root || !isFolder(root)) {
-        await this.prisma.indexedFolder.updateMany({
-          where: { sourceId: run.source.id },
-          data: { status: 'MISSING' },
-        });
-        await this.prisma.syncIssue.create({
-          data: {
-            syncRunId: run.id,
-            code: SyncIssueCode.ACCESS_DENIED,
-            severity: SyncIssueSeverity.ERROR,
-            details: 'The configured root folder is unavailable.',
-          },
+        await this.recordIssue(run.id, run.source.id, {
+          code: SyncIssueCode.ACCESS_DENIED,
+          severity: SyncIssueSeverity.ERROR,
+          details: 'The configured root folder is unavailable.',
+          driveFolderId: run.source.driveFolderId,
         });
         await this.prisma.syncRun.update({
           where: { id: run.id },
@@ -250,11 +270,16 @@ export class SyncService {
       severity: SyncIssueSeverity,
       details: string,
       driveFileId?: string,
+      driveFolderId?: string,
     ) => {
       counts.issues++;
       partial = true;
-      await this.prisma.syncIssue.create({
-        data: { syncRunId: run.id, code, severity, details, driveFileId },
+      await this.recordIssue(run.id, run.source.id, {
+        code,
+        severity,
+        details,
+        driveFileId,
+        driveFolderId,
       });
     };
     const index = async (
@@ -556,6 +581,14 @@ export class SyncService {
             where: { sourceId: run.source.id, lastSeenSyncRunId: { not: run.id } },
             data: { status: 'MISSING' },
           }),
+          this.prisma.syncIssue.updateMany({
+            where: {
+              resolvedAt: null,
+              syncRunId: { not: run.id },
+              run: { is: { photoSourceId: run.source.id } },
+            },
+            data: { resolvedAt: new Date() },
+          }),
         ]);
       }
       await this.prisma.syncRun.update({
@@ -580,6 +613,8 @@ export class SyncService {
           SyncIssueCode.ACCESS_DENIED,
           SyncIssueSeverity.ERROR,
           'Drive access was denied or the request was invalid.',
+          undefined,
+          checkpoint.pendingFolders[0]?.id ?? run.source.driveFolderId,
         );
       await this.persist(run.id, checkpoint, counts);
       if (!transient)
