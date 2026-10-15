@@ -161,36 +161,50 @@ describe('TimelinePhotoViewer effects', () => {
     expect(container.textContent).toContain('1 de enero de 2026');
   });
 
-  it('opens with previews and fetches the original only when requested', async () => {
+  it('opens the selected photo at original quality while preserving a preview underneath', async () => {
     await act(async () =>
       root?.render(<TimelinePhotoViewer photos={photos} initialIndex={0} onClose={vi.fn()} />),
     );
 
     const images = [...container.querySelectorAll<HTMLImageElement>('img')];
-    expect(images[0]?.getAttribute('src')).toContain('/v1/photos/photo-1/thumbnail');
-    expect(images[1]?.getAttribute('src')).toContain('/v1/photos/photo-2/thumbnail');
-
-    await act(async () => button('Ver original').click());
-    expect(container.querySelector('img')?.getAttribute('src')).toContain(
-      '/v1/photos/photo-1/content',
+    expect(images.some((image) => image.getAttribute('src')?.includes('/photo-1/content'))).toBe(
+      true,
     );
-    expect(container.textContent).toContain('Volver a vista previa');
+    expect(images.some((image) => image.getAttribute('src')?.includes('/photo-1/thumbnail'))).toBe(
+      true,
+    );
+    expect(images.some((image) => image.getAttribute('src')?.includes('/photo-2/thumbnail'))).toBe(
+      true,
+    );
+    expect(
+      [...container.querySelectorAll('button')].some((item) =>
+        item.textContent?.includes('Ver original'),
+      ),
+    ).toBe(false);
   });
 
   it('falls back from a failed original to its thumbnail and offers a bounded retry', async () => {
     await act(async () =>
       root?.render(<TimelinePhotoViewer photos={photos} initialIndex={0} onClose={vi.fn()} />),
     );
-    await act(async () => button('Ver original').click());
 
-    const original = container.querySelector<HTMLImageElement>('img')!;
+    const original = [...container.querySelectorAll<HTMLImageElement>('img')].find((image) =>
+      image.getAttribute('src')?.includes('/photo-1/content'),
+    )!;
     await act(async () => original.dispatchEvent(new Event('error')));
-    expect(container.querySelector('img')?.getAttribute('src')).toContain(
-      '/v1/photos/photo-1/thumbnail',
-    );
-    expect(container.textContent).toContain('Ver original');
+    expect(
+      [...container.querySelectorAll<HTMLImageElement>('img')].some((image) =>
+        image.getAttribute('src')?.includes('/photo-1/thumbnail'),
+      ),
+    ).toBe(true);
 
-    const preview = container.querySelector<HTMLImageElement>('img')!;
+    const preview = [...container.querySelectorAll<HTMLImageElement>('img')].find((image) =>
+      image.getAttribute('src')?.includes('/photo-1/thumbnail'),
+    )!;
+    await act(async () => preview.dispatchEvent(new Event('load')));
+    expect(container.textContent).toContain(
+      'El original no se pudo cargar; se muestra la miniatura.',
+    );
     await act(async () => preview.dispatchEvent(new Event('error')));
     expect(container.querySelector('[role="alert"]')?.textContent).toContain(
       'No se pudo cargar la fotografía.',

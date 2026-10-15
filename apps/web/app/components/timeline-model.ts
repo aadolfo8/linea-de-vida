@@ -104,6 +104,30 @@ export function timelineHref({
   return year ? `/timeline/${year}${month ? `/${month}` : ''}` : '/timeline';
 }
 
+export function timelineHrefWithReturn(
+  href: string,
+  returnTo: string | null,
+  returnLabel?: string | null,
+) {
+  if (!returnTo) return href;
+  const url = new URL(href, 'http://linea-de-vida.local');
+  url.searchParams.set('returnTo', returnTo);
+  if (returnLabel) url.searchParams.set('returnLabel', returnLabel);
+  return `${url.pathname}${url.search}${url.hash}`;
+}
+
+export function safeOrganizeReturnHref(value: string | null, origin: string) {
+  if (!value) return null;
+  try {
+    const base = new URL(origin);
+    const target = new URL(value, base);
+    if (target.origin !== base.origin || target.pathname !== '/organizar') return null;
+    return `${target.pathname}${target.search}${target.hash}`;
+  } catch {
+    return null;
+  }
+}
+
 export const monthFormatter = new Intl.DateTimeFormat('es', {
   month: 'long',
   timeZone: 'UTC',

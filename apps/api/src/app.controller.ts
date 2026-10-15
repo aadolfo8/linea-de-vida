@@ -839,6 +839,38 @@ export class AppController {
       nextCursor: records.length > limit ? this.cursor(scope, offset + limit) : null,
     };
   }
+  @UseGuards(SessionGuard) @Get('photo-sources/:id/issues') async sourceIssues(
+    @CurrentUserId() userId: string,
+    @Param('id') sourceId: string,
+    @Query('cursor') cursor?: string,
+    @Query('limit') rawLimit?: string,
+  ) {
+    const source = await this.prisma.photoSource.findFirst({ where: { id: sourceId, userId } });
+    if (!source)
+      throw new NotFoundException({ code: 'SOURCE_NOT_FOUND', message: 'Photo source not found.' });
+    const scope = `source-active-issues:${sourceId}`;
+    const { limit, offset } = this.page(cursor, rawLimit, scope);
+    const where = { resolvedAt: null, run: { is: { photoSourceId: sourceId } } };
+    const [records, grouped] = await Promise.all([
+      this.prisma.syncIssue.findMany({
+        where,
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        skip: offset,
+        take: limit + 1,
+      }),
+      this.prisma.syncIssue.groupBy({
+        by: ['code'],
+        where,
+        _count: { _all: true },
+      }),
+    ]);
+    return {
+      items: records.slice(0, limit),
+      totalCount: grouped.reduce((total, group) => total + group._count._all, 0),
+      countsByCode: Object.fromEntries(grouped.map((group) => [group.code, group._count._all])),
+      nextCursor: records.length > limit ? this.cursor(scope, offset + limit) : null,
+    };
+  }
   @UseGuards(SessionGuard) @Get('photo-sources/:id/photos') async searchSourcePhotos(
     @CurrentUserId() userId: string,
     @Param('id') sourceId: string,

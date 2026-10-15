@@ -79,6 +79,8 @@ export const settingsEndpoint = {
   classificationSummary: (sourceId: string) => `/photo-sources/${sourceId}/classification-summary`,
   pendingPhotos: (sourceId: string, cursor?: string) =>
     `/photo-sources/${sourceId}/pending-photos?limit=30${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`,
+  sourceIssues: (sourceId: string, cursor?: string) =>
+    `/photo-sources/${encodeURIComponent(sourceId)}/issues?limit=30${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`,
   sourcePhotos: (
     sourceId: string,
     options: { query?: string; folderId?: string; classification?: string; cursor?: string } = {},

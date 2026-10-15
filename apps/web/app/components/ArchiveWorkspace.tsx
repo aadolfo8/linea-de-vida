@@ -4,6 +4,7 @@ import {
   type CSSProperties,
   type FormEvent,
   type KeyboardEvent,
+  type MouseEvent,
   useCallback,
   useEffect,
   useMemo,
@@ -20,6 +21,12 @@ import {
 } from '../../lib/api';
 import { mediaUrl } from '../../lib/media';
 import { driveFolderIdFromInput } from '../../lib/drive-folder';
+import { timelineHref } from './timeline-model';
+import {
+  parseOrganizeLocation,
+  writeOrganizeLocation,
+  type OrganizeLocation,
+} from '../../lib/organize-navigation';
 import { removePhotosFromArchive } from '../../lib/photo-removal';
 import { visibleFolderTree } from '../settings/folder-tree';
 import { archiveStyles as styles } from './archive-workspace.styles';
@@ -80,7 +87,14 @@ type SyncRun = {
   issueCount?: number;
   createdAt?: string;
 };
-type SyncIssue = { id: string; details?: string; code?: string; driveFileId?: string | null };
+type SyncIssue = {
+  id: string;
+  details?: string;
+  code?: string;
+  driveFileId?: string | null;
+  driveFolderId?: string | null;
+  createdAt?: string;
+};
 type SourceOverview = {
   summary: ClassificationSummary | null;
   latestRun: SyncRun | null;
@@ -101,6 +115,12 @@ type FolderDatePreview = {
   replacesAutomaticCount: number;
   replacesFolderNameDateCount: number;
 };
+type DateChangeResult = {
+  count: number;
+  year: number;
+  month: number | null;
+  scopeLabel: string;
+};
 type BusyAction =
   | 'browse'
   | 'connect-drive'
@@ -119,6 +139,7 @@ type BusyAction =
 
 const TERMINAL_SYNC_STATUSES = ['SUCCEEDED', 'PARTIAL', 'FAILED', 'CANCELLED'];
 const MANUAL_DATE_BULK_LIMIT = 50;
+const ORGANIZE_RETURN_KEY = 'linea-de-vida:organize-return';
 const MONTH_OPTIONS = Array.from({ length: 12 }, (_, index) => ({
   value: String(index + 1),
   label: new Intl.DateTimeFormat('es-ES', { month: 'long', timeZone: 'UTC' }).format(
@@ -287,6 +308,8 @@ export function ArchiveWorkspace({
   const [history, setHistory] = useState<SyncRun[]>([]);
   const [issues, setIssues] = useState<SyncIssue[]>([]);
   const [issueCursor, setIssueCursor] = useState<string | null>(null);
+  const [issueTotalCount, setIssueTotalCount] = useState(0);
+  const [issueCountsByCode, setIssueCountsByCode] = useState<Record<string, number>>({});
   const [loadingIssues, setLoadingIssues] = useState(false);
   const [loadingMoreIssues, setLoadingMoreIssues] = useState(false);
   const [issuesError, setIssuesError] = useState(false);
@@ -309,6 +332,11 @@ export function ArchiveWorkspace({
   const [manualError, setManualError] = useState('');
   const [manualDatePreview, setManualDatePreview] = useState<ManualDatePreview | null>(null);
   const [manualEditorOpen, setManualEditorOpen] = useState(false);
+  const [dateChangeResult, setDateChangeResult] = useState<DateChangeResult | null>(null);
+  const navigationReadyRef = useRef(false);
+  const navigationWriteRef = useRef(false);
+  const restoredLocationRef = useRef<OrganizeLocation | null>(null);
+  const organizeReturnRestoreRef = useRef<{ href: string; scrollY: number } | null>(null);
   const activeSourceIdRef = useRef<string | null>(null);
   const selectedFolderIdRef = useRef<string | null>(null);
   const photoFilterRef = useRef(photoFilter);
@@ -390,6 +418,38 @@ export function ArchiveWorkspace({
 
   const announce = (message: string, tone: Notice['tone'] = 'info') => setNotice({ message, tone });
 
+  const restoreOrganizeReturn = () => {
+    const context = organizeReturnRestoreRef.current;
+    if (!context) return;
+    requestAnimationFrame(() => {
+      if (organizeReturnRestoreRef.current !== context) return;
+      window.scrollTo({ top: context.scrollY, behavior: 'instant' });
+      const folderRow = [...document.querySelectorAll<HTMLElement>('[data-folder-id]')].find(
+        (element) => element.dataset.folderId === selectedFolderIdRef.current,
+      );
+      (folderRow ?? document.getElementById('photos-workspace'))?.focus({ preventScroll: true });
+      organizeReturnRestoreRef.current = null;
+      sessionStorage.removeItem(ORGANIZE_RETURN_KEY);
+    });
+  };
+
+  const openTimelineResult = (event: MouseEvent<HTMLAnchorElement>, result: DateChangeResult) => {
+    const returnTo = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+    const returnContext = { href: returnTo, scrollY: window.scrollY };
+    try {
+      sessionStorage.setItem(ORGANIZE_RETURN_KEY, JSON.stringify(returnContext));
+    } catch {
+      // The return link still works if browser storage is unavailable.
+    }
+    const destination = new URL(
+      timelineHref({ year: result.year, month: result.month }),
+      window.location.origin,
+    );
+    destination.searchParams.set('returnTo', returnTo);
+    destination.searchParams.set('returnLabel', result.scopeLabel);
+    event.currentTarget.href = destination.toString();
+  };
+
   const reviewPendingPhotos = () => {
     if (!activeSource || busy) return;
     setOrganizeTab('pending');
@@ -404,16 +464,21 @@ export function ArchiveWorkspace({
   };
 
   const loadMoreIssues = async () => {
-    if (!run || !issueCursor || loadingMoreIssues) return;
+    if (!activeSource || !issueCursor || loadingMoreIssues) return;
     setLoadingMoreIssues(true);
     try {
-      const page = await apiJson<{ items: SyncIssue[]; nextCursor: string | null }>(
-        settingsEndpoint.issues(run.id, issueCursor),
-      );
+      const page = await apiJson<{
+        items: SyncIssue[];
+        nextCursor: string | null;
+        totalCount: number;
+        countsByCode: Record<string, number>;
+      }>(settingsEndpoint.sourceIssues(activeSource.id, issueCursor));
       setIssues((current) => [
         ...new Map([...current, ...page.items].map((issue) => [issue.id, issue])).values(),
       ]);
       setIssueCursor(page.nextCursor);
+      setIssueTotalCount(page.totalCount);
+      setIssueCountsByCode(page.countsByCode);
       setIssuesError(false);
     } catch (error) {
       setIssuesError(true);
@@ -560,7 +625,15 @@ export function ArchiveWorkspace({
       setHistory(nextHistory.items);
       setRun(nextHistory.items[0] ?? null);
       setSelectedFolderId((current) => {
-        const next = all.some((folder) => folder.id === current) ? current : (all[0]?.id ?? null);
+        const restoredFolderId =
+          restoredLocationRef.current?.sourceId === sourceId
+            ? restoredLocationRef.current.folderId
+            : null;
+        const next = all.some((folder) => folder.id === current)
+          ? current
+          : all.some((folder) => folder.id === restoredFolderId)
+            ? restoredFolderId
+            : (all[0]?.id ?? null);
         selectedFolderIdRef.current = next;
         return next;
       });
@@ -584,6 +657,7 @@ export function ArchiveWorkspace({
     const controller = new AbortController();
     photoRequestRef.current = controller;
     setLoadingPhotos(true);
+    let loaded = false;
     try {
       const page = await apiJson<{ items: IndexedPhoto[]; nextCursor: string | null }>(
         settingsEndpoint.folderPhotos(folderIdValue, cursor, filter === 'ALL' ? undefined : filter),
@@ -605,10 +679,12 @@ export function ArchiveWorkspace({
       ]);
       setPhotoCursor(page.nextCursor);
       if (!append) setSelectedPhotos(new Set(retained.map((photo) => photo.id)));
+      loaded = true;
     } finally {
       if (photoRequestRef.current === controller) {
         photoRequestRef.current = null;
         setLoadingPhotos(false);
+        if (loaded) restoreOrganizeReturn();
       }
     }
   };
@@ -634,6 +710,7 @@ export function ArchiveWorkspace({
       setSelectedPhotos(new Set(retained.map((photo) => photo.id)));
     }
     setLoadingPhotos(true);
+    let loaded = false;
     try {
       const page = await apiJson<{ items: IndexedPhoto[]; nextCursor: string | null }>(
         settingsEndpoint.pendingPhotos(sourceId, cursor),
@@ -652,10 +729,12 @@ export function ArchiveWorkspace({
         ).values(),
       ]);
       setPhotoCursor(page.nextCursor);
+      loaded = true;
     } finally {
       if (photoRequestRef.current === controller) {
         photoRequestRef.current = null;
         setLoadingPhotos(false);
+        if (loaded) restoreOrganizeReturn();
       }
     }
   };
@@ -677,6 +756,7 @@ export function ArchiveWorkspace({
     pendingViewRef.current = false;
     setPendingView(false);
     setLoadingPhotos(true);
+    let loaded = false;
     try {
       const page = await apiJson<{ items: IndexedPhoto[]; nextCursor: string | null }>(
         settingsEndpoint.sourcePhotos(sourceId, {
@@ -701,11 +781,13 @@ export function ArchiveWorkspace({
         ).values(),
       ]);
       setPhotoCursor(page.nextCursor);
+      loaded = true;
       if (!append) setSelectedPhotos(new Set(retained.map((photo) => photo.id)));
     } finally {
       if (photoRequestRef.current === controller) {
         photoRequestRef.current = null;
         setLoadingPhotos(false);
+        if (loaded) restoreOrganizeReturn();
       }
     }
   };
@@ -777,6 +859,98 @@ export function ArchiveWorkspace({
   }, [area]);
 
   useEffect(() => {
+    if (area !== 'organize' || navigationReadyRef.current) return;
+    const restored = parseOrganizeLocation(window.location.href);
+    restoredLocationRef.current = restored;
+    try {
+      const saved = sessionStorage.getItem(ORGANIZE_RETURN_KEY);
+      if (saved) {
+        const context = JSON.parse(saved) as { href?: unknown; scrollY?: unknown };
+        const currentHref = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+        if (
+          context.href === currentHref &&
+          typeof context.scrollY === 'number' &&
+          Number.isFinite(context.scrollY) &&
+          context.scrollY >= 0
+        )
+          organizeReturnRestoreRef.current = { href: currentHref, scrollY: context.scrollY };
+        else sessionStorage.removeItem(ORGANIZE_RETURN_KEY);
+      }
+    } catch {
+      sessionStorage.removeItem(ORGANIZE_RETURN_KEY);
+    }
+    setSelectedSourceId(restored.sourceId);
+    setOrganizeTab(restored.task);
+    setPhotoFilter(restored.classification);
+    photoFilterRef.current = restored.classification;
+    setSearchText(restored.query);
+    setAppliedSearch(restored.query);
+    setSearchFolderId(restored.searchFolderId);
+    if (restored.task === 'pending') {
+      pendingViewRef.current = true;
+      setPendingView(true);
+      setPhotoFilter('UNCLASSIFIED');
+      photoFilterRef.current = 'UNCLASSIFIED';
+    }
+    navigationReadyRef.current = true;
+  }, [area]);
+
+  useEffect(() => {
+    if (area !== 'organize' || !navigationReadyRef.current) return;
+    const pop = () => {
+      const restored = parseOrganizeLocation(window.location.href);
+      navigationWriteRef.current = true;
+      restoredLocationRef.current = restored;
+      setSelectedSourceId(restored.sourceId);
+      setSelectedFolderId(restored.folderId);
+      selectedFolderIdRef.current = restored.folderId;
+      setOrganizeTab(restored.task);
+      const nextFilter = restored.task === 'pending' ? 'UNCLASSIFIED' : restored.classification;
+      setPhotoFilter(nextFilter);
+      photoFilterRef.current = nextFilter;
+      setPendingView(restored.task === 'pending');
+      pendingViewRef.current = restored.task === 'pending';
+      setSearchMode(Boolean(restored.query));
+      setSearchText(restored.query);
+      setAppliedSearch(restored.query);
+      setSearchFolderId(restored.searchFolderId);
+      setSelectedPhotos(new Set());
+    };
+    window.addEventListener('popstate', pop);
+    return () => window.removeEventListener('popstate', pop);
+  }, [area]);
+
+  useEffect(() => {
+    if (area !== 'organize' || !navigationReadyRef.current || !activeSource || loadingArchive)
+      return;
+    if (navigationWriteRef.current) {
+      navigationWriteRef.current = false;
+      return;
+    }
+    const task = organizeTab;
+    const state: OrganizeLocation = {
+      sourceId: activeSource.id,
+      folderId: selectedFolderId,
+      task,
+      classification: task === 'pending' ? 'UNCLASSIFIED' : photoFilter,
+      query: searchMode ? appliedSearch : '',
+      searchFolderId: searchMode ? searchFolderId : 'ALL',
+    };
+    const nextUrl = writeOrganizeLocation(window.location.href, state);
+    const currentUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+    if (nextUrl !== currentUrl) window.history.pushState(null, '', nextUrl);
+  }, [
+    activeSource?.id,
+    area,
+    appliedSearch,
+    organizeTab,
+    photoFilter,
+    searchFolderId,
+    searchMode,
+    selectedFolderId,
+  ]);
+
+  useEffect(() => {
     const sourceId = activeSource?.id ?? null;
     activeSourceIdRef.current = sourceId;
     selectedFolderIdRef.current = null;
@@ -816,10 +990,19 @@ export function ArchiveWorkspace({
     void loadArchive(sourceId)
       .then(async () => {
         if (activeSourceIdRef.current !== sourceId) return;
-        if (new URLSearchParams(window.location.search).get('filter') === 'undated') {
+        const restored = restoredLocationRef.current;
+        if (restored?.sourceId === sourceId && restored.task === 'pending') {
           await loadPending(sourceId);
           if (activeSourceIdRef.current === sourceId)
             document.getElementById('photos-workspace')?.scrollIntoView({ block: 'start' });
+        } else if (restored?.sourceId === sourceId && restored.query) {
+          setSearchMode(true);
+          await loadSourcePhotos(
+            sourceId,
+            restored.query,
+            restored.searchFolderId,
+            restored.classification,
+          );
         }
       })
       .catch((error) => {
@@ -926,16 +1109,11 @@ export function ArchiveWorkspace({
 
   useEffect(() => {
     const sourceId = activeSource?.id;
-    if (!run) {
-      setIssues([]);
-      setIssueCursor(null);
-      setLoadingIssues(false);
-      setIssuesError(false);
-      return;
-    }
     if (!sourceId) {
       setIssues([]);
       setIssueCursor(null);
+      setIssueTotalCount(0);
+      setIssueCountsByCode({});
       setLoadingIssues(false);
       setIssuesError(false);
       return;
@@ -943,18 +1121,24 @@ export function ArchiveWorkspace({
     const controller = new AbortController();
     setIssues([]);
     setIssueCursor(null);
+    setIssueTotalCount(0);
+    setIssueCountsByCode({});
     setLoadingIssues(true);
     setIssuesError(false);
-    void apiJson<{ items: SyncIssue[]; nextCursor: string | null }>(
-      settingsEndpoint.issues(run.id),
-      {
-        signal: controller.signal,
-      },
-    )
+    void apiJson<{
+      items: SyncIssue[];
+      nextCursor: string | null;
+      totalCount: number;
+      countsByCode: Record<string, number>;
+    }>(settingsEndpoint.sourceIssues(sourceId), {
+      signal: controller.signal,
+    })
       .then((page) => {
         if (!controller.signal.aborted && activeSourceIdRef.current === sourceId) {
           setIssues(page.items);
           setIssueCursor(page.nextCursor);
+          setIssueTotalCount(page.totalCount);
+          setIssueCountsByCode(page.countsByCode);
           setLoadingIssues(false);
           setIssuesError(false);
         }
@@ -966,18 +1150,29 @@ export function ArchiveWorkspace({
           setIssuesError(true);
         }
       });
-    if (run.status === 'SUCCEEDED') {
+    if (run?.status === 'SUCCEEDED') {
       announce(
-        `Archivo actualizado: ${pluralize(run.indexedCount ?? 0, 'foto indexada', 'fotos indexadas')}.`,
+        `Revisión completa: ${pluralize(run.indexedCount ?? 0, 'foto indexada', 'fotos indexadas')}. Las fotos que ya no están en Drive se retiraron solo del índice local.`,
         'success',
       );
-      if (activeSourceIdRef.current === sourceId) void loadArchive(sourceId);
+      if (activeSourceIdRef.current === sourceId) {
+        void loadArchive(sourceId);
+        if (selectedFolderIdRef.current)
+          void loadPhotos(sourceId, selectedFolderIdRef.current, photoFilterRef.current);
+      }
       void loadSources();
-    } else if (run.status === 'PARTIAL') {
-      announce('La revisión terminó, pero algunas fotos necesitan atención.', 'warning');
-      if (activeSourceIdRef.current === sourceId) void loadArchive(sourceId);
+    } else if (run?.status === 'PARTIAL') {
+      announce(
+        'La revisión quedó incompleta. No retiramos del índice fotos cuya ausencia no pudimos confirmar.',
+        'warning',
+      );
+      if (activeSourceIdRef.current === sourceId) {
+        void loadArchive(sourceId);
+        if (selectedFolderIdRef.current)
+          void loadPhotos(sourceId, selectedFolderIdRef.current, photoFilterRef.current);
+      }
       void loadSources();
-    } else if (run.status === 'FAILED') {
+    } else if (run?.status === 'FAILED') {
       announce(
         'No se pudo actualizar el archivo. Revisa la incidencia y vuelve a intentarlo.',
         'error',
@@ -1192,6 +1387,13 @@ export function ArchiveWorkspace({
       if (activeSource) await loadArchive(activeSource.id);
       if (activeSource)
         await loadPhotos(activeSource.id, selectedFolder.id, photoFilterRef.current);
+      if (result.affectedCount > 0)
+        setDateChangeResult({
+          count: result.affectedCount,
+          year: Number(dateYear),
+          month: dateMonth ? Number(dateMonth) : null,
+          scopeLabel: selectedFolder.name,
+        });
       announce(
         `Fecha de carpeta actualizada en ${pluralize(result.affectedCount, 'foto', 'fotos')}. Las fotos originales no se modificaron.`,
         'success',
@@ -1289,6 +1491,8 @@ export function ArchiveWorkspace({
       return;
     }
     const count = selectedPhotos.size;
+    const changedCount = manualDatePreview.willChangeCount;
+    const changedScopeLabel = selectedFolder?.name ?? 'las fotos seleccionadas';
     setManualError('');
     setBusyAction('manual-date');
     try {
@@ -1312,6 +1516,13 @@ export function ArchiveWorkspace({
       else if (activeSource && selectedFolderId)
         await loadPhotos(activeSource.id, selectedFolderId, photoFilter);
       if (activeSource) await loadArchive(activeSource.id);
+      if (changedCount > 0)
+        setDateChangeResult({
+          count: changedCount,
+          year,
+          month: manualMonth ? Number(manualMonth) : null,
+          scopeLabel: changedScopeLabel,
+        });
       announce(
         `Fecha corregida en ${pluralize(count, 'foto', 'fotos')}. La información detectada original se conserva.`,
         'success',
@@ -1578,6 +1789,61 @@ export function ArchiveWorkspace({
           <span aria-hidden="true" className={styles.noticeMark} />
           <p>{notice.message}</p>
         </div>
+      )}
+
+      {area === 'organize' && dateChangeResult && (
+        <section className={styles.dateResult} aria-labelledby="date-result-title" role="status">
+          <div>
+            <p className={styles.dateResultEyebrow}>Corrección guardada</p>
+            <h2 id="date-result-title">
+              Fecha actualizada en {pluralize(dateChangeResult.count, 'foto', 'fotos')}
+            </h2>
+            <p>
+              Ya puedes consultar {dateChangeResult.month ? 'ese mes' : 'ese año'} en la cronología.
+              Allí también aparecen fotos del mismo periodo de otras carpetas.
+            </p>
+          </div>
+          <div className={styles.dateResultActions}>
+            <a
+              className={styles.primaryButton}
+              href={timelineHref({ year: dateChangeResult.year, month: dateChangeResult.month })}
+              onClick={(event) => openTimelineResult(event, dateChangeResult)}
+            >
+              Ver en la cronología
+            </a>
+            <button
+              type="button"
+              className={styles.secondaryButton}
+              onClick={() => {
+                setDateChangeResult(null);
+                setOrganizeTab('pending');
+                if (activeSource) void loadPending(activeSource.id);
+              }}
+            >
+              Seguir revisando
+            </button>
+            {selectedFolderId && (
+              <button
+                type="button"
+                className={styles.textButton}
+                onClick={() => {
+                  setDateChangeResult(null);
+                  setOrganizeTab('folders');
+                  pendingViewRef.current = false;
+                  setPendingView(false);
+                  requestAnimationFrame(() => {
+                    document.getElementById('photos-workspace')?.scrollIntoView({ block: 'start' });
+                    [...document.querySelectorAll<HTMLElement>('[data-folder-id]')]
+                      .find((element) => element.dataset.folderId === selectedFolderId)
+                      ?.focus({ preventScroll: true });
+                  });
+                }}
+              >
+                Volver a la carpeta
+              </button>
+            )}
+          </div>
+        </section>
       )}
 
       {area === 'settings' && (
@@ -2111,11 +2377,16 @@ export function ArchiveWorkspace({
 
             {!loadingIssues && !!groupedIssues.length ? (
               <div className={styles.reviewIssues}>
-                <h3>Problemas de la última revisión</h3>
-                {run?.issueCount && run.issueCount > issues.length ? (
+                <h3>Problemas que siguen pendientes</h3>
+                {issueTotalCount > issues.length ? (
                   <p className={styles.reviewQueueHint}>
-                    Se muestran las primeras {issues.length} incidencias de{' '}
-                    {run.issueCount.toLocaleString('es-ES')} detectadas.
+                    {pluralize(
+                      issueTotalCount,
+                      'problema pendiente detectado',
+                      'problemas pendientes detectados',
+                    )}
+                    . Se muestra la primera página; las incidencias que una revisión completa ya
+                    resolvió no aparecen aquí.
                   </p>
                 ) : null}
                 <ul className={styles.reviewIssueList}>
@@ -2124,9 +2395,17 @@ export function ArchiveWorkspace({
                       <div>
                         <strong>{issueCopy(group[0]!)}</strong>
                         <span>{issueActionCopy(group[0]!)}</span>
-                        {group.length > 1 && (
-                          <span>{pluralize(group.length, 'incidencia', 'incidencias')}</span>
-                        )}
+                        <span>
+                          {pluralize(
+                            issueCountsByCode[code] ?? group.length,
+                            code === 'ACCESS_DENIED'
+                              ? 'carpeta o elemento pendiente'
+                              : 'elemento pendiente',
+                            code === 'ACCESS_DENIED'
+                              ? 'carpetas o elementos pendientes'
+                              : 'elementos pendientes',
+                          )}
+                        </span>
                       </div>
                       <button
                         type="button"
@@ -2151,6 +2430,11 @@ export function ArchiveWorkspace({
                   </button>
                 )}
               </div>
+            ) : !loadingIssues && !issuesError ? (
+              <p className={styles.reviewQueueHint}>
+                No hay problemas de revisión que sigan pendientes. Las incidencias antiguas se
+                conservan en el historial de cada revisión.
+              </p>
             ) : null}
 
             {!loadingArchive &&
@@ -2553,7 +2837,7 @@ export function ArchiveWorkspace({
           )}
 
           {!!folders.length && (
-            <div className={styles.archiveWorkspace} id="photos-workspace">
+            <div className={styles.archiveWorkspace} id="photos-workspace" tabIndex={-1}>
               <aside className={styles.treePanel}>
                 <div className={styles.treeHeading}>
                   <div>
@@ -2699,6 +2983,28 @@ export function ArchiveWorkspace({
                         )}
                       </div>
                     </header>
+
+                    <div className={styles.folderReview}>
+                      <div>
+                        <strong>Comprobar si hay cambios en Drive</strong>
+                        <p>
+                          Revisaremos toda esta fuente para confirmar qué archivos siguen
+                          disponibles. Solo se actualizará el índice local; nunca se borrarán fotos
+                          de Drive.
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        className={styles.secondaryButton}
+                        onClick={() => void sync()}
+                        disabled={busy || loadingArchive || isSyncActive(run)}
+                      >
+                        {isSyncActive(run) && (
+                          <span className={styles.spinner} aria-hidden="true" />
+                        )}
+                        {isSyncActive(run) ? 'Revisión en curso' : 'Revisar cambios en Drive'}
+                      </button>
+                    </div>
 
                     {selectedFolder.dateRule && (
                       <div className={styles.ruleStatus}>
