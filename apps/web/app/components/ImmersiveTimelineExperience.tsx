@@ -4,6 +4,7 @@ import { AnimatePresence, LayoutGroup, motion, useReducedMotion } from 'motion/r
 import { usePathname, useRouter } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { api, ApiError, apiJson } from '../../lib/api';
+import { subscribeArchiveIndexUpdated } from '../../lib/archive-index-events';
 import { mediaUrl } from '../../lib/media';
 import { TemporalCarousel, type TemporalCarouselItem } from './TemporalCarousel';
 import { TimelinePhotoViewer } from './TimelinePhotoViewer';
@@ -129,7 +130,7 @@ const styles: Record<string, string> = {
   gallerySkeleton: 'col-span-[var(--gallery-span)] h-full',
 };
 
-function useYearSummary(year: number | null) {
+function useYearSummary(year: number | null, archiveRevision: number) {
   const [data, setData] = useState<TimelineYearSummary | null>(null);
   const [state, setState] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
   const request = useRef(0);
@@ -162,7 +163,7 @@ function useYearSummary(year: number | null) {
       window.clearTimeout(timer);
       controller.abort();
     };
-  }, [year]);
+  }, [archiveRevision, year]);
 
   return { data, state };
 }
@@ -196,9 +197,19 @@ export function ImmersiveTimelineExperience({
     index: number;
     loadMore?: () => Promise<TimelinePhotoPage | null>;
   } | null>(null);
+  const [archiveRevision, setArchiveRevision] = useState(0);
   const resolvedYearSelection = resolveTimelineYearSelection(years, route.year, yearSelection);
   const selectedVisualYear = resolvedYearSelection.visualYear;
   const selectedSettledYear = resolvedYearSelection.settledYear;
+
+  useEffect(
+    () =>
+      subscribeArchiveIndexUpdated(() => {
+        setArchiveRevision((revision) => revision + 1);
+        setViewer(null);
+      }),
+    [],
+  );
 
   useEffect(() => {
     const controller = new AbortController();
@@ -218,7 +229,7 @@ export function ImmersiveTimelineExperience({
         if (!controller.signal.aborted) setYearsState('error');
       });
     return () => controller.abort();
-  }, []);
+  }, [archiveRevision]);
 
   useEffect(() => {
     if (!years?.items.length || !route.year) return;
@@ -229,7 +240,10 @@ export function ImmersiveTimelineExperience({
     }
   }, [organizeReturnLabel, organizeReturnTo, route.year, router, years]);
 
-  const { data: loadedSummary, state: summaryState } = useYearSummary(selectedSettledYear);
+  const { data: loadedSummary, state: summaryState } = useYearSummary(
+    selectedSettledYear,
+    archiveRevision,
+  );
   const summary = loadedSummary?.year === selectedSettledYear ? loadedSummary : null;
   const isMonthRoute = Boolean(route.month || route.unknown);
 
@@ -556,6 +570,7 @@ export function ImmersiveTimelineExperience({
             transition={{ duration: reduceMotion ? 0 : 0.16, ease: 'easeOut' }}
           >
             <ImmersiveMonthGallery
+              key={`${route.year}-${route.unknown ? 'sin-mes' : route.month}-${archiveRevision}`}
               year={route.year}
               month={route.unknown ? 'sin-mes' : route.month!}
               label={selectedMonthLabel}
