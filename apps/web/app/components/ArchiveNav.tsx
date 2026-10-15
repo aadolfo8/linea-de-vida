@@ -32,6 +32,13 @@ export function ArchiveNav({
         </Link>
         <Link
           data-cursor="route"
+          href="/organizar"
+          aria-current={pathname === '/organizar' ? 'page' : undefined}
+        >
+          Organizar
+        </Link>
+        <Link
+          data-cursor="route"
           href="/settings"
           aria-current={pathname === '/settings' ? 'page' : undefined}
         >
