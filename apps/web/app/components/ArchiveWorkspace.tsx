@@ -28,6 +28,7 @@ import {
   type OrganizeLocation,
 } from '../../lib/organize-navigation';
 import { removePhotosFromArchive } from '../../lib/photo-removal';
+import { notifyArchiveIndexUpdated } from '../../lib/archive-index-events';
 import { visibleFolderTree } from '../settings/folder-tree';
 import { archiveStyles as styles } from './archive-workspace.styles';
 
@@ -86,6 +87,7 @@ type SyncRun = {
   processedCount?: number;
   indexedCount?: number;
   issueCount?: number;
+  removedCount?: number;
   createdAt?: string;
 };
 type SyncIssue = {
@@ -230,8 +232,13 @@ const syncPhaseLabel = (phase?: string) =>
 
 const syncResultSummary = (run: SyncRun) => {
   const totals = `${pluralize(run.foundCount ?? 0, 'foto encontrada', 'fotos encontradas')}; ${pluralize(run.indexedCount ?? 0, 'incluida', 'incluidas')}; ${pluralize(run.issueCount ?? 0, 'incidencia', 'incidencias')}.`;
-  if (run.status === 'SUCCEEDED')
-    return `Revisión completa. ${totals} Los originales de Drive no se modificaron.`;
+  if (run.status === 'SUCCEEDED') {
+    const removed = run.removedCount ?? 0;
+    const removal = removed
+      ? `${removed === 1 ? 'Se ha retirado' : 'Se han retirado'} ${pluralize(removed, 'foto que ya no estaba', 'fotos que ya no estaban')}.`
+      : 'No se han retirado fotos nuevas en esta revisión.';
+    return `Revisión completada: ${removal} ${totals} Esta acción solo actualiza la aplicación; no borra archivos de Google Drive.`;
+  }
   if (run.status === 'PARTIAL')
     return `Revisión parcial. ${totals} No se confirmaron las ausencias que quedaron sin revisar.`;
   if (run.status === 'FAILED')
@@ -1171,6 +1178,8 @@ export function ArchiveWorkspace({
               signal: controller.signal,
             });
             if (controller.signal.aborted) return;
+            if (currentRun.status !== 'SUCCEEDED' && nextRun.status === 'SUCCEEDED')
+              notifyArchiveIndexUpdated();
             setSourceOverviews((current) => {
               if (current[sourceId]?.latestRun?.id !== currentRun.id) return current;
               return {
@@ -1248,13 +1257,13 @@ export function ArchiveWorkspace({
         }
       });
     if (run?.status === 'SUCCEEDED') {
-      announce(
-        `Revisión completa: ${pluralize(run.indexedCount ?? 0, 'foto indexada', 'fotos indexadas')}. Las fotos que ya no están en Drive se retiraron solo del índice local.`,
-        'success',
-      );
+      announce(syncResultSummary(run) ?? 'Revisión completada.', 'success');
       if (activeSourceIdRef.current === sourceId) {
         void loadArchive(sourceId);
-        if (selectedFolderIdRef.current)
+        if (pendingViewRef.current) void loadPending(sourceId);
+        else if (searchMode)
+          void loadSourcePhotos(sourceId, appliedSearch, searchFolderId, photoFilterRef.current);
+        else if (selectedFolderIdRef.current)
           void loadPhotos(sourceId, selectedFolderIdRef.current, photoFilterRef.current);
       }
       void loadSources();
@@ -1265,7 +1274,10 @@ export function ArchiveWorkspace({
       );
       if (activeSourceIdRef.current === sourceId) {
         void loadArchive(sourceId);
-        if (selectedFolderIdRef.current)
+        if (pendingViewRef.current) void loadPending(sourceId);
+        else if (searchMode)
+          void loadSourcePhotos(sourceId, appliedSearch, searchFolderId, photoFilterRef.current);
+        else if (selectedFolderIdRef.current)
           void loadPhotos(sourceId, selectedFolderIdRef.current, photoFilterRef.current);
       }
       void loadSources();
@@ -1276,7 +1288,10 @@ export function ArchiveWorkspace({
       );
       if (activeSourceIdRef.current === sourceId) {
         void loadArchive(sourceId);
-        if (selectedFolderIdRef.current)
+        if (pendingViewRef.current) void loadPending(sourceId);
+        else if (searchMode)
+          void loadSourcePhotos(sourceId, appliedSearch, searchFolderId, photoFilterRef.current);
+        else if (selectedFolderIdRef.current)
           void loadPhotos(sourceId, selectedFolderIdRef.current, photoFilterRef.current);
       }
       void loadSources();
@@ -2304,6 +2319,12 @@ export function ArchiveWorkspace({
                             ? 'Todavía no se ha iniciado una revisión.'
                             : null}
                       </p>
+                      {sourceIsActive && (
+                        <p className={styles.sourceOverviewHint}>
+                          Busca cambios en esta carpeta y las subcarpetas incluidas. Solo se retiran
+                          fotos tras una revisión completa; no se eliminan archivos de Google Drive.
+                        </p>
+                      )}
                       {sourceSyncing && latestRun ? (
                         <div className={styles.sourceProgress} aria-live="polite">
                           <p className={styles.sourceProgressLine}>
@@ -2382,7 +2403,7 @@ export function ArchiveWorkspace({
                             {sourceSyncing && (
                               <span className={styles.spinner} aria-hidden="true" />
                             )}
-                            {sourceSyncing ? 'Revisión en curso' : 'Buscar cambios'}
+                            {sourceSyncing ? 'Revisión en curso' : 'Revisar y actualizar carpeta'}
                           </button>
                         </>
                       ) : displayedStatus === 'DISCONNECTED' ? (
@@ -2466,7 +2487,7 @@ export function ArchiveWorkspace({
                   disabled={busy || isSyncActive(run)}
                 >
                   {isSyncActive(run) && <span className={styles.spinner} aria-hidden="true" />}
-                  {isSyncActive(run) ? 'Revisión en curso' : 'Volver a revisar carpeta'}
+                  {isSyncActive(run) ? 'Revisión en curso' : 'Revisar y actualizar carpeta'}
                 </button>
               )}
             </div>
@@ -2735,11 +2756,11 @@ export function ArchiveWorkspace({
                   {(busyAction === 'sync' || isSyncActive(run)) && (
                     <span className={styles.spinner} aria-hidden="true" />
                   )}
-                  {isSyncActive(run) ? 'Buscando cambios…' : 'Buscar cambios en Drive'}
+                  {isSyncActive(run) ? 'Revisando carpeta…' : 'Revisar y actualizar carpeta'}
                 </button>
                 <small>
-                  Añade fotos nuevas, actualiza la información disponible y detecta archivos que ya
-                  no están. Drive no se modifica.
+                  Busca cambios en esta carpeta y sus subcarpetas incluidas. Solo una revisión
+                  completa retira fotos ausentes del índice local; no borra archivos de Drive.
                 </small>
               </div>
             )}
@@ -2937,6 +2958,10 @@ export function ArchiveWorkspace({
                 <div>
                   <dt>Fotos incluidas</dt>
                   <dd>{(run.indexedCount ?? 0).toLocaleString('es-ES')}</dd>
+                </div>
+                <div>
+                  <dt>Fotos retiradas</dt>
+                  <dd>{(run.removedCount ?? 0).toLocaleString('es-ES')}</dd>
                 </div>
                 <div>
                   <dt>Incidencias</dt>
@@ -3173,9 +3198,9 @@ export function ArchiveWorkspace({
                       <div>
                         <strong>Comprobar si hay cambios en Drive</strong>
                         <p>
-                          Revisaremos toda esta fuente para confirmar qué archivos siguen
-                          disponibles. Solo se actualizará el índice local; nunca se borrarán fotos
-                          de Drive.
+                          La revisión completa la carpeta de origen seleccionada y sus subcarpetas
+                          incluidas. Solo se retirarán del índice las fotos que ya no pertenezcan a
+                          ese ámbito tras una revisión completa. No se borran archivos de Drive.
                         </p>
                       </div>
                       <button
@@ -3187,7 +3212,7 @@ export function ArchiveWorkspace({
                         {isSyncActive(run) && (
                           <span className={styles.spinner} aria-hidden="true" />
                         )}
-                        {isSyncActive(run) ? 'Revisión en curso' : 'Revisar cambios en Drive'}
+                        {isSyncActive(run) ? 'Revisando carpeta…' : 'Revisar y actualizar carpeta'}
                       </button>
                     </div>
 
@@ -3958,6 +3983,7 @@ export function ArchiveWorkspace({
                     </span>
                     <span>
                       {pluralize(item.indexedCount ?? 0, 'foto incluida', 'fotos incluidas')} ·{' '}
+                      {pluralize(item.removedCount ?? 0, 'foto retirada', 'fotos retiradas')} ·{' '}
                       {pluralize(item.issueCount ?? 0, 'incidencia', 'incidencias')}
                     </span>
                   </li>
