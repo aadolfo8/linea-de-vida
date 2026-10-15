@@ -1,17 +1,15 @@
 'use client';
 
-import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useEffect, useRef } from 'react';
 import { ArchiveNav } from './ArchiveNav';
 import { ImmersiveTimelineExperience } from './ImmersiveTimelineExperience';
 import { ProtectedSurface } from './ProtectedSurface';
-import { TimelineExperience } from './TimelineExperience';
 import { useTimelineFocus } from './TimelineFocus';
-import { parseTimelineRoute, timelineHref, type TimelineView } from './timeline-model';
-import styles from './timeline-route.module.css';
+import { parseTimelineRoute, timelineHref } from './timeline-model';
+import { Button } from '../../components/ui/button';
 
-export function TimelineRoute({ view = 'immersive' }: { view?: TimelineView }) {
+export function TimelineRoute() {
   const pathname = usePathname();
   const router = useRouter();
   const { focused, setFocused } = useTimelineFocus();
@@ -23,8 +21,8 @@ export function TimelineRoute({ view = 'immersive' }: { view?: TimelineView }) {
 
   useEffect(() => {
     if (!route.invalid) return;
-    router.replace(timelineHref({ year: route.year, view }), { scroll: false });
-  }, [route.invalid, route.year, router, view]);
+    router.replace(timelineHref({ year: route.year }), { scroll: false });
+  }, [route.invalid, route.year, router]);
 
   useEffect(() => {
     if (previousFocus.current === focused) return;
@@ -53,59 +51,52 @@ export function TimelineRoute({ view = 'immersive' }: { view?: TimelineView }) {
     <ProtectedSurface>
       {(session) => (
         <div
-          className={`${styles.shell} ${view === 'editorial' ? 'timeline-editorial-shell' : 'timeline-immersive-shell'}`}
-          data-mode={view}
+          className="timeline-immersive-shell min-h-dvh"
           data-route-depth={routeDepth}
           data-focus={focused ? 'on' : 'off'}
         >
           {!focused && (
             <>
-              <ArchiveNav name={session.user.displayName} timelinePath={timelineHref({ view })} />
-              <nav className={styles.modeBar} aria-label="Vista de la cronología">
-                <span>Vista</span>
-                <div>
-                  <Link
-                    href={pathname}
-                    aria-current={view === 'immersive' ? 'page' : undefined}
-                    scroll={false}
-                  >
-                    Inmersiva
-                  </Link>
-                  <Link
-                    href={`${pathname}?view=editorial`}
-                    aria-current={view === 'editorial' ? 'page' : undefined}
-                    scroll={false}
-                  >
-                    Editorial
-                  </Link>
-                </div>
-                <button
+              <ArchiveNav name={session.user.displayName} />
+              <nav
+                className="relative z-[19] flex min-h-[3.25rem] items-center justify-end gap-3 border-b border-map-line bg-map-paper px-[max(1rem,5vw)] py-2 text-map-muted max-[680px]:justify-between max-[680px]:flex-wrap"
+                aria-label="Vista de la cronología"
+              >
+                <Button
                   ref={enterRef}
-                  className={styles.focusButton}
+                  variant="outline"
+                  size="sm"
+                  className="rounded-lg border-current text-inherit hover:bg-map-route-soft/40"
                   onClick={() => setFocused(true)}
                 >
                   Concentrar vista
-                </button>
+                </Button>
               </nav>
             </>
           )}
           {focused && (
-            <div className={styles.focusExit}>
-              <button
+            <div
+              className="sticky top-0 z-[21] flex justify-end bg-map-paper px-[max(1rem,5vw)] py-2 text-map-ink data-[route-depth=month]:relative"
+              data-route-depth={routeDepth}
+            >
+              <Button
                 ref={exitRef}
-                className={styles.focusButton}
+                variant="outline"
+                size="sm"
+                className="rounded-lg border-current text-inherit"
                 onClick={() => setFocused(false)}
               >
                 Salir del modo concentración
-              </button>
+              </Button>
             </div>
           )}
           {route.invalid ? (
-            <main className="route-pending" aria-live="polite">
+            <main
+              className="grid min-h-dvh place-items-center bg-map-paper p-6 text-map-ink"
+              aria-live="polite"
+            >
               Corrigiendo la ruta temporal…
             </main>
-          ) : view === 'editorial' ? (
-            <TimelineExperience view="editorial" />
           ) : (
             <ImmersiveTimelineExperience />
           )}

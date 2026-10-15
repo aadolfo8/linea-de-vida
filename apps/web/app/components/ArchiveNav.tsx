@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { CalendarDays, FolderCog, Settings2 } from 'lucide-react';
 
 export function ArchiveNav({
   name,
@@ -12,41 +13,53 @@ export function ArchiveNav({
 }) {
   const pathname = usePathname();
   return (
-    <header className="archive-nav">
+    <header className="archive-nav sticky top-0 z-20 grid min-h-[72px] grid-cols-[1fr_auto_1fr] items-center gap-6 border-b border-map-line bg-map-paper px-[5vw] text-map-ink max-[680px]:min-h-16 max-[680px]:grid-cols-[1fr_auto] max-[680px]:px-[18px]">
       <Link
-        className="archive-mark"
+        className="inline-flex min-h-11 items-center text-[0.8rem] font-bold uppercase tracking-[0.08em] text-inherit no-underline"
         href={timelinePath}
         aria-label="Línea de vida, ir a la cronología"
       >
         Línea de vida
       </Link>
-      <nav aria-label="Navegación principal">
+      <nav
+        className="flex gap-1 max-[680px]:order-3 max-[680px]:col-span-full max-[680px]:w-full max-[680px]:justify-between max-[680px]:gap-0 max-[680px]:overflow-x-auto"
+        aria-label="Navegación principal"
+      >
         <Link
+          className="inline-flex min-h-11 items-center gap-2 px-3 text-sm text-map-muted no-underline transition-colors hover:text-map-route aria-[current=page]:bg-map-route-soft aria-[current=page]:text-map-ink max-[680px]:shrink-0 max-[680px]:px-2 max-[680px]:whitespace-nowrap"
           data-cursor="route"
           href={timelinePath}
           aria-current={
             pathname === '/timeline' || pathname.startsWith('/timeline/') ? 'page' : undefined
           }
         >
-          Cronología
+          <CalendarDays aria-hidden="true" className="size-4" />
+          <span>Cronología</span>
         </Link>
         <Link
+          className="inline-flex min-h-11 items-center gap-2 px-3 text-sm text-map-muted no-underline transition-colors hover:text-map-route aria-[current=page]:bg-map-route-soft aria-[current=page]:text-map-ink max-[680px]:shrink-0 max-[680px]:px-2 max-[680px]:whitespace-nowrap"
           data-cursor="route"
           href="/organizar"
           aria-current={pathname === '/organizar' ? 'page' : undefined}
         >
-          Organizar
+          <FolderCog aria-hidden="true" className="size-4" />
+          <span>Organizar</span>
         </Link>
         <Link
+          className="inline-flex min-h-11 items-center gap-2 px-3 text-sm text-map-muted no-underline transition-colors hover:text-map-route aria-[current=page]:bg-map-route-soft aria-[current=page]:text-map-ink max-[680px]:shrink-0 max-[680px]:px-2 max-[680px]:whitespace-nowrap"
           data-cursor="route"
           href="/settings"
           aria-current={pathname === '/settings' ? 'page' : undefined}
         >
-          Ajustes
+          <Settings2 aria-hidden="true" className="size-4" />
+          <span>Ajustes</span>
         </Link>
       </nav>
-      <p className="session-status" aria-label={name ? `Sesión de ${name}` : 'Sesión activa'}>
-        <span aria-hidden="true" />
+      <p
+        className="session-status flex items-center justify-self-end gap-2 text-[0.82rem] text-map-muted"
+        aria-label={name ? `Sesión de ${name}` : 'Sesión activa'}
+      >
+        <span className="size-2 rounded-full bg-map-route" aria-hidden="true" />
         {name ?? 'Sesión activa'}
       </p>
     </header>

@@ -58,7 +58,6 @@ export type TimelineYearSummary = {
 
 export type TimelinePhotoPage = { items: TimelinePhoto[]; nextCursor: string | null };
 export type TimelineMonth = number | 'sin-mes';
-export type TimelineView = 'immersive' | 'editorial';
 
 export type TimelineRouteState = {
   year: number | null;
@@ -98,14 +97,11 @@ export function parseTimelineRoute(pathname: string): TimelineRouteState {
 export function timelineHref({
   year,
   month,
-  view = 'immersive',
 }: {
   year?: number | null;
   month?: TimelineMonth | null;
-  view?: TimelineView;
-}) {
-  const path = year ? `/timeline/${year}${month ? `/${month}` : ''}` : '/timeline';
-  return view === 'editorial' ? `${path}?view=editorial` : path;
+} = {}) {
+  return year ? `/timeline/${year}${month ? `/${month}` : ''}` : '/timeline';
 }
 
 export const monthFormatter = new Intl.DateTimeFormat('es', {

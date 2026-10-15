@@ -46,6 +46,7 @@ describe('mounted archive removal', () => {
   let remove: () => Promise<unknown>;
   let sourceRemoved: boolean;
   let sourceStatus: string;
+  let excludedItems: Array<Record<string, unknown>>;
   const button = (text: string) => {
     const found = [...container.querySelectorAll('button')].find((node) =>
       node.textContent?.includes(text),
@@ -82,7 +83,7 @@ describe('mounted archive removal', () => {
   const treeRow = () => container.querySelector<HTMLElement>('[data-folder-id="folder"]')!;
   const filterSelect = () =>
     [...container.querySelectorAll('select')].find((node) =>
-      node.querySelector('option[value="ALL"]'),
+      node.querySelector('option[value="MANUAL"]'),
     )!;
   const changeSelect = async (node: HTMLSelectElement, value: string) => {
     await act(async () => {
@@ -102,6 +103,7 @@ describe('mounted archive removal', () => {
     remove = async () => ({ results: [] });
     sourceRemoved = false;
     sourceStatus = 'ACTIVE';
+    excludedItems = [];
     request.mockImplementation(async (path, init) => {
       if (path === '/photo-sources')
         return {
@@ -135,6 +137,15 @@ describe('mounted archive removal', () => {
         return { total: 2, automatic: 0, folder: 0, manual: 0, unclassified: 2 };
       if (path.includes('/pending-photos?')) return load();
       if (path.startsWith('/indexed-folders/folder/photos?')) return load();
+      if (path.startsWith('/photo-sources/source/photos?')) return load();
+      if (path === '/photo-exclusions?limit=30') return { items: excludedItems, nextCursor: null };
+      if (path === '/photo-exclusions/excluded-1' && init?.method === 'DELETE') {
+        excludedItems = excludedItems.map((item) => ({
+          ...item,
+          restoredAt: '2026-10-14T00:00:00.000Z',
+        }));
+        return undefined;
+      }
       if (path === '/photo-removals') return remove();
       if (path === '/oauth/google/drive/authorize')
         return { available: false, message: 'Google OAuth no está configurado.' };
@@ -194,6 +205,46 @@ describe('mounted archive removal', () => {
 
     await click(button('Buscar cambios'));
     expect(request).toHaveBeenCalledWith('/photo-sources/source/sync-runs', { method: 'POST' });
+  });
+
+  it('searches the source across folders and filters locally excluded photos into a recoverable bin', async () => {
+    excludedItems = [
+      {
+        id: 'excluded-1',
+        sourceId: 'source',
+        sourceName: 'Archive',
+        folderPath: ['Family', 'Summer'],
+        fileName: 'lost.jpg',
+        mimeType: 'image/jpeg',
+        createdAt: '2026-10-13T12:00:00.000Z',
+        restoredAt: null,
+      },
+    ];
+    await mount();
+    expect(container.textContent).toContain('lost.jpg');
+    expect(container.textContent).toContain('Family / Summer');
+
+    const searchInput = container.querySelector<HTMLInputElement>('input[type="search"]')!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set?.call(
+        searchInput,
+        'summer',
+      );
+      searchInput.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await click(button('Buscar en el archivo'));
+    expect(request).toHaveBeenCalledWith(
+      '/photo-sources/source/photos?limit=30&q=summer',
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
+
+    await click(button('Restaurar'));
+    expect(request).toHaveBeenCalledWith('/photo-exclusions/excluded-1', { method: 'DELETE' });
+    expect(
+      container.querySelector('ul[aria-label="Fotos excluidas y en proceso de restauración"]')
+        ?.textContent,
+    ).toContain('Restaurada · pendiente de revisión en Drive');
+    expect(container.textContent).toContain('Su corrección manual de fecha se conservará');
   });
 
   it('allows removing a disconnected source without reconnecting Drive', async () => {

@@ -78,6 +78,21 @@ export const settingsEndpoint = {
   classificationSummary: (sourceId: string) => `/photo-sources/${sourceId}/classification-summary`,
   pendingPhotos: (sourceId: string, cursor?: string) =>
     `/photo-sources/${sourceId}/pending-photos?limit=30${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`,
+  sourcePhotos: (
+    sourceId: string,
+    options: { query?: string; folderId?: string; classification?: string; cursor?: string } = {},
+  ) => {
+    const params = new URLSearchParams({ limit: '30' });
+    if (options.query?.trim()) params.set('q', options.query.trim());
+    if (options.folderId) params.set('folderId', options.folderId);
+    if (options.classification && options.classification !== 'ALL')
+      params.set('classification', options.classification);
+    if (options.cursor) params.set('cursor', options.cursor);
+    return `/photo-sources/${encodeURIComponent(sourceId)}/photos?${params}`;
+  },
+  photoExclusions: (cursor?: string) =>
+    `/photo-exclusions?limit=30${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`,
+  restorePhotoExclusion: (id: string) => `/photo-exclusions/${encodeURIComponent(id)}`,
   manualDates: '/photos/manual-date-overrides',
   folderPhotos: (folderId: string, cursor?: string, classification?: string) =>
     `/indexed-folders/${folderId}/photos?limit=30${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}${classification ? `&classification=${encodeURIComponent(classification)}` : ''}`,

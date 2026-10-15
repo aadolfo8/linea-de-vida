@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { Button } from '../../components/ui/button';
 import { apiJson, isUnauthenticated, type Session } from '../../lib/api';
 
 export function useSession() {
@@ -30,14 +31,20 @@ export function ProtectedSurface({
   }, [state]);
   if (state === 'error')
     return (
-      <main className="route-pending" aria-live="polite">
+      <main
+        className="grid min-h-dvh place-items-center bg-map-paper p-6 text-map-ink"
+        aria-live="polite"
+      >
         <p>No se pudo comprobar la sesión. Tu archivo sigue intacto.</p>
-        <button onClick={retry}>Reintentar</button>
+        <Button onClick={retry}>Reintentar</Button>
       </main>
     );
   if (state !== 'ready' || !session)
     return (
-      <main className="route-pending" aria-live="polite">
+      <main
+        className="grid min-h-dvh place-items-center bg-map-paper p-6 text-map-ink"
+        aria-live="polite"
+      >
         Comprobando tu sesión privada…
       </main>
     );

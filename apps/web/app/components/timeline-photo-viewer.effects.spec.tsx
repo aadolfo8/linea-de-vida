@@ -113,8 +113,8 @@ describe('TimelinePhotoViewer effects', () => {
     expect(returnTarget.inert).toBe(true);
     expect(returnTarget.getAttribute('aria-hidden')).toBe('true');
     expect(document.activeElement).toBe(buttons[0]);
-    expect(window.getComputedStyle(buttons[0]).minWidth).toBe('44px');
-    expect(window.getComputedStyle(buttons[0]).minHeight).toBe('44px');
+    expect(buttons[0].className).toContain('min-w-11');
+    expect(buttons[0].className).toContain('min-h-11');
 
     buttons.at(-1)!.focus();
     buttons.at(-1)!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true }));
@@ -275,8 +275,8 @@ describe('TimelinePhotoViewer effects', () => {
       container.querySelector<HTMLButtonElement>('[aria-label="Ir al año siguiente"]')!,
     ];
     arrows.forEach((arrow) => {
-      expect(window.getComputedStyle(arrow).minWidth).toBe('44px');
-      expect(window.getComputedStyle(arrow).minHeight).toBe('44px');
+      expect(arrow.className).toContain('min-w-11');
+      expect(arrow.className).toContain('min-h-11');
     });
   });
 });

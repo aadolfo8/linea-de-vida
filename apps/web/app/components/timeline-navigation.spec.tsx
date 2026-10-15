@@ -23,7 +23,6 @@ it('jumps directly to a distant year and month and exposes context and undated p
           ]}
           year={1998}
           month={8}
-          view="editorial"
           onYear={onYear}
           onMonth={onMonth}
         />,
@@ -40,7 +39,7 @@ it('jumps directly to a distant year and month and exposes context and undated p
     expect(onMonth).toHaveBeenCalledExactlyOnceWith(12);
     expect(container.querySelector('[aria-current="date"]')?.textContent).toBe('agosto');
     expect(container.querySelector('[aria-label="Volver a 1998"]')?.getAttribute('href')).toBe(
-      '/timeline/1998?view=editorial',
+      '/timeline/1998',
     );
     expect(
       container.querySelector('a[href="/organizar?filter=undated#photos-workspace"]'),

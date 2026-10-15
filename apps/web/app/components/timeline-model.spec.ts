@@ -39,12 +39,10 @@ describe('timeline route state', () => {
     );
   });
 
-  it('keeps immersive routes query-free and preserves editorial mode across levels', () => {
+  it('generates canonical query-free routes for every timeline level', () => {
     expect(timelineHref({})).toBe('/timeline');
     expect(timelineHref({ year: 2018, month: 5 })).toBe('/timeline/2018/5');
-    expect(timelineHref({ year: 2018, month: 'sin-mes', view: 'editorial' })).toBe(
-      '/timeline/2018/sin-mes?view=editorial',
-    );
+    expect(timelineHref({ year: 2018, month: 'sin-mes' })).toBe('/timeline/2018/sin-mes');
   });
 
   it('marks invalid dynamic month paths while retaining a valid year for correction', () => {
