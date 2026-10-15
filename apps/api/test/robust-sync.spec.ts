@@ -32,6 +32,7 @@ function fixture(pages: Record<string, { items: DriveItem[]; nextCursor?: string
   const issues: any[] = [];
   const folders = new Map<string, any>();
   const exclusions = new Set<string>();
+  const restoredExclusions = new Map<string, any>();
   const prisma: any = {
     syncRun: {
       findUnique: async () => run,
@@ -41,8 +42,16 @@ function fixture(pages: Record<string, { items: DriveItem[]; nextCursor?: string
     },
     syncIssue: { create: async ({ data }: any) => issues.push(data) },
     photoExclusion: {
-      findUnique: async ({ where }: any) =>
-        exclusions.has(where.userId_driveFileId.driveFileId) ? { id: 'excluded' } : null,
+      findUnique: async ({ where }: any) => {
+        const driveFileId = where.userId_driveFileId.driveFileId;
+        return (
+          restoredExclusions.get(driveFileId) ??
+          (exclusions.has(driveFileId) ? { id: 'excluded', restoredAt: null } : null)
+        );
+      },
+      deleteMany: async ({ where }: any) => ({
+        count: restoredExclusions.delete(where.id.replace('exclusion-', '')) ? 1 : 0,
+      }),
     },
     indexedFolder: {
       findFirst: async ({ where }: any) =>
@@ -73,8 +82,11 @@ function fixture(pages: Record<string, { items: DriveItem[]; nextCursor?: string
     photo: {
       findUnique: async ({ where }: any) =>
         photos.get(where.userId_driveFileId.driveFileId) ?? null,
-      create: async ({ data }: any) =>
-        photos.set(data.driveFileId, { ...data, id: data.driveFileId, override: null }),
+      create: async ({ data }: any) => {
+        const photo = { ...data, id: data.driveFileId, override: null };
+        photos.set(data.driveFileId, photo);
+        return photo;
+      },
       update: async ({ where, data }: any) => Object.assign(photos.get(where.id), data),
       updateMany: async ({ where, data }: any) => {
         for (const photo of photos.values())
@@ -83,6 +95,14 @@ function fixture(pages: Record<string, { items: DriveItem[]; nextCursor?: string
             photo.lastSeenSyncRunId !== where.lastSeenSyncRunId.not
           )
             Object.assign(photo, data);
+      },
+    },
+    manualDateOverride: {
+      upsert: async ({ where, create, update }: any) => {
+        const photo = photos.get(where.photoId);
+        const value = photo.override ? Object.assign(photo.override, update) : create;
+        photo.override = value;
+        return value;
       },
     },
     $transaction: async (operation: any) =>
@@ -116,6 +136,7 @@ function fixture(pages: Record<string, { items: DriveItem[]; nextCursor?: string
     issues,
     folders,
     exclusions,
+    restoredExclusions,
     prisma,
     drive,
     service: new SyncService(prisma, drive, new PhotoDateResolver()),
@@ -625,6 +646,31 @@ describe('robust sync', () => {
     await f.service.execute('run');
     expect(f.photos.has('removed')).toBe(false);
     expect(f.run.status).toBe('SUCCEEDED');
+  });
+
+  it('reindexes a restored exclusion and preserves its manual date correction', async () => {
+    const f = fixture({ 'root:': { items: [image('restored')] } });
+    f.restoredExclusions.set('restored', {
+      id: 'exclusion-restored',
+      restoredAt: new Date('2026-10-14T00:00:00.000Z'),
+      manualDateValue: new Date('2001-01-01T00:00:00.000Z'),
+      manualDatePrecision: 'YEAR',
+      manualDateReason: 'Family note',
+    });
+
+    await f.service.execute('run');
+
+    expect(f.photos.get('restored')).toMatchObject({
+      effectiveDateValue: new Date('2001-01-01T00:00:00.000Z'),
+      effectiveDatePrecision: 'YEAR',
+      effectiveDateSource: 'MANUAL',
+      override: {
+        dateValue: new Date('2001-01-01T00:00:00.000Z'),
+        precision: 'YEAR',
+        reason: 'Family note',
+      },
+    });
+    expect(f.restoredExclusions.has('restored')).toBe(false);
   });
 
   it('includes the selected root folder name in folder-date evidence', async () => {

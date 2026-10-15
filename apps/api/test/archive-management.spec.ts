@@ -5,8 +5,40 @@ import { FolderDateRuleService } from '../src/folder-date-rule.service';
 
 function controllerFixture() {
   const photos = [
-    { id: 'photo-1', userId: 'owner', driveFileId: 'drive-1', folderId: 'child' },
-    { id: 'photo-2', userId: 'owner', driveFileId: 'drive-2', folderId: 'grandchild' },
+    {
+      id: 'photo-1',
+      userId: 'owner',
+      driveFileId: 'drive-1',
+      sourceId: 'source',
+      folderId: 'child',
+      fileName: 'Summer.jpg',
+      mimeType: 'image/jpeg',
+      effectiveDateValue: null,
+      effectiveDatePrecision: 'UNKNOWN',
+      effectiveDateSource: 'NONE',
+      source: { name: 'Family archive' },
+      folder: { path: ['Root', 'Child'] },
+      override: {
+        dateValue: new Date('2020-01-01'),
+        precision: 'YEAR',
+        reason: 'Family note',
+      },
+    },
+    {
+      id: 'photo-2',
+      userId: 'owner',
+      driveFileId: 'drive-2',
+      sourceId: 'source',
+      folderId: 'grandchild',
+      fileName: 'Winter.jpg',
+      mimeType: 'image/jpeg',
+      effectiveDateValue: new Date('2024-01-01'),
+      effectiveDatePrecision: 'YEAR',
+      effectiveDateSource: 'EXIF',
+      source: { name: 'Family archive' },
+      folder: { path: ['Root', 'Child', 'Grandchild'] },
+      override: null,
+    },
   ];
   const exclusions: any[] = [];
   const updates: any[] = [];
@@ -49,14 +81,24 @@ function controllerFixture() {
         async ({ where }: any) =>
           photos.find((photo) => photo.id === where.id && photo.userId === where.userId) ?? null,
       ),
-      findMany: vi.fn(async ({ where }: any) =>
-        where.folderId?.in
-          ? photos.filter((photo) => where.folderId.in.includes(photo.folderId))
-          : where.folderId
-            ? photos.filter(
-                (photo) => photo.userId === where.userId && photo.folderId === where.folderId,
-              )
-            : [],
+      findMany: vi.fn(async ({ where, include }: any) =>
+        include?.folder
+          ? photos.filter(
+              (photo) =>
+                photo.userId === where.userId &&
+                photo.sourceId === where.sourceId &&
+                (!where.folderId || photo.folderId === where.folderId) &&
+                (!where.fileName ||
+                  photo.fileName.toLowerCase().includes(where.fileName.contains)) &&
+                (!where.effectiveDateValue || photo.effectiveDateValue === null),
+            )
+          : where.folderId?.in
+            ? photos.filter((photo) => where.folderId.in.includes(photo.folderId))
+            : where.folderId
+              ? photos.filter(
+                  (photo) => photo.userId === where.userId && photo.folderId === where.folderId,
+                )
+              : [],
       ),
       update: vi.fn(async ({ where, data }: any) => updates.push({ where, data })),
       delete: vi.fn(async ({ where }: any) => {
@@ -67,6 +109,22 @@ function controllerFixture() {
     },
     photoExclusion: {
       upsert: vi.fn(async (args: any) => exclusions.push(args)),
+      findMany: vi.fn(async ({ where }: any) =>
+        exclusions
+          .map((entry) => ({
+            id: 'excluded-1',
+            ...entry.create,
+            createdAt: new Date('2026-01-02'),
+          }))
+          .filter((entry) => entry.userId === where.userId),
+      ),
+      findFirst: vi.fn(async ({ where }: any) =>
+        exclusions.some((entry) => entry.create.userId === where.userId)
+          ? { id: where.id, userId: where.userId }
+          : null,
+      ),
+      deleteMany: vi.fn(async () => ({ count: exclusions.splice(0).length })),
+      updateMany: vi.fn(async () => ({ count: 1 })),
     },
     $transaction: async (operation: any) =>
       Array.isArray(operation) ? Promise.all(operation) : operation(prisma),
@@ -201,9 +259,82 @@ describe('indexed archive management', () => {
   it('creates an owned tombstone, removes only local metadata, and hides cross-user deletion', async () => {
     const fixture = controllerFixture();
     await fixture.controller.deletePhoto('owner', 'photo-1');
-    expect(fixture.exclusions[0].create).toEqual({ userId: 'owner', driveFileId: 'drive-1' });
+    expect(fixture.exclusions[0].create).toEqual({
+      userId: 'owner',
+      driveFileId: 'drive-1',
+      sourceId: 'source',
+      sourceName: 'Family archive',
+      folderPath: ['Root', 'Child'],
+      fileName: 'Summer.jpg',
+      mimeType: 'image/jpeg',
+      manualDateValue: new Date('2020-01-01'),
+      manualDatePrecision: 'YEAR',
+      manualDateReason: 'Family note',
+      restoredAt: null,
+    });
     expect(fixture.photos.some((photo) => photo.id === 'photo-1')).toBe(false);
     await expect(fixture.controller.deletePhoto('other', 'photo-2')).rejects.toBeInstanceOf(
+      NotFoundException,
+    );
+  });
+
+  it('searches photos across one owned source and scopes the opaque cursor to filters', async () => {
+    const f = controllerFixture();
+    const result = await f.controller.searchSourcePhotos(
+      'owner',
+      'source',
+      'summer',
+      'child',
+      'UNCLASSIFIED',
+      undefined,
+      '1',
+    );
+    expect(result.items).toHaveLength(1);
+    expect(result.items[0]).toMatchObject({
+      fileName: 'Summer.jpg',
+      folderPath: ['Root', 'Child'],
+    });
+    expect(f.prisma.photo.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          userId: 'owner',
+          sourceId: 'source',
+          fileName: { contains: 'summer', mode: 'insensitive' },
+          folderId: 'child',
+          effectiveDateValue: null,
+        }),
+        take: 2,
+      }),
+    );
+    await expect(f.controller.searchSourcePhotos('other', 'source')).rejects.toBeInstanceOf(
+      NotFoundException,
+    );
+    await expect(
+      f.controller.searchSourcePhotos('owner', 'source', 'x'.repeat(121)),
+    ).rejects.toMatchObject({
+      status: 400,
+    });
+  });
+
+  it('lists only the current user’s exclusions and restores by owned tombstone ID', async () => {
+    const f = controllerFixture();
+    await f.controller.deletePhoto('owner', 'photo-1');
+    const page = await f.controller.photoExclusions('owner', undefined, '1');
+    expect(page.items).toMatchObject([
+      {
+        id: 'excluded-1',
+        fileName: 'Summer.jpg',
+        sourceName: 'Family archive',
+        folderPath: ['Root', 'Child'],
+      },
+    ]);
+    expect(page.items[0]).not.toHaveProperty('driveFileId');
+    await f.controller.restorePhotoExclusion('owner', 'excluded-1');
+    expect(f.prisma.photoExclusion.updateMany).toHaveBeenCalledWith({
+      where: { id: 'excluded-1', userId: 'owner', restoredAt: null },
+      data: { restoredAt: expect.any(Date) },
+    });
+    await expect(f.controller.restorePhotoExclusion('other', 'excluded-1')).rejects.toBeInstanceOf(
       NotFoundException,
     );
   });

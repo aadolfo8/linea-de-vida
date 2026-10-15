@@ -71,7 +71,10 @@ Para backup PostgreSQL, ejecuta desde un host autorizado `pg_dump --format=custo
 | `POST /v1/photo-sources/:id/sync-runs`                           | Devuelve `202` y encola el escaneo.                                     |
 | `GET /v1/photo-sources/:id/sync-runs`                            | Historial paginado de escaneos de la fuente propia.                     |
 | `GET /v1/photo-sources/:id/indexed-folders`                      | Jerarquía indexada paginada de la fuente propia.                        |
+| `GET /v1/photo-sources/:id/photos?q=&folderId=&classification=`  | Búsqueda paginada por nombre, carpeta y clasificación.                  |
 | `GET /v1/indexed-folders/:id/photos`                             | Fotos activas paginadas de una carpeta propia.                          |
+| `GET /v1/photo-exclusions?cursor=&limit=`                        | Papelera paginada de exclusiones de la cuenta.                          |
+| `DELETE /v1/photo-exclusions/:id`                                | Restaura una foto quitando su exclusión local.                          |
 | `PUT /v1/indexed-folders/:id/date-override`                      | Aplica año o año/mes a la carpeta propia y sus descendientes.           |
 | `GET /v1/sync-runs/:id`                                          | Progreso del propietario.                                               |
 | `GET /v1/sync-runs/:id/issues?cursor=&limit=`                    | Incidencias paginadas del propietario.                                  |
@@ -92,9 +95,9 @@ Todas las rutas salvo health/callback requieren sesión firmada en cookie `httpO
 
 Las rutas de gestión verifican que fuente, carpeta y foto pertenezcan al usuario de sesión. La edición de carpeta acepta únicamente precisión `YEAR` o `MONTH`, exige `recursive: true` y actualiza la carpeta seleccionada y todos sus descendientes dentro de una transacción. Retirar una foto elimina solo el registro local y crea la exclusión correspondiente; nunca solicita una escritura o eliminación en Drive. Los filtros diarios calculan el límite superior con aritmética UTC de calendario, incluido el cambio de mes y año.
 
-En Ajustes, la selección en vivo de Drive está separada del archivo indexado. El navegador muestra fuente, jerarquía, breadcrumb, conteos, estado, historial y fotos paginadas con su precisión; permite seleccionar fotos para retirarlas solo del archivo local. La edición de año o año/mes exige una confirmación explícita que identifica la carpeta seleccionada y aplica el cambio a todas sus subcarpetas.
+En Organizar, la selección en vivo de Drive está separada del archivo indexado. El navegador muestra fuente, jerarquía, breadcrumb, conteos, estado, historial y fotos paginadas con su precisión; permite buscar por nombre en una fuente, acotar por carpeta o clasificación y seleccionar fotos para corregir su fecha o retirarlas solo del archivo local. La edición de año o año/mes exige una confirmación explícita que identifica la carpeta seleccionada y aplica el cambio según el alcance elegido.
 
-La retirada por lotes recibe `{ "photoIds": ["id"] }` y devuelve `results` con `REMOVED`, `ABSENT` o `FAILED` por ID único. `ABSENT` significa que la foto no está en el archivo del usuario: no distingue entre un ID inexistente y uno ajeno. Cada retirada conserva la transacción de exclusión y borrado local; un fallo no revierte las retiradas anteriores. Drive no se modifica.
+La retirada por lotes recibe `{ "photoIds": ["id"] }` y devuelve `results` con `REMOVED`, `ABSENT` o `FAILED` por ID único. `ABSENT` significa que la foto no está en el archivo del usuario: no distingue entre un ID inexistente y uno ajeno. Cada retirada conserva la transacción de exclusión y borrado local; el tombstone conserva nombre, carpeta y una posible corrección manual para identificar y recuperar la foto. Restaurarla la deja pendiente de la siguiente revisión manual; recupera esa corrección, no cambia Drive ni inicia la revisión por sí sola.
 
 Ajustes envía bloques de hasta 50, mantiene pendientes los fallos o resultados no confirmados y permite reintentar tras perder una respuesta. Después de retirar fotos se descarta el cursor anterior y se actualiza la primera página conservando las pendientes.
 

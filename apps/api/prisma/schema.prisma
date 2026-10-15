@@ -248,6 +248,15 @@ model PhotoExclusion {
  id String @id @default(cuid())
  userId String
  driveFileId String
+ sourceId String?
+ sourceName String?
+ folderPath String[] @default([])
+ fileName String?
+ mimeType String?
+ manualDateValue DateTime? @db.Date
+ manualDatePrecision DatePrecision?
+ manualDateReason String?
+ restoredAt DateTime?
  createdAt DateTime @default(now())
  user User @relation(fields:[userId],references:[id],onDelete:Cascade)
  @@unique([userId,driveFileId])

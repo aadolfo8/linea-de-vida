@@ -21,7 +21,7 @@ import {
 import { mediaUrl } from '../../lib/media';
 import { removePhotosFromArchive } from '../../lib/photo-removal';
 import { visibleFolderTree } from '../settings/folder-tree';
-import styles from '../settings/settings.module.css';
+import { archiveStyles as styles } from './archive-workspace.styles';
 
 type RuleScope = 'DIRECT_ONLY' | 'FALLBACK_DESCENDANTS' | 'ALL_DESCENDANTS';
 type DriveFolder = { id: string; name: string; parents: string[] };
@@ -50,6 +50,17 @@ type IndexedPhoto = {
     precision: string;
     origin: string;
   };
+  folderPath?: string[];
+};
+type PhotoExclusion = {
+  id: string;
+  sourceId: string | null;
+  sourceName: string | null;
+  folderPath: string[];
+  fileName: string | null;
+  mimeType: string | null;
+  createdAt: string;
+  restoredAt: string | null;
 };
 type ClassificationSummary = {
   total: number;
@@ -86,6 +97,7 @@ type BusyAction =
   | 'folder-date'
   | 'manual-date'
   | 'remove-rule'
+  | 'restore-exclusion'
   | 'disconnect';
 
 const TERMINAL_SYNC_STATUSES = ['SUCCEEDED', 'PARTIAL', 'FAILED', 'CANCELLED'];
@@ -229,6 +241,14 @@ export function ArchiveWorkspace({
   const [photoCursor, setPhotoCursor] = useState<string | null>(null);
   const [photoFilter, setPhotoFilter] = useState('ALL');
   const [pendingView, setPendingView] = useState(false);
+  const [searchMode, setSearchMode] = useState(false);
+  const [searchText, setSearchText] = useState('');
+  const [appliedSearch, setAppliedSearch] = useState('');
+  const [searchFolderId, setSearchFolderId] = useState('ALL');
+  const [exclusions, setExclusions] = useState<PhotoExclusion[]>([]);
+  const [exclusionCursor, setExclusionCursor] = useState<string | null>(null);
+  const [loadingExclusions, setLoadingExclusions] = useState(false);
+  const [restoringExclusionId, setRestoringExclusionId] = useState<string | null>(null);
   const [selectedPhotos, setSelectedPhotos] = useState<Set<string>>(new Set());
   const [notice, setNotice] = useState<Notice | null>(null);
   const [busyAction, setBusyAction] = useState<BusyAction | null>(null);
@@ -259,6 +279,7 @@ export function ArchiveWorkspace({
   const archiveRequestRef = useRef<AbortController | null>(null);
   const photoRequestRef = useRef<AbortController | null>(null);
   const removing = useRef(false);
+  const searchKeyRef = useRef('');
   const busy = busyAction !== null;
   const activeSources = sources.filter((source) => source.status === 'ACTIVE');
   const activeSource =
@@ -517,6 +538,8 @@ export function ArchiveWorkspace({
     photoRequestRef.current = controller;
     pendingViewRef.current = true;
     photoFilterRef.current = 'UNCLASSIFIED';
+    searchKeyRef.current = '';
+    setSearchMode(false);
     setPendingView(true);
     setPhotoFilter('UNCLASSIFIED');
     if (!append) {
@@ -548,6 +571,73 @@ export function ArchiveWorkspace({
         photoRequestRef.current = null;
         setLoadingPhotos(false);
       }
+    }
+  };
+
+  const loadSourcePhotos = async (
+    sourceId: string,
+    query: string,
+    folderIdValue: string,
+    classification: string,
+    cursor?: string,
+    append = false,
+    retained: IndexedPhoto[] = [],
+  ) => {
+    const key = JSON.stringify([sourceId, query, folderIdValue, classification]);
+    searchKeyRef.current = key;
+    photoRequestRef.current?.abort();
+    const controller = new AbortController();
+    photoRequestRef.current = controller;
+    pendingViewRef.current = false;
+    setPendingView(false);
+    setLoadingPhotos(true);
+    try {
+      const page = await apiJson<{ items: IndexedPhoto[]; nextCursor: string | null }>(
+        settingsEndpoint.sourcePhotos(sourceId, {
+          query,
+          folderId: folderIdValue === 'ALL' ? undefined : folderIdValue,
+          classification,
+          cursor,
+        }),
+        { signal: controller.signal },
+      );
+      if (
+        controller.signal.aborted ||
+        photoRequestRef.current !== controller ||
+        activeSourceIdRef.current !== sourceId ||
+        !searchMode ||
+        searchKeyRef.current !== key
+      )
+        return;
+      setPhotos((current) => [
+        ...new Map(
+          [...(append ? current : retained), ...page.items].map((photo) => [photo.id, photo]),
+        ).values(),
+      ]);
+      setPhotoCursor(page.nextCursor);
+      if (!append) setSelectedPhotos(new Set(retained.map((photo) => photo.id)));
+    } finally {
+      if (photoRequestRef.current === controller) {
+        photoRequestRef.current = null;
+        setLoadingPhotos(false);
+      }
+    }
+  };
+
+  const loadPhotoExclusions = async (cursor?: string, append = false) => {
+    setLoadingExclusions(true);
+    try {
+      const page = await apiJson<{ items: PhotoExclusion[]; nextCursor: string | null }>(
+        settingsEndpoint.photoExclusions(cursor),
+      );
+      setExclusions((current) =>
+        append
+          ? [...new Map([...current, ...page.items].map((item) => [item.id, item])).values()]
+          : page.items,
+      );
+      setExclusionCursor(page.nextCursor);
+    } finally {
+      setLoadingExclusions(false);
     }
   };
 
@@ -594,11 +684,19 @@ export function ArchiveWorkspace({
   }, [area, loadSourceOverviews, sources]);
 
   useEffect(() => {
+    if (area !== 'organize') return;
+    void loadPhotoExclusions().catch((error) =>
+      announce(errorCopy(error, 'No se pudo cargar la papelera de fotos excluidas.'), 'error'),
+    );
+  }, [area]);
+
+  useEffect(() => {
     const sourceId = activeSource?.id ?? null;
     activeSourceIdRef.current = sourceId;
     selectedFolderIdRef.current = null;
     photoFilterRef.current = 'ALL';
     pendingViewRef.current = false;
+    searchKeyRef.current = '';
     archiveRequestRef.current?.abort();
     archiveRequestRef.current = null;
     photoRequestRef.current?.abort();
@@ -615,6 +713,10 @@ export function ArchiveWorkspace({
     setSelectedPhotos(new Set());
     setPhotoFilter('ALL');
     setPendingView(false);
+    setSearchMode(false);
+    setSearchText('');
+    setAppliedSearch('');
+    setSearchFolderId('ALL');
     setConfirmRemovePhotos(false);
     setConfirmRemoveRule(false);
     setConfirmRemoveSourceId(null);
@@ -647,6 +749,13 @@ export function ArchiveWorkspace({
       return;
     }
     if (pendingView) return;
+    if (searchMode) {
+      void loadSourcePhotos(sourceId, appliedSearch, searchFolderId, photoFilter).catch((error) => {
+        if (!isAbortError(error) && activeSourceIdRef.current === sourceId)
+          announce(errorCopy(error, 'No se pudieron buscar las fotos. Reintenta.'), 'error');
+      });
+      return;
+    }
     const folderIdValue = selectedFolderId;
     const filter = photoFilter;
     selectedFolderIdRef.current = folderIdValue;
@@ -662,7 +771,15 @@ export function ArchiveWorkspace({
           'error',
         );
     });
-  }, [activeSource?.id, selectedFolderId, photoFilter, pendingView]);
+  }, [
+    activeSource?.id,
+    selectedFolderId,
+    photoFilter,
+    pendingView,
+    searchMode,
+    appliedSearch,
+    searchFolderId,
+  ]);
 
   useEffect(() => {
     if (!selectedFolder) return;
@@ -909,12 +1026,22 @@ export function ArchiveWorkspace({
   const refreshPhotoView = async (retained: IndexedPhoto[]) => {
     if (!activeSource) return;
     if (pendingView) await loadPending(activeSource.id, undefined, false, retained);
+    else if (searchMode)
+      await loadSourcePhotos(
+        activeSource.id,
+        appliedSearch,
+        searchFolderId,
+        photoFilter,
+        undefined,
+        false,
+        retained,
+      );
     else if (selectedFolderId)
       await loadPhotos(activeSource.id, selectedFolderId, photoFilter, undefined, false, retained);
   };
 
   const refreshPhotos = async () => {
-    if (busy || !activeSource || (!pendingView && !selectedFolderId)) return;
+    if (busy || !activeSource || (!pendingView && !searchMode && !selectedFolderId)) return;
     setBusyAction('refresh-photos');
     try {
       await refreshPhotoView(photos.filter((photo) => selectedPhotos.has(photo.id)));
@@ -998,6 +1125,8 @@ export function ArchiveWorkspace({
       setManualEditorOpen(false);
       setSelectedPhotos(new Set());
       if (activeSource && pendingView) await loadPending(activeSource.id);
+      else if (activeSource && searchMode)
+        await loadSourcePhotos(activeSource.id, appliedSearch, searchFolderId, photoFilter);
       else if (activeSource && selectedFolderId)
         await loadPhotos(activeSource.id, selectedFolderId, photoFilter);
       if (activeSource) await loadArchive(activeSource.id);
@@ -1072,12 +1201,59 @@ export function ArchiveWorkspace({
     photoRequestRef.current = null;
     selectedFolderIdRef.current = folderIdValue;
     pendingViewRef.current = false;
+    searchKeyRef.current = '';
+    setSearchMode(false);
     setPendingView(false);
     setPhotos([]);
     setPhotoCursor(null);
     setSelectedPhotos(new Set());
     setLoadingPhotos(true);
     setSelectedFolderId(folderIdValue);
+  };
+
+  const beginArchiveSearch = (event: FormEvent) => {
+    event.preventDefault();
+    if (!activeSource || busy) return;
+    const query = searchText.trim();
+    if (query.length > 120) {
+      announce('La búsqueda admite hasta 120 caracteres.', 'warning');
+      return;
+    }
+    photoRequestRef.current?.abort();
+    photoRequestRef.current = null;
+    searchKeyRef.current = '';
+    pendingViewRef.current = false;
+    setPendingView(false);
+    setSearchMode(true);
+    setAppliedSearch(query);
+    setPhotos([]);
+    setPhotoCursor(null);
+    setSelectedPhotos(new Set());
+    setLoadingPhotos(true);
+  };
+
+  const restoreExclusion = async (exclusion: PhotoExclusion) => {
+    if (busy || restoringExclusionId) return;
+    setRestoringExclusionId(exclusion.id);
+    setBusyAction('restore-exclusion');
+    try {
+      await apiJson<void>(settingsEndpoint.restorePhotoExclusion(exclusion.id), {
+        method: 'DELETE',
+      });
+      const restoredAt = new Date().toISOString();
+      setExclusions((current) =>
+        current.map((item) => (item.id === exclusion.id ? { ...item, restoredAt } : item)),
+      );
+      announce(
+        `${exclusion.fileName ?? 'La foto'} se incluirá en la próxima revisión de Drive. Su corrección manual de fecha se conservará. Drive no se ha modificado.`,
+        'success',
+      );
+    } catch (error) {
+      announce(errorCopy(error, 'No se pudo restaurar esta foto. Reintenta.'), 'error');
+    } finally {
+      setRestoringExclusionId(null);
+      setBusyAction(null);
+    }
   };
 
   const handleTreeKeyDown = (event: KeyboardEvent<HTMLElement>, folder: IndexedFolder) => {
@@ -1676,6 +1852,78 @@ export function ArchiveWorkspace({
       )}
 
       {area === 'organize' && (
+        <section className={styles.sourcesOverview} aria-labelledby="excluded-title">
+          <div className={styles.sectionHeading}>
+            <div>
+              <h2 id="excluded-title">Papelera de fotos excluidas</h2>
+              <p>
+                Las fotos retiradas solo se excluyen de tu archivo local. Restaurarlas permite que
+                vuelvan a aparecer en la próxima revisión de Drive.
+              </p>
+            </div>
+            <span>{exclusions.length.toLocaleString('es-ES')} visibles</span>
+          </div>
+          {loadingExclusions && !exclusions.length ? (
+            <p role="status" className={styles.loadingLine}>
+              Cargando papelera…
+            </p>
+          ) : exclusions.length ? (
+            <>
+              <ul
+                className={styles.exclusionList}
+                aria-label="Fotos excluidas y en proceso de restauración"
+              >
+                {exclusions.map((exclusion) => (
+                  <li key={exclusion.id}>
+                    <div>
+                      <strong>{exclusion.fileName ?? 'Foto sin nombre disponible'}</strong>
+                      <span>
+                        {exclusion.restoredAt
+                          ? 'Restaurada · pendiente de revisión en Drive'
+                          : (exclusion.sourceName ?? 'Fuente retirada')}
+                      </span>
+                      {!!exclusion.folderPath.length && (
+                        <small>{exclusion.folderPath.join(' / ')}</small>
+                      )}
+                    </div>
+                    {!exclusion.restoredAt && (
+                      <button
+                        type="button"
+                        className={styles.secondaryButton}
+                        onClick={() => void restoreExclusion(exclusion)}
+                        disabled={busy || restoringExclusionId === exclusion.id}
+                      >
+                        {restoringExclusionId === exclusion.id && (
+                          <span className={styles.spinner} aria-hidden="true" />
+                        )}
+                        Restaurar
+                      </button>
+                    )}
+                  </li>
+                ))}
+              </ul>
+              {exclusionCursor && (
+                <button
+                  type="button"
+                  className={styles.loadMoreButton}
+                  onClick={() =>
+                    void loadPhotoExclusions(exclusionCursor, true).catch((error) =>
+                      announce(errorCopy(error, 'No se pudieron cargar más exclusiones.'), 'error'),
+                    )
+                  }
+                  disabled={loadingExclusions || busy}
+                >
+                  Cargar más fotos excluidas
+                </button>
+              )}
+            </>
+          ) : (
+            <p className={styles.emptyState}>No hay fotos en la papelera.</p>
+          )}
+        </section>
+      )}
+
+      {area === 'organize' && (
         <section
           aria-labelledby="archive-title"
           className={styles.archiveSection}
@@ -2182,6 +2430,71 @@ export function ArchiveWorkspace({
                   </>
                 ) : null}
 
+                <form className={styles.archiveSearch} onSubmit={beginArchiveSearch}>
+                  <label>
+                    Buscar por nombre
+                    <input
+                      type="search"
+                      value={searchText}
+                      onChange={(event) => setSearchText(event.target.value)}
+                      maxLength={120}
+                      placeholder="Ej.: vacaciones, IMG_2048…"
+                      disabled={busy || loadingArchive}
+                    />
+                  </label>
+                  <label>
+                    Carpeta
+                    <select
+                      value={searchFolderId}
+                      onChange={(event) => {
+                        setSearchFolderId(event.target.value);
+                        if (searchMode) {
+                          setPhotos([]);
+                          setPhotoCursor(null);
+                          setSelectedPhotos(new Set());
+                          setLoadingPhotos(true);
+                        }
+                      }}
+                      disabled={busy || loadingArchive}
+                    >
+                      <option value="ALL">Toda la fuente</option>
+                      {folders.map((folder) => (
+                        <option key={folder.id} value={folder.id}>
+                          {folder.path.join(' / ')}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <button
+                    type="submit"
+                    className={styles.primaryButton}
+                    disabled={busy || loadingArchive || loadingPhotos}
+                  >
+                    Buscar en el archivo
+                  </button>
+                  {searchMode && (
+                    <button
+                      type="button"
+                      className={styles.secondaryButton}
+                      onClick={() => {
+                        photoRequestRef.current?.abort();
+                        photoRequestRef.current = null;
+                        searchKeyRef.current = '';
+                        setSearchMode(false);
+                        setSearchText('');
+                        setAppliedSearch('');
+                        setSearchFolderId('ALL');
+                        setPhotos([]);
+                        setPhotoCursor(null);
+                        setSelectedPhotos(new Set());
+                      }}
+                      disabled={busy}
+                    >
+                      Cerrar búsqueda
+                    </button>
+                  )}
+                </form>
+
                 <div className={styles.galleryToolbar}>
                   <label>
                     Mostrar fotografías
@@ -2209,9 +2522,11 @@ export function ArchiveWorkspace({
                     </select>
                   </label>
                   <span aria-live="polite">
-                    {selectedPhotos.size
-                      ? pluralize(selectedPhotos.size, 'foto seleccionada', 'fotos seleccionadas')
-                      : 'Selecciona fotos para corregir su fecha'}
+                    {searchMode
+                      ? `Resultados en ${searchFolderId === 'ALL' ? 'toda la fuente' : (folders.find((folder) => folder.id === searchFolderId)?.name ?? 'la carpeta seleccionada')}`
+                      : selectedPhotos.size
+                        ? pluralize(selectedPhotos.size, 'foto seleccionada', 'fotos seleccionadas')
+                        : 'Selecciona fotos para corregir su fecha'}
                   </span>
                 </div>
 
@@ -2224,14 +2539,20 @@ export function ArchiveWorkspace({
                 ) : !photos.length ? (
                   <div className={styles.emptyState}>
                     <h3>
-                      {pendingView ? 'No quedan fotos por revisar' : 'No hay fotos en esta vista'}
+                      {pendingView
+                        ? 'No quedan fotos por revisar'
+                        : searchMode
+                          ? 'No hay resultados para esta búsqueda'
+                          : 'No hay fotos en esta vista'}
                     </h3>
                     <p>
                       {pendingView
                         ? 'Todas las fotografías de esta fuente tienen una fecha suficiente.'
-                        : photoFilter === 'ALL'
-                          ? 'Esta carpeta no contiene fotografías activas en el índice.'
-                          : 'Cambia el filtro para ver fotografías con otro tipo de fecha.'}
+                        : searchMode
+                          ? 'Prueba otro nombre o cambia la carpeta y el filtro de fecha.'
+                          : photoFilter === 'ALL'
+                            ? 'Esta carpeta no contiene fotografías activas en el índice.'
+                            : 'Cambia el filtro para ver fotografías con otro tipo de fecha.'}
                     </p>
                   </div>
                 ) : (
@@ -2266,6 +2587,9 @@ export function ArchiveWorkspace({
                                 {formatClassifiedDate(photo.effectiveDate)}
                               </span>
                               <small>{originLabel(photo.effectiveDate.origin)}</small>
+                              {searchMode && photo.folderPath?.length ? (
+                                <small>{photo.folderPath.join(' / ')}</small>
+                              ) : null}
                             </span>
                             <span className={styles.selectionState}>
                               <span aria-hidden="true">
@@ -2360,7 +2684,8 @@ export function ArchiveWorkspace({
                       </h3>
                       <p>
                         Dejarán de aparecer en Línea de vida. Los archivos originales seguirán en
-                        Drive y no se modificarán.
+                        Drive y no se modificarán. Puedes recuperarlas desde la papelera; se
+                        incluirán otra vez en la próxima revisión.
                       </p>
                     </div>
                     <div className={styles.buttonRow}>
@@ -2475,15 +2800,24 @@ export function ArchiveWorkspace({
                       void (
                         pendingView
                           ? loadPending(activeSource.id, photoCursor, true)
-                          : selectedFolderId
-                            ? loadPhotos(
+                          : searchMode
+                            ? loadSourcePhotos(
                                 activeSource.id,
-                                selectedFolderId,
+                                appliedSearch,
+                                searchFolderId,
                                 photoFilter,
                                 photoCursor,
                                 true,
                               )
-                            : Promise.resolve()
+                            : selectedFolderId
+                              ? loadPhotos(
+                                  activeSource.id,
+                                  selectedFolderId,
+                                  photoFilter,
+                                  photoCursor,
+                                  true,
+                                )
+                              : Promise.resolve()
                       ).catch((error) => {
                         if (!isAbortError(error))
                           announce(

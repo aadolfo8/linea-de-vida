@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { galleryEagerIndexes } from './TimelineExperience';
+import { galleryEagerIndexes } from './TimelinePhotoViewer';
 
 describe('gallery eager image demand', () => {
   it('prioritizes only the selected preview and its adjacent previews', () => {
