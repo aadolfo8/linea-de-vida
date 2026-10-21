@@ -11,6 +11,9 @@ export type DriveItem = {
   imageWidth?: number | null;
   imageHeight?: number | null;
   thumbnailLink?: string | null;
+  /** Drive's content hash; together with `size` it identifies the bytes across copies. */
+  md5Checksum?: string | null;
+  size?: string | null;
 };
 
 export class DriveRequestError extends Error {
@@ -75,7 +78,7 @@ export class GoogleDriveProvider implements DriveAdapter {
         pageToken: cursor,
         pageSize: Math.min(1000, Math.max(1, Number(process.env.SYNC_PAGE_SIZE ?? 100))),
         fields:
-          'nextPageToken,files(id,name,mimeType,parents,imageMediaMetadata(width,height,time),thumbnailLink)',
+          'nextPageToken,files(id,name,mimeType,parents,imageMediaMetadata(width,height,time),thumbnailLink,md5Checksum,size)',
       });
     } catch (error) {
       const underlying = error as {
@@ -111,6 +114,8 @@ export class GoogleDriveProvider implements DriveAdapter {
           imageWidth: file.imageMediaMetadata?.width,
           imageHeight: file.imageMediaMetadata?.height,
           thumbnailLink: file.thumbnailLink,
+          md5Checksum: file.md5Checksum,
+          size: file.size,
         })),
       nextCursor: response.data.nextPageToken ?? undefined,
     };

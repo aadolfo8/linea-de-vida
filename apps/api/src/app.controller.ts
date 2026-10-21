@@ -37,6 +37,7 @@ import { loadRuntimeConfig } from './production';
 import { FolderDateRuleService } from './folder-date-rule.service';
 import { findOverlappingFolderSource, FolderAncestryUnavailable } from './folder-source-overlap';
 import { readPhotoDimensions } from './photo-dimensions';
+import { refreshPhotos } from './photo-catalog';
 
 @Controller('v1')
 export class AppController {
@@ -477,26 +478,38 @@ export class AppController {
   @Delete('photo-sources/:id')
   @HttpCode(HttpStatus.NO_CONTENT)
   async removeSource(@CurrentUserId() userId: string, @Param('id') sourceId: string) {
-    await this.prisma.$transaction(async (tx) => {
-      const source = await tx.photoSource.findFirst({ where: { id: sourceId, userId } });
-      if (!source)
-        throw new NotFoundException({
-          code: 'SOURCE_NOT_FOUND',
-          message: 'Photo source not found.',
+    await this.prisma.$transaction(
+      async (tx) => {
+        const source = await tx.photoSource.findFirst({ where: { id: sourceId, userId } });
+        if (!source)
+          throw new NotFoundException({
+            code: 'SOURCE_NOT_FOUND',
+            message: 'Photo source not found.',
+          });
+        const activeRun = await tx.syncRun.findFirst({
+          where: { photoSourceId: sourceId, status: { in: ['QUEUED', 'RUNNING'] } },
+          select: { id: true },
         });
-      const activeRun = await tx.syncRun.findFirst({
-        where: { photoSourceId: sourceId, status: { in: ['QUEUED', 'RUNNING'] } },
-        select: { id: true },
-      });
-      if (activeRun)
-        throw new ConflictException({
-          code: 'SOURCE_SYNC_ACTIVE',
-          message: 'Wait for the current source review to finish before removing it.',
+        if (activeRun)
+          throw new ConflictException({
+            code: 'SOURCE_SYNC_ACTIVE',
+            message: 'Wait for the current source review to finish before removing it.',
+          });
+        // Only this source's copies go: a photo that also lives in another source stays, mirroring
+        // one of its remaining copies; a photo with no copy left is deleted.
+        const affected = await tx.photoFile.findMany({
+          where: { userId, sourceId },
+          select: { photoId: true },
         });
-      await tx.photo.deleteMany({ where: { userId, sourceId } });
-      await tx.indexedFolder.deleteMany({ where: { userId, sourceId } });
-      await tx.photoSource.delete({ where: { id: sourceId } });
-    });
+        const photoIds = [...new Set(affected.map((file) => file.photoId))];
+        await tx.photoFile.deleteMany({ where: { userId, sourceId } });
+        await tx.photo.deleteMany({ where: { userId, sourceId, files: { none: {} } } });
+        await refreshPhotos(tx, photoIds);
+        await tx.indexedFolder.deleteMany({ where: { userId, sourceId } });
+        await tx.photoSource.delete({ where: { id: sourceId } });
+      },
+      { timeout: 60_000 },
+    );
   }
   @UseGuards(SessionGuard, CsrfGuard) @Post('photo-sources') async createSource(
     @CurrentUserId() userId: string,
@@ -865,7 +878,7 @@ export class AppController {
       }),
     ]);
     const page = records.slice(0, limit);
-    const relatedPhotos = await this.prisma.photo.findMany({
+    const relatedFiles = await this.prisma.photoFile.findMany({
       where: {
         sourceId,
         userId,
@@ -873,9 +886,14 @@ export class AppController {
           in: page.flatMap((issue) => (issue.driveFileId ? [issue.driveFileId] : [])),
         },
       },
-      select: { id: true, driveFileId: true, fileName: true, folderId: true },
+      select: { photoId: true, driveFileId: true, fileName: true, folderId: true },
     });
-    const photosByDriveId = new Map(relatedPhotos.map((photo) => [photo.driveFileId, photo]));
+    const photosByDriveId = new Map(
+      relatedFiles.map((file) => [
+        file.driveFileId,
+        { id: file.photoId, fileName: file.fileName, folderId: file.folderId },
+      ]),
+    );
     return {
       items: page.map((issue) => {
         const photo = issue.driveFileId ? photosByDriveId.get(issue.driveFileId) : null;
@@ -1532,6 +1550,7 @@ export class AppController {
         create: {
           userId,
           driveFileId: photo.driveFileId,
+          contentKey: photo.contentKey,
           sourceId: photo.sourceId,
           sourceName: photo.source.name,
           folderPath: photo.folder?.path ?? [],
@@ -1543,6 +1562,7 @@ export class AppController {
           restoredAt: null,
         },
         update: {
+          contentKey: photo.contentKey,
           sourceId: photo.sourceId,
           sourceName: photo.source.name,
           folderPath: photo.folder?.path ?? [],

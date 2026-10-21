@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { PhotoDateResolver } from '../src/date-resolver';
 import { DriveAdapter, DriveItem, DriveRequestError } from '../src/drive';
 import { SyncService } from '../src/sync.service';
+import { MemoryPrisma } from './support/memory-prisma';
 
 const image = (id: string, name = `${id}.jpg`): DriveItem => ({
   id,
@@ -29,11 +30,66 @@ function fixture(pages: Record<string, { items: DriveItem[]; nextCursor?: string
     removedCount: 0,
     checkpoint: null,
   };
-  const photos = new Map<string, any>();
+  const memory = new MemoryPrisma();
+  const photoRow = (driveFileId: string) =>
+    memory.rows('photo').find((photo) => photo.driveFileId === driveFileId);
+  /** Keyed by the photo's primary Drive file id, backed by the Photo/PhotoFile tables. */
+  const photos = {
+    get: (driveFileId: string): any => {
+      const row = photoRow(driveFileId);
+      if (!row) return undefined;
+      const override = memory.rows('manualDateOverride').find((entry) => entry.photoId === row.id);
+      return { ...row, override: override ?? null };
+    },
+    has: (driveFileId: string) => !!photoRow(driveFileId),
+    set: (driveFileId: string, seed: any) => {
+      const { override, ...rest } = seed;
+      const id = seed.id ?? driveFileId;
+      memory.rows('photo').push({
+        userId: 'owner',
+        contentKey: `drive:${driveFileId}`,
+        folderId: null,
+        detectedSource: 'NONE',
+        ...rest,
+        id,
+        driveFileId,
+      });
+      memory.rows('photoFile').push({
+        id: `file-${driveFileId}`,
+        photoId: id,
+        userId: 'owner',
+        sourceId: seed.sourceId,
+        driveFileId,
+        status: seed.status === 'ACTIVE' ? 'ACTIVE' : 'MISSING',
+        lastSeenSyncRunId: seed.lastSeenSyncRunId,
+        createdAt: new Date(0),
+      });
+      if (override) memory.rows('manualDateOverride').push({ ...override, photoId: id });
+    },
+    get size() {
+      return memory.rows('photo').length;
+    },
+    get length() {
+      return memory.rows('photo').length;
+    },
+  };
   const issues: any[] = [];
   const folders = new Map<string, any>();
-  const exclusions = new Set<string>();
-  const restoredExclusions = new Map<string, any>();
+  const exclusions = {
+    add: (driveFileId: string) =>
+      memory.rows('photoExclusion').push({
+        id: `exclusion-${driveFileId}`,
+        userId: 'owner',
+        driveFileId,
+        restoredAt: null,
+      }),
+  };
+  const restoredExclusions = {
+    set: (driveFileId: string, row: any) =>
+      memory.rows('photoExclusion').push({ userId: 'owner', driveFileId, ...row }),
+    has: (driveFileId: string) =>
+      memory.rows('photoExclusion').some((entry) => entry.driveFileId === driveFileId),
+  };
   const prisma: any = {
     syncRun: {
       findUnique: async () => run,
@@ -72,18 +128,10 @@ function fixture(pages: Record<string, { items: DriveItem[]; nextCursor?: string
             Object.assign(issue, data);
       },
     },
-    photoExclusion: {
-      findUnique: async ({ where }: any) => {
-        const driveFileId = where.userId_driveFileId.driveFileId;
-        return (
-          restoredExclusions.get(driveFileId) ??
-          (exclusions.has(driveFileId) ? { id: 'excluded', restoredAt: null } : null)
-        );
-      },
-      deleteMany: async ({ where }: any) => ({
-        count: restoredExclusions.delete(where.id.replace('exclusion-', '')) ? 1 : 0,
-      }),
-    },
+    photoExclusion: memory.photoExclusion,
+    photoFile: memory.photoFile,
+    photo: memory.photo,
+    manualDateOverride: memory.manualDateOverride,
     indexedFolder: {
       findFirst: async ({ where }: any) =>
         [...folders.values()].find(
@@ -108,37 +156,6 @@ function fixture(pages: Record<string, { items: DriveItem[]; nextCursor?: string
             folder.lastSeenSyncRunId !== where.lastSeenSyncRunId.not
           )
             Object.assign(folder, data);
-      },
-    },
-    photo: {
-      findUnique: async ({ where }: any) =>
-        photos.get(where.userId_driveFileId.driveFileId) ?? null,
-      create: async ({ data }: any) => {
-        const photo = { ...data, id: data.driveFileId, override: null };
-        photos.set(data.driveFileId, photo);
-        return photo;
-      },
-      update: async ({ where, data }: any) => Object.assign(photos.get(where.id), data),
-      updateMany: async ({ where, data }: any) => {
-        let count = 0;
-        for (const photo of photos.values())
-          if (
-            photo.sourceId === where.sourceId &&
-            (!where.status || photo.status === where.status) &&
-            photo.lastSeenSyncRunId !== where.lastSeenSyncRunId.not
-          ) {
-            Object.assign(photo, data);
-            count++;
-          }
-        return { count };
-      },
-    },
-    manualDateOverride: {
-      upsert: async ({ where, create, update }: any) => {
-        const photo = photos.get(where.photoId);
-        const value = photo.override ? Object.assign(photo.override, update) : create;
-        photo.override = value;
-        return value;
       },
     },
     $transaction: async (operation: any) =>
