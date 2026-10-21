@@ -4,6 +4,7 @@ import { Focus, X } from 'lucide-react';
 import { usePathname, useRouter } from 'next/navigation';
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { ArchiveNav } from './ArchiveNav';
+import { createPinchDetector } from './pinch';
 import { ProtectedSurface } from './ProtectedSurface';
 import { SkyChrome, type SkyCrumb } from './sky/SkyChrome';
 import { SkyStage } from './sky/SkyStage';
@@ -20,10 +21,6 @@ import {
   timelineHref,
   timelineHrefWithReturn,
 } from './timeline-model';
-
-/** Pinch gestures arrive as small ctrl+wheel deltas; a mouse wheel with ctrl is page zoom. */
-const PINCH_MAX_DELTA = 50;
-const PINCH_TRIGGER = 12;
 
 export function TimelineRoute() {
   const pathname = usePathname();
@@ -108,28 +105,25 @@ export function TimelineRoute() {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [focused, routeDepth, setFocused]);
 
-  // Trackpad pinch-out zooms out one depth.
+  // A trackpad pinch-out zooms out one depth. Only the gesture that is consumed is prevented;
+  // everything else (zoom in, ctrl + mouse wheel, a short pinch) keeps zooming the page.
   useEffect(() => {
     if (routeDepth === 'panorama') return;
-    let accumulated = 0;
-    let timer = 0;
+    const detect = createPinchDetector();
     const onWheel = (event: WheelEvent) => {
-      if (!event.ctrlKey || Math.abs(event.deltaY) >= PINCH_MAX_DELTA) return;
       if (document.querySelector('[role="dialog"]')) return;
+      const verdict = detect({
+        ctrlKey: event.ctrlKey,
+        deltaY: event.deltaY,
+        deltaMode: event.deltaMode,
+        time: event.timeStamp,
+      });
+      if (verdict === 'pass' || verdict === 'accumulate') return;
       event.preventDefault();
-      accumulated += event.deltaY;
-      window.clearTimeout(timer);
-      timer = window.setTimeout(() => (accumulated = 0), 200);
-      if (accumulated > PINCH_TRIGGER) {
-        accumulated = 0;
-        goUpRef.current();
-      }
+      if (verdict === 'consume') goUpRef.current();
     };
     window.addEventListener('wheel', onWheel, { passive: false });
-    return () => {
-      window.clearTimeout(timer);
-      window.removeEventListener('wheel', onWheel);
-    };
+    return () => window.removeEventListener('wheel', onWheel);
   }, [routeDepth]);
 
   const crumbs: SkyCrumb[] = [{ label: 'Años' }];

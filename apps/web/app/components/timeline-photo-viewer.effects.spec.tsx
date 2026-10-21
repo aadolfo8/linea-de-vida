@@ -325,6 +325,28 @@ describe('TimelinePhotoViewer effects', () => {
     expect(button('Foto siguiente').hasAttribute('disabled')).toBe(true);
   });
 
+  it('stops offering a next photo when the caller has nothing more to load', async () => {
+    const loadMore = vi.fn().mockResolvedValue({ items: [], nextCursor: 'more' });
+    await render({ photos, initialIndex: 2, loadMore });
+    expect(button('Foto siguiente').hasAttribute('disabled')).toBe(false);
+
+    // The month paged to its end on its own: the viewer is handed no way to load more.
+    await render({ photos, initialIndex: 2, loadMore: undefined });
+    expect(button('Foto siguiente').hasAttribute('disabled')).toBe(true);
+  });
+
+  it('drops a waiting advance when the end is reached, instead of jumping later', async () => {
+    const loadMore = vi.fn().mockReturnValue(new Promise(() => undefined));
+    await render({ photos, initialIndex: 2, loadMore });
+    await act(async () => button('Foto siguiente').click());
+    expect(counter()).toBe('3 / 3');
+
+    await render({ photos, initialIndex: 2, loadMore: undefined });
+    const later = photo(4, { fileName: 'Fourth photo.jpg' });
+    await render({ photos: [...photos, later], initialIndex: 2, loadMore: undefined });
+    expect(counter()).toBe('3 / 4');
+  });
+
   describe('meta', () => {
     it('states the date precision honestly and counts against the known total', async () => {
       await render({

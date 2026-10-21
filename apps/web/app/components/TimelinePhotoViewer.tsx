@@ -111,7 +111,10 @@ export function TimelinePhotoViewer({
 }) {
   const reduceMotion = useReducedMotion() ?? false;
   const [loadedPhotos, setLoadedPhotos] = useState(photos);
-  const [hasMore, setHasMore] = useState(Boolean(loadMore));
+  // The caller owns paging: no `loadMore` means nothing more is coming, even if it had one
+  // when the viewer opened. The viewer only adds what its own requests learned.
+  const [exhausted, setExhausted] = useState(false);
+  const hasMore = Boolean(loadMore) && !exhausted;
   const [loadingMore, setLoadingMore] = useState(false);
   const [loadMoreError, setLoadMoreError] = useState(false);
   const [index, setIndex] = useState(initialIndex);
@@ -346,7 +349,7 @@ export function TimelinePhotoViewer({
         const currentIds = new Set(current.map((photo) => photo.id));
         return [...current, ...page.items.filter((photo) => !currentIds.has(photo.id))];
       });
-      setHasMore(Boolean(page.nextCursor));
+      setExhausted(!page.nextCursor);
     } catch {
       setLoadMoreError(true);
     } finally {
@@ -377,6 +380,13 @@ export function TimelinePhotoViewer({
     select(pendingAdvance, 1);
     setPendingAdvance(null);
   }, [loadedPhotos.length, pendingAdvance, select]);
+
+  // Nothing is coming (the end was reached): a waiting advance would never land.
+  useEffect(() => {
+    if (pendingAdvance === null || hasMore) return;
+    if (pendingAdvance < Math.max(loadedPhotos.length, photos.length)) return;
+    setPendingAdvance(null);
+  }, [hasMore, loadedPhotos.length, pendingAdvance, photos.length]);
 
   /** Moves one photo along, never wrapping; at the loaded end it waits for the next page. */
   const step = useCallback(
