@@ -77,6 +77,7 @@ enum FolderDateRuleScope {
   FALLBACK_DESCENDANTS
   ALL_DESCENDANTS
   DIRECT_ONLY
+  DIRECT_OVERRIDE
 }
 enum SyncIssueCode {
  RATE_LIMITED
