@@ -2,6 +2,39 @@ import { describe, expect, it, vi } from 'vitest';
 import { FolderDateRuleService } from '../src/folder-date-rule.service';
 
 describe('FolderDateRuleService', () => {
+  it('terminates when the stored folder tree has a cycle', async () => {
+    const prisma: any = {
+      indexedFolder: {
+        findFirst: vi.fn(async () => ({ id: 'a', userId: 'owner', sourceId: 'source' })),
+        findMany: vi.fn(async () => [
+          { id: 'a', parentId: 'b', dateRule: null },
+          { id: 'b', parentId: 'a', dateRule: null },
+        ]),
+      },
+      photo: {
+        findMany: vi.fn(async () => [
+          {
+            id: 'p',
+            folderId: 'a',
+            effectiveDateValue: null,
+            effectiveDatePrecision: 'UNKNOWN',
+            effectiveDateSource: 'NONE',
+            detectedDate: null,
+            detectedPrecision: 'UNKNOWN',
+            detectedSource: 'NONE',
+            override: null,
+          },
+        ]),
+      },
+    };
+    const preview = await new FolderDateRuleService(prisma).preview('owner', 'a', {
+      dateValue: new Date('2005-01-01T00:00:00.000Z'),
+      precision: 'YEAR',
+      scope: 'FALLBACK_DESCENDANTS',
+    });
+    expect(preview.scopePhotoCount).toBe(1);
+  });
+
   it('excludes descendants where a nearer folder rule takes precedence', async () => {
     const childRule = {
       dateValue: new Date('1998-01-01T00:00:00.000Z'),

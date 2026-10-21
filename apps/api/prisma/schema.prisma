@@ -299,8 +299,6 @@ model PhotoExclusion {
  id String @id @default(cuid())
  userId String
  driveFileId String
- /// Content identity of the removed photo, so a new copy of the same bytes stays excluded.
- contentKey String?
  sourceId String?
  sourceName String?
  folderPath String[] @default([])
@@ -313,7 +311,6 @@ model PhotoExclusion {
  createdAt DateTime @default(now())
  user User @relation(fields:[userId],references:[id],onDelete:Cascade)
  @@unique([userId,driveFileId])
- @@index([userId,contentKey])
  @@index([userId,createdAt])
 }
 model ManualDateOverride {
