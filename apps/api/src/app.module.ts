@@ -11,6 +11,7 @@ import { MediaProxyService } from './media-proxy.service';
 import { RetentionService } from './retention.service';
 import { TakeoutMatcher, TakeoutMetadataParser } from './takeout';
 import { FolderDateRuleService } from './folder-date-rule.service';
+import { OrderingService } from './ordering.service';
 import { PhotoVisibilityService } from './photo-visibility.service';
 @Module({
   controllers: [AppController, OrderingController],
@@ -22,6 +23,7 @@ import { PhotoVisibilityService } from './photo-visibility.service';
     ManualDateService,
     FolderDateRuleService,
     PhotoVisibilityService,
+    OrderingService,
     MediaProxyService,
     RetentionService,
     SyncService,

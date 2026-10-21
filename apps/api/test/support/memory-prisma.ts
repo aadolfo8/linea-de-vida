@@ -197,16 +197,23 @@ export class MemoryPrisma {
     const keys = (Array.isArray(orderBy) ? orderBy : orderBy ? [orderBy] : []).flatMap((entry) =>
       Object.entries(entry).map(([field, direction]) => ({
         field,
-        direction: isObject(direction) ? (direction.sort as string) : (direction as string),
+        direction: (isObject(direction) ? direction.sort : direction) as string,
+        // Like PostgreSQL: NULLs sort as the largest value unless told otherwise.
+        nulls: (isObject(direction) && direction.nulls
+          ? direction.nulls
+          : (isObject(direction) ? direction.sort : direction) === 'desc'
+            ? 'first'
+            : 'last') as string,
       })),
     );
     return [...rows].sort((a, b) => {
-      for (const { field, direction } of keys) {
+      for (const { field, direction, nulls } of keys) {
         const left = comparable(a[field]) as any;
         const right = comparable(b[field]) as any;
         if (left === right) continue;
-        if (left == null) return direction === 'asc' ? 1 : -1;
-        if (right == null) return direction === 'asc' ? -1 : 1;
+        if (left == null && right == null) continue;
+        if (left == null) return nulls === 'first' ? -1 : 1;
+        if (right == null) return nulls === 'first' ? 1 : -1;
         const result = left < right ? -1 : 1;
         return direction === 'desc' ? -result : result;
       }

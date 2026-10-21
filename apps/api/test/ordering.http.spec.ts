@@ -7,6 +7,7 @@ import { CsrfGuard, SessionGuard } from '../src/auth';
 import { FolderDateRuleService } from '../src/folder-date-rule.service';
 import { ManualDateService } from '../src/manual-date.service';
 import { OrderingController } from '../src/ordering.controller';
+import { OrderingService } from '../src/ordering.service';
 import { PhotoVisibilityService } from '../src/photo-visibility.service';
 import { MemoryPrisma } from './support/memory-prisma';
 
@@ -23,6 +24,7 @@ async function createApp() {
       id,
       userId,
       sourceId: 'source',
+      fileName: `${id}.jpg`,
       folderId: id === 'p1' ? 'root' : 'child',
       status: 'ACTIVE',
       hiddenAt: null,
@@ -33,13 +35,31 @@ async function createApp() {
       effectiveDatePrecision: 'UNKNOWN',
       effectiveDateSource: 'NONE',
     });
+  const folder = (
+    id: string,
+    userId: string,
+    sourceId: string,
+    parentId: string | null,
+    name: string,
+  ) => ({
+    id,
+    userId,
+    sourceId,
+    parentId,
+    name,
+    path: parentId ? ['Root', name] : [name],
+    status: 'ACTIVE',
+  });
   memory
     .rows('indexedFolder')
     .push(
-      { id: 'root', userId: 'owner', sourceId: 'source', parentId: null },
-      { id: 'child', userId: 'owner', sourceId: 'source', parentId: 'root' },
-      { id: 'foreign-folder', userId: 'other', sourceId: 'other-source', parentId: null },
+      folder('root', 'owner', 'source', null, 'Root'),
+      folder('child', 'owner', 'source', 'root', 'Child'),
+      folder('foreign-folder', 'other', 'other-source', null, 'Theirs'),
     );
+  memory
+    .rows('photoSource')
+    .push({ id: 'source', userId: 'owner' }, { id: 'other-source', userId: 'other' });
   const app = (
     await Test.createTestingModule({
       controllers: [OrderingController],
@@ -47,6 +67,7 @@ async function createApp() {
         { provide: PhotoVisibilityService, useValue: new PhotoVisibilityService(memory as any) },
         { provide: ManualDateService, useValue: new ManualDateService(memory as any) },
         { provide: FolderDateRuleService, useValue: new FolderDateRuleService(memory as any) },
+        { provide: OrderingService, useValue: new OrderingService(memory as any) },
       ],
     })
       // The real session guard needs a signed cookie; the tests only need the user it resolves.
@@ -228,5 +249,82 @@ describe('Ordenar HTTP contracts', () => {
       .send({ year: 2008, precision: 'YEAR' })
       .expect(404);
     await call('delete', '/v1/indexed-folders/foreign-folder/date').expect(404);
+  });
+
+  it('serves the piles, the photos of a pile and the folder tree', async () => {
+    const created = await createApp();
+    app = created.app;
+    await call('get', '/v1/ordering/piles')
+      .expect(200)
+      .expect(({ body }) =>
+        expect(body).toEqual({ undated: 2, yearOnly: 0, dated: 0, hidden: 0, total: 2 }),
+      );
+    await call('get', '/v1/ordering/piles?folderId=child&includeSubfolders=false')
+      .expect(200)
+      .expect(({ body }) => expect(body.total).toBe(1));
+    await call('get', '/v1/ordering/photos?pile=undated&limit=1')
+      .expect(200)
+      .expect(({ body }) => {
+        expect(body.items).toHaveLength(1);
+        expect(body.items[0]).toMatchObject({
+          thumbnailUrl: '/v1/photos/p1/thumbnail',
+          hidden: false,
+        });
+        expect(body.nextCursor).toEqual(expect.any(String));
+      });
+    await call('get', '/v1/photo-sources/source/folder-tree')
+      .expect(200)
+      .expect(({ body }) => {
+        expect(body.items[0]).toMatchObject({ name: 'Root', subtreePhotoCount: 2 });
+        expect(body.items[0].children[0]).toMatchObject({ name: 'Child', photoCount: 1 });
+      });
+    await call('get', '/v1/indexed-folders/child')
+      .expect(200)
+      .expect(({ body }) =>
+        expect(body.breadcrumb).toEqual([
+          { id: 'root', name: 'Root' },
+          { id: 'child', name: 'Child' },
+        ]),
+      );
+  });
+
+  it('keeps the read routes owner-scoped and validates their query', async () => {
+    app = (await createApp()).app;
+    await call('get', '/v1/ordering/piles?sourceId=other-source').expect(404);
+    await call('get', '/v1/photo-sources/other-source/folder-tree').expect(404);
+    await call('get', '/v1/indexed-folders/foreign-folder').expect(404);
+    await call('get', '/v1/ordering/piles?includeSubfolders=maybe').expect(400);
+    await call('get', '/v1/ordering/photos').expect(400);
+    await call('get', '/v1/ordering/photos?pile=undated&cursor=junk').expect(400);
+    await request(app.getHttpServer()).get('/v1/ordering/piles').expect(403);
+  });
+
+  it('lists and accepts filename suggestions', async () => {
+    const created = await createApp();
+    app = created.app;
+    created.memory.rows('photo')[0].fileName = 'IMG-20190812-WA0001.jpg';
+    await call('get', '/v1/ordering/filename-suggestions')
+      .expect(200)
+      .expect(({ body }) => {
+        expect(body.totalCount).toBe(1);
+        expect(body.groups[0]).toMatchObject({ kind: 'whatsapp', photoCount: 1 });
+      });
+    await call('post', '/v1/ordering/filename-suggestions/accept')
+      .send({ kinds: ['whatsapp'] })
+      .expect(200)
+      .expect(({ body }) => expect(body).toEqual({ appliedCount: 1 }));
+    expect(created.memory.rows('photo')[0]).toMatchObject({
+      detectedSource: 'FILENAME',
+      effectiveDateSource: 'FILENAME',
+    });
+    await call('post', '/v1/ordering/filename-suggestions/accept')
+      .send({ kinds: ['bogus'] })
+      .expect(400);
+    await request(app.getHttpServer())
+      .post('/v1/ordering/filename-suggestions/accept')
+      .set('x-test-user', 'owner')
+      .set('Origin', 'http://attacker.example.test')
+      .send({})
+      .expect(403);
   });
 });

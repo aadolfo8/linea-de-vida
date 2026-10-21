@@ -1,4 +1,4 @@
-import { FolderDateRuleScope } from '@prisma/client';
+import { DatePrecision, FolderDateRuleScope } from '@prisma/client';
 
 /**
  * A folder date rule has two independent choices: does it reach subfolders, and does it replace
@@ -32,6 +32,13 @@ export const overridesDetectedDates = (scope: FolderDateRuleScope) =>
   scope === 'ALL_DESCENDANTS' || scope === 'DIRECT_OVERRIDE';
 
 type RuleFolder<R> = { parentId: string | null; dateRule: R | null };
+
+/** An indexed folder with the date rule that may apply to its photos. */
+export type FolderWithRule = RuleFolder<{
+  dateValue: Date;
+  precision: DatePrecision;
+  scope: FolderDateRuleScope;
+}>;
 
 /** The rule that applies to a photo in `folderId`: its own folder's, else the nearest inheriting ancestor's. */
 export function applicableRule<R extends { scope: FolderDateRuleScope }>(
