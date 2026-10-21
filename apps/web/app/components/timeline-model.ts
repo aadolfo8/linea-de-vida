@@ -38,6 +38,16 @@ export function photoDateLabel(photo: Pick<TimelinePhoto, 'effectiveDate'>) {
   return photoDateFormats[precision].format(date);
 }
 
+/** What the archive really knows about a photo's date, as a short chip. */
+export function photoPrecisionLabel(photo: Pick<TimelinePhoto, 'effectiveDate'>) {
+  const { value, precision } = photo.effectiveDate;
+  if (!value) return null;
+  if (precision === 'DAY') return 'Día exacto';
+  if (precision === 'MONTH') return 'Día sin concretar';
+  if (precision === 'YEAR') return 'Mes sin concretar';
+  return null;
+}
+
 export type TimelineYearItem = { year: number; photoCount: number };
 
 export type TimelineYearsPage = {
@@ -56,6 +66,17 @@ export type TimelineYearSummary = {
   previews: TimelinePhoto[];
 };
 
+/** One constellation of a year: a month with photos, or the group of photos without a month. */
+export type TimelineMonthPreview = {
+  month: number | null;
+  kind: 'MONTH' | 'YEAR';
+  label: string | null;
+  photoCount: number;
+  previews: TimelinePhoto[];
+};
+
+export type TimelineMonthPreviews = { year: number; items: TimelineMonthPreview[] };
+
 export type TimelinePhotoPage = { items: TimelinePhoto[]; nextCursor: string | null };
 export type TimelineMonth = number | 'sin-mes';
 
@@ -64,12 +85,6 @@ export type TimelineRouteState = {
   month: number | null;
   unknown: boolean;
   invalid: boolean;
-};
-
-export type TimelineYearSelection = {
-  scope: string;
-  visualYear: number | null;
-  settledYear: number | null;
 };
 
 const validYear = (value: string) => {
@@ -136,114 +151,20 @@ export const monthFormatter = new Intl.DateTimeFormat('es', {
 export const monthLabel = (month: number) =>
   monthFormatter.format(new Date(Date.UTC(2024, month - 1)));
 
-export function isCurrentTimelineRequest(requestId: number, latestRequestId: number) {
-  return requestId === latestRequestId;
-}
+export const capitalize = (value: string) => value.charAt(0).toUpperCase() + value.slice(1);
 
-export function resolveInitialTimelineYear(
-  years: Pick<TimelineYearsPage, 'items' | 'latestYear'> | null,
-  routeYear: number | null,
-) {
-  if (!years?.items.length) return routeYear;
-  if (routeYear && years.items.some((item) => item.year === routeYear)) return routeYear;
-  if (years.latestYear && years.items.some((item) => item.year === years.latestYear))
-    return years.latestYear;
-  return years.items.at(-1)?.year ?? null;
-}
+/** "Agosto", the way a month heads its constellation. */
+export const monthTitle = (month: number) => capitalize(monthLabel(month));
 
-export function resolveTimelineYearSelection(
-  years: TimelineYearsPage | null,
-  routeYear: number | null,
-  current: TimelineYearSelection | null = null,
-): TimelineYearSelection {
-  const scope = [
-    routeYear ?? 'root',
-    years ? (years.firstYear ?? 'empty') : 'pending',
-    years ? (years.lastYear ?? 'empty') : 'pending',
-    years ? (years.latestYear ?? 'empty') : 'pending',
-    years?.items.length ?? 0,
-  ].join(':');
-  if (current?.scope === scope) return current;
+export const photoCountLabel = (count: number) =>
+  `${count.toLocaleString('es-ES')} ${count === 1 ? 'foto' : 'fotos'}`;
 
-  const initialYear = resolveInitialTimelineYear(years, routeYear);
-  return { scope, visualYear: initialYear, settledYear: initialYear };
-}
-
-export function temporalSelectionIndex(
-  items: readonly { key: string }[],
-  selectedKey: string | null,
-) {
-  const selectedIndex = selectedKey ? items.findIndex((item) => item.key === selectedKey) : -1;
-  return selectedIndex >= 0 ? selectedIndex : 0;
-}
-
-export type TimelineGalleryRow<T> = {
-  entries: { item: T; index: number; span: number }[];
-};
-
-const galleryRowSpans = [
-  [7, 5],
-  [4, 3, 5],
-  [5, 7],
-] as const;
-
-export function groupTimelineGalleryRows<T>(items: readonly T[]): TimelineGalleryRow<T>[] {
-  const rows: TimelineGalleryRow<T>[] = [];
-  let index = 0;
-  let patternIndex = 0;
-
-  while (index < items.length) {
-    const remaining = items.length - index;
-    const spans =
-      remaining === 1
-        ? ([12] as const)
-        : remaining === 2
-          ? ([7, 5] as const)
-          : remaining === 3
-            ? ([4, 3, 5] as const)
-            : remaining === 4
-              ? ([7, 5] as const)
-              : galleryRowSpans[patternIndex % galleryRowSpans.length];
-
-    rows.push({
-      entries: spans.map((span, offset) => ({
-        item: items[index + offset]!,
-        index: index + offset,
-        span,
-      })),
-    });
-    index += spans.length;
-    patternIndex += 1;
-  }
-
-  return rows;
-}
-
-export function shouldStartTimelineRequest({
-  reset,
-  loading,
-  cooldownUntil,
-  now,
-}: {
-  reset: boolean;
-  loading: boolean;
-  cooldownUntil: number;
-  now: number;
-}) {
-  return reset || (!loading && now >= cooldownUntil);
-}
+export const monthCountLabel = (count: number) => `${count} ${count === 1 ? 'mes' : 'meses'}`;
 
 export function wrappedFocusIndex(currentIndex: number, length: number, backwards: boolean) {
   if (length <= 0) return -1;
   if (currentIndex < 0) return backwards ? length - 1 : 0;
   return (currentIndex + (backwards ? -1 : 1) + length) % length;
-}
-
-export function shouldCommitTemporalSelection(
-  committed: string | number | null,
-  settled: string | number,
-) {
-  return committed !== settled;
 }
 
 export async function collectTimelineYears(

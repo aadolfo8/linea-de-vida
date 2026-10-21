@@ -12,6 +12,12 @@
   --color-map-muted: #435d64;
   --color-map-danger: #963f32;
   --font-sans: ui-sans-serif, system-ui, sans-serif;
+  /* Night sky: only used by the timeline (see components/sky/sky.css). */
+  --color-sky-ink: #05070d;
+  --color-sky-ink-2: #0b0f1a;
+  --color-sky-fg: #e8ecf4;
+  --color-sky-mute: #8790a4;
+  --color-sky-accent: #cfe0ff;
 }
 
 :root {
@@ -91,36 +97,10 @@ input:focus-visible {
   outline: 3px solid var(--map-active);
   outline-offset: 3px;
 }
-body:has(.experience),
-body:has(.timeline-immersive-shell) {
-  background: var(--map-paper);
-}
-.timeline-immersive-shell[data-route-depth='month'] .archive-nav {
-  position: relative;
-  top: auto;
-}
-.timeline-immersive-shell .archive-nav a,
-.timeline-immersive-shell nav[aria-label='Vista de la cronología'],
-.timeline-immersive-shell :is(a, button) {
-  min-width: 44px;
-  min-height: 44px;
-}
-.timeline-immersive-shell nav[aria-label='Vista de la cronología'] {
-  position: relative;
-}
-.timeline-photo-dialog :is(button, a) {
-  min-width: 44px;
-  min-height: 44px;
-}
-body:has(.timeline-immersive-shell) .session-status {
-  color: var(--map-muted);
-}
-body:has(.timeline-immersive-shell) .session-status span {
-  background: var(--map-route);
-}
-body:has(.timeline-immersive-shell) button:focus-visible,
-body:has(.timeline-immersive-shell) a:focus-visible {
-  outline-color: var(--map-active);
+/* The night sky of the timeline paints the page behind it, so no light flash shows at the edges. */
+html:has(.sky),
+body:has(.sky) {
+  background: var(--color-sky-ink);
 }
 @media (max-width: 680px) {
   .session-status {
