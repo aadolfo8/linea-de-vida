@@ -11,7 +11,6 @@ import {
   useState,
   type CSSProperties,
 } from 'react';
-import { createPortal } from 'react-dom';
 import { api } from '../../../lib/api';
 import { subscribeArchiveIndexUpdated } from '../../../lib/archive-index-events';
 import { thumbnailVariantUrl } from '../../../lib/media';
@@ -26,7 +25,7 @@ import {
   type TimelineMonthPreviews,
   type TimelinePhoto,
 } from '../timeline-model';
-import { TimelinePhotoViewer } from '../TimelinePhotoViewer';
+import { TimelinePhotoViewer, type ViewerSource } from '../TimelinePhotoViewer';
 import { useTimelinePosition } from '../useTimelinePosition';
 import './month.css';
 import { SkyHint } from './SkyChrome';
@@ -169,6 +168,22 @@ export function MonthDepth({
     if (index >= 0) setViewerIndex(index);
   }, []);
 
+  // The viewer grows from, and shrinks back to, the tile of the photo it shows.
+  const viewerSource = useMemo<ViewerSource>(() => {
+    const tileOf = (photoId: string) =>
+      [...document.querySelectorAll<HTMLElement>('button.sky-ph')].find(
+        (tile) => tile.dataset.photoId === photoId,
+      ) ?? null;
+    return {
+      rectOf: (photoId) => tileOf(photoId)?.getBoundingClientRect() ?? null,
+      focusTile: (photoId) => {
+        const tile = tileOf(photoId);
+        tile?.focus({ preventScroll: true });
+        return tile !== null;
+      },
+    };
+  }, []);
+
   // While the viewer is open the sky stays put behind it.
   const viewerOpen = viewerIndex !== null;
   useEffect(() => {
@@ -261,16 +276,18 @@ export function MonthDepth({
         <SkyRail entries={rail} label="Saltar a un día" />
         <SkyHint text={`Pulsa una foto para abrirla · Esc para volver a ${year}`} />
       </SkyOverlay>
-      {viewerOpen &&
-        createPortal(
+      {viewerOpen && (
+        <SkyOverlay>
           <TimelinePhotoViewer
             photos={photos}
             initialIndex={viewerIndex!}
+            total={total}
+            source={viewerSource}
             loadMore={cursor ? loadMoreForViewer : undefined}
             onClose={() => setViewerIndex(null)}
-          />,
-          document.body,
-        )}
+          />
+        </SkyOverlay>
+      )}
     </>
   );
 }

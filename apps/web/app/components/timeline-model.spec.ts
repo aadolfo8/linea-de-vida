@@ -6,6 +6,7 @@ import {
   parseTimelineRoute,
   photoAspectRatio,
   photoDateLabel,
+  photoPrecisionLabel,
   resolveInitialTimelineYear,
   resolveTimelineYearSelection,
   shouldCommitTemporalSelection,
@@ -39,6 +40,17 @@ describe('timeline route state', () => {
     expect(photoDateLabel({ effectiveDate: { value: null, precision: 'UNKNOWN' } })).toBe(
       'Fecha no disponible',
     );
+  });
+
+  it('names the precision of a date without claiming more than is known', () => {
+    const at = (precision: 'DAY' | 'MONTH' | 'YEAR' | 'UNKNOWN') => ({
+      effectiveDate: { value: '2024-01-01T00:00:00.000Z', precision },
+    });
+    expect(photoPrecisionLabel(at('DAY'))).toBe('Día exacto');
+    expect(photoPrecisionLabel(at('MONTH'))).toBe('Día sin concretar');
+    expect(photoPrecisionLabel(at('YEAR'))).toBe('Mes sin concretar');
+    expect(photoPrecisionLabel(at('UNKNOWN'))).toBeNull();
+    expect(photoPrecisionLabel({ effectiveDate: { value: null, precision: 'DAY' } })).toBeNull();
   });
 
   it('generates canonical query-free routes for every timeline level', () => {

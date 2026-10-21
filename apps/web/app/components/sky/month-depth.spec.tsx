@@ -20,6 +20,11 @@ const viewer = vi.hoisted(() => ({
     photos: { id: string }[];
     initialIndex: number;
     loadMore?: () => Promise<{ items: { id: string }[]; nextCursor: string | null } | null>;
+    total?: number | null;
+    source?: {
+      rectOf: (id: string) => { left: number; width: number } | null;
+      focusTile?: (id: string) => boolean;
+    };
     onClose: () => void;
   },
 }));
@@ -369,6 +374,31 @@ describe('MonthDepth', () => {
 
     await act(async () => viewer.props!.onClose());
     expect(container.ownerDocument.querySelector('[role="dialog"]')).toBeNull();
+  });
+
+  it('lets the viewer find the tile of a photo to grow from and to give focus back to', async () => {
+    cache.loadGalleryPage.mockResolvedValue(page([day('a', 14), day('b', 14)], null));
+    await mount();
+    await act(async () => tiles()[1]!.click());
+
+    expect(viewer.props!.total).toBe(214);
+    const tile = tiles()[1]!;
+    vi.spyOn(tile, 'getBoundingClientRect').mockReturnValue({
+      left: 120,
+      top: 40,
+      right: 320,
+      bottom: 170,
+      width: 200,
+      height: 130,
+      x: 120,
+      y: 40,
+      toJSON: () => ({}),
+    });
+    expect(viewer.props!.source!.rectOf('b')).toMatchObject({ left: 120, width: 200 });
+    expect(viewer.props!.source!.rectOf('missing')).toBeNull();
+    expect(viewer.props!.source!.focusTile!('b')).toBe(true);
+    expect(document.activeElement).toBe(tile);
+    expect(viewer.props!.source!.focusTile!('missing')).toBe(false);
   });
 
   it('plays the pending travel into this depth and consumes it', async () => {
