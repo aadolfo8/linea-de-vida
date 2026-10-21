@@ -1,7 +1,7 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { DatePrecision, DateSource, FolderDateRuleScope } from '@prisma/client';
 import { PrismaService } from './prisma.service';
-import { applicableRule, overridesDetectedDates } from './folder-rule-scope';
+import { FolderWithRule, applicableRule, overridesDetectedDates } from './folder-rule-scope';
 import { chunk, parsePhotoIds } from './photo-ids';
 
 export const MANUAL_DATE_BULK_LIMIT = 50;
@@ -296,20 +296,7 @@ export class ManualDateService {
   async clearMany(userId: string, rawIds: unknown) {
     const ids = parsePhotoIds(rawIds);
     const results: ClearDateResult[] = [];
-    const foldersBySource = new Map<
-      string,
-      Map<
-        string,
-        {
-          parentId: string | null;
-          dateRule: {
-            dateValue: Date;
-            precision: DatePrecision;
-            scope: FolderDateRuleScope;
-          } | null;
-        }
-      >
-    >();
+    const foldersBySource = new Map<string, Map<string, FolderWithRule>>();
     for (const batch of chunk(ids, BATCH_CHUNK)) {
       try {
         const outcome = await this.prisma.$transaction(async (tx) => {
