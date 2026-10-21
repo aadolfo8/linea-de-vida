@@ -52,9 +52,7 @@ async function depthMock() {
       React.createElement('button', null, 'Cargar más fotografías'),
     );
 }
-vi.mock('./ImmersiveTimelineExperience', async () => ({
-  ImmersiveTimelineExperience: await depthMock(),
-}));
+vi.mock('./sky/MonthDepth', async () => ({ MonthDepth: await depthMock() }));
 vi.mock('./sky/YearsDepth', async () => ({ YearsDepth: await depthMock() }));
 vi.mock('./sky/YearDepth', async () => ({ YearDepth: await depthMock() }));
 
@@ -106,19 +104,13 @@ describe('Timeline shell targets', () => {
     });
   });
 
-  it('exposes month-gallery depth and releases both shell controls from sticky positioning', async () => {
+  it('exposes the month depth inside the same sky stage as the other depths', async () => {
     navigation.pathname = '/timeline/2018/5';
     await act(async () => renderRoute());
 
-    const shell = container.querySelector<HTMLElement>('[data-route-depth="month"]');
-    const archiveNav = container.querySelector<HTMLElement>('.archive-nav');
-    const modeBar = container.querySelector<HTMLElement>(
-      'nav[aria-label="Vista de la cronología"]',
-    );
-
-    expect(shell).not.toBeNull();
-    expect(window.getComputedStyle(archiveNav!).position).toBe('relative');
-    expect(window.getComputedStyle(modeBar!).position).toBe('relative');
+    expect(container.querySelector('[data-route-depth="month"]')).not.toBeNull();
+    expect(container.querySelector('.sky canvas')).not.toBeNull();
+    expect(container.querySelector('.sky-bar')?.className).not.toContain('sky-bar-static');
   });
 
   for (const pathname of [
@@ -313,7 +305,7 @@ describe('Timeline shell targets', () => {
     expect(container.querySelector('button[aria-label="Volver a Años"]')).not.toBeNull();
   });
 
-  it('remembers the travel orientation and keeps the legacy month gallery without a stage', async () => {
+  it('remembers the travel orientation and keeps it at the month depth', async () => {
     await act(async () => renderRoute());
     const horizontal = container.querySelector<HTMLButtonElement>(
       '[aria-label="Orientación de la línea"] button[title="Horizontal"]',
@@ -324,8 +316,7 @@ describe('Timeline shell targets', () => {
 
     navigation.pathname = '/timeline/2018/5';
     await act(async () => renderRoute());
-    expect(container.querySelector('.sky-paper')).not.toBeNull();
-    expect(container.querySelector('canvas')).toBeNull();
+    expect(container.querySelector('.sky')?.getAttribute('data-orientation')).toBe('horizontal');
     window.localStorage.clear();
   });
 });

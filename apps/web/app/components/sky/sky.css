@@ -418,29 +418,6 @@
   }
 }
 
-/* The month depth still shows the paper gallery (until the sky replaces it) inside the dark shell. */
-.sky-bar.sky-bar-static {
-  position: relative;
-  inset: auto;
-  margin: 14px max(16px, env(safe-area-inset-left, 0px));
-}
-.sky-paper {
-  margin-top: 14px;
-  overflow: clip;
-  border-radius: 28px 28px 0 0;
-  color: var(--map-ink);
-  color-scheme: light;
-}
-.sky-paper :focus-visible {
-  outline: 3px solid var(--map-active);
-  outline-offset: 3px;
-}
-@media (max-width: 640px) {
-  .sky-paper {
-    border-radius: 18px 18px 0 0;
-  }
-}
-
 /* Skip link and the way back to Organizar, both quiet over the sky. */
 .sky-skip {
   position: fixed;
@@ -487,10 +464,4 @@
   color: var(--sky-accent);
   font-weight: 600;
   text-underline-offset: 4px;
-}
-.sky-return.sky-return-static {
-  position: relative;
-  inset: auto;
-  margin: 0 max(16px, env(safe-area-inset-left, 0px));
-  max-width: none;
 }
