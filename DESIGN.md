@@ -44,7 +44,7 @@ Photos are shown unfiltered. The viewer is the one place that goes to pure black
 
 ### Type
 
-Loaded with `next/font/google` in `timeline/layout.tsx`.
+Loaded with `next/font/google` in `app/fonts.ts`.
 
 | Token           | Face         | Role                                                                           |
 | --------------- | ------------ | ------------------------------------------------------------------------------ |
@@ -117,6 +117,15 @@ With `prefers-reduced-motion` (read through `useReducedMotion`):
 ## Privacy and data
 
 Media is requested only through the session-guarded API proxy, with `width=640|1280` thumbnail variants and the original only in the viewer. The timeline is read-only: it never changes Drive. Cached archive data is invalidated on the archive-index update event.
+
+## Sign-in
+
+`/` (`app/page.tsx`, `welcome.css`) lives in the same sky: `<main class="sky sky-scope welcome">` with the shared starfield (`useStarfield`, built on `starfield.ts`: DPR capped at 2, ~30 fps, paused while the tab is hidden, drawn once under reduced motion) and a faint thread of diamond nodes as decoration. No photographs and no family data appear before sign-in.
+
+- Brand "Línea de vida" in `--sky-display` at large scale with an outline stroke like the year numerals; one purpose line; the primary action "Iniciar sesión con Google" as a light pill button (56px high); three guarantees as mono labels with diamond markers.
+- States are unchanged: session check redirects to `/timeline`; OAuth notices from `?oauth=` and errors render as `role="alert"` and are linked to the button with `aria-describedby`; the development login appears only when Google authorization is unavailable.
+- The sky fonts are declared once in `app/fonts.ts` and exposed as CSS variables on `<body>` by the root layout; the palette stays scoped to `.sky` / `.sky-scope`.
+- The page fits one screen (`min-height: 100dvh`) and scrolls when zoomed or short.
 
 ## Out of scope
 
