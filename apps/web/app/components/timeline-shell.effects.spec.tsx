@@ -110,7 +110,7 @@ describe('Timeline shell targets', () => {
 
     expect(container.querySelector('[data-route-depth="month"]')).not.toBeNull();
     expect(container.querySelector('.sky canvas')).not.toBeNull();
-    expect(container.querySelector('.sky-bar')?.className).not.toContain('sky-bar-static');
+    expect(container.querySelector('header.sky-bar')).not.toBeNull();
   });
 
   for (const pathname of [

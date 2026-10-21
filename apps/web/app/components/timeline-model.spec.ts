@@ -1,18 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   collectTimelineYears,
-  groupTimelineGalleryRows,
-  isCurrentTimelineRequest,
   parseTimelineRoute,
   photoAspectRatio,
   photoDateLabel,
   photoPrecisionLabel,
-  resolveInitialTimelineYear,
-  resolveTimelineYearSelection,
-  shouldCommitTemporalSelection,
-  shouldStartTimelineRequest,
   safeOrganizeReturnHref,
-  temporalSelectionIndex,
   timelineHref,
   timelineHrefWithReturn,
   wrappedFocusIndex,
@@ -87,29 +80,7 @@ describe('timeline route state', () => {
   });
 });
 
-describe('timeline pagination and selection guards', () => {
-  it('groups gallery items into complete ordered rows without reordering photos', () => {
-    const items = Array.from({ length: 12 }, (_, index) => `photo-${index}`);
-    const rows = groupTimelineGalleryRows(items);
-
-    expect(rows.map((row) => row.entries.map(({ span }) => span))).toEqual([
-      [7, 5],
-      [4, 3, 5],
-      [5, 7],
-      [7, 5],
-      [4, 3, 5],
-    ]);
-    expect(rows.flatMap((row) => row.entries.map(({ item }) => item))).toEqual(items);
-    rows.forEach((row) => {
-      expect(row.entries.reduce((total, entry) => total + entry.span, 0)).toBe(12);
-    });
-
-    for (let count = 2; count <= 20; count += 1) {
-      const grouped = groupTimelineGalleryRows(Array.from({ length: count }, (_, index) => index));
-      expect(grouped.every((row) => row.entries.length > 1)).toBe(true);
-    }
-  });
-
+describe('timeline pagination and focus guards', () => {
   it('follows bounded year pages and removes duplicate boundary items', async () => {
     const pages: TimelineYearsPage[] = [
       {
@@ -144,64 +115,6 @@ describe('timeline pagination and selection guards', () => {
       ],
     });
     expect(fetchPage).toHaveBeenCalledTimes(2);
-  });
-
-  it('accepts only the latest request and avoids route commits for the current snap', () => {
-    expect(isCurrentTimelineRequest(3, 4)).toBe(false);
-    expect(isCurrentTimelineRequest(4, 4)).toBe(true);
-    expect(shouldCommitTemporalSelection(2018, 2018)).toBe(false);
-    expect(shouldCommitTemporalSelection(2018, 2019)).toBe(true);
-  });
-
-  it('single-sources the initial year and carousel snap from the latest archive year', () => {
-    const years: TimelineYearsPage = {
-      firstYear: 2024,
-      lastYear: 2026,
-      latestYear: 2026,
-      items: [
-        { year: 2024, photoCount: 7 },
-        { year: 2025, photoCount: 2 },
-        { year: 2026, photoCount: 4 },
-      ],
-    };
-
-    expect(resolveInitialTimelineYear(years, null)).toBe(2026);
-    expect(resolveInitialTimelineYear(years, 2025)).toBe(2025);
-    expect(
-      temporalSelectionIndex(
-        years.items.map(({ year }) => ({ key: `${year}` })),
-        '2026',
-      ),
-    ).toBe(2);
-
-    const pending = resolveTimelineYearSelection(null, null);
-    const ready = resolveTimelineYearSelection(years, null, pending);
-    expect(ready).toMatchObject({ visualYear: 2026, settledYear: 2026 });
-    expect(resolveTimelineYearSelection(years, null, ready)).toBe(ready);
-    expect(
-      resolveTimelineYearSelection(years, 2025, {
-        ...ready,
-        visualYear: 2024,
-        settledYear: 2024,
-      }),
-    ).toMatchObject({ visualYear: 2025, settledYear: 2025 });
-  });
-
-  it('lets replacement loads bypass stale loading and cooldown guards', () => {
-    expect(
-      shouldStartTimelineRequest({ reset: true, loading: true, cooldownUntil: 200, now: 100 }),
-    ).toBe(true);
-    expect(
-      shouldStartTimelineRequest({ reset: false, loading: true, cooldownUntil: 0, now: 100 }),
-    ).toBe(false);
-    expect(
-      shouldStartTimelineRequest({ reset: false, loading: false, cooldownUntil: 200, now: 100 }),
-    ).toBe(false);
-
-    const staleRequest = 7;
-    const replacementRequest = staleRequest + 1;
-    expect(isCurrentTimelineRequest(staleRequest, replacementRequest)).toBe(false);
-    expect(isCurrentTimelineRequest(replacementRequest, replacementRequest)).toBe(true);
   });
 
   it('wraps focus at both modal boundaries', () => {

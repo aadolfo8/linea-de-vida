@@ -97,31 +97,10 @@ input:focus-visible {
   outline: 3px solid var(--map-active);
   outline-offset: 3px;
 }
-body:has(.experience) {
-  background: var(--map-paper);
-}
+/* The night sky of the timeline paints the page behind it, so no light flash shows at the edges. */
 html:has(.sky),
-html:has(.timeline-immersive-shell),
-body:has(.sky),
-body:has(.timeline-immersive-shell) {
+body:has(.sky) {
   background: var(--color-sky-ink);
-}
-.timeline-immersive-shell[data-route-depth='month'] .archive-nav {
-  position: relative;
-  top: auto;
-}
-.timeline-immersive-shell .archive-nav a,
-.timeline-immersive-shell nav[aria-label='Vista de la cronología'],
-.timeline-immersive-shell :is(a, button) {
-  min-width: 44px;
-  min-height: 44px;
-}
-.timeline-immersive-shell nav[aria-label='Vista de la cronología'] {
-  position: relative;
-}
-.timeline-photo-dialog :is(button, a) {
-  min-width: 44px;
-  min-height: 44px;
 }
 @media (max-width: 680px) {
   .session-status {
