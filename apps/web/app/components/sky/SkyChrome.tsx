@@ -25,7 +25,7 @@ export function SkyChrome({
   orientation,
   onOrientationChange,
   actions,
-  showTitle = true,
+  placement = 'fixed',
 }: {
   crumbs: SkyCrumb[];
   onTravel: TravelTo;
@@ -33,7 +33,8 @@ export function SkyChrome({
   orientation?: SkyOrientation;
   onOrientationChange?: (orientation: SkyOrientation) => void;
   actions?: ReactNode;
-  showTitle?: boolean;
+  /** Static sits in the page flow (depths without a stage); fixed floats over the sky. */
+  placement?: 'fixed' | 'static';
 }) {
   const parent = crumbs.length > 1 ? crumbs[crumbs.length - 2]! : null;
   const goUp = (event: MouseEvent<HTMLElement>, crumb: SkyCrumb) => {
@@ -43,17 +44,11 @@ export function SkyChrome({
   };
 
   return (
-    <header className="sky-bar">
+    <header className={placement === 'static' ? 'sky-bar sky-bar-static' : 'sky-bar'}>
       <div className="sky-where">
-        {showTitle && (
-          <Link
-            className="sky-brand"
-            href="/timeline"
-            aria-label="Línea de vida, ir a la cronología"
-          >
-            Línea de vida
-          </Link>
-        )}
+        <Link className="sky-brand" href="/timeline" aria-label="Línea de vida, ir a la cronología">
+          Línea de vida
+        </Link>
         <div className="sky-crumbs">
           {parent?.href && (
             <button

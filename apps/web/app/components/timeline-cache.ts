@@ -3,6 +3,7 @@ import { subscribeArchiveIndexUpdated } from '../../lib/archive-index-events';
 import {
   collectTimelineYears,
   type TimelineMonth,
+  type TimelineMonthPreviews,
   type TimelinePhotoPage,
   type TimelineYearSummary,
   type TimelineYearsPage,
@@ -10,6 +11,7 @@ import {
 
 const TTL = 5 * 60 * 1000;
 const MAX_SUMMARIES = 12;
+const MAX_MONTH_PREVIEWS = 12;
 const MAX_GALLERIES = 6;
 const MAX_CACHED_PHOTOS = 1800;
 
@@ -21,6 +23,7 @@ type GalleryEntry = {
 };
 
 const summaries = new Map<number, CacheEntry<TimelineYearSummary>>();
+const monthPreviews = new Map<number, CacheEntry<TimelineMonthPreviews>>();
 let years: CacheEntry<TimelineYearsPage> | null = null;
 const galleries = new Map<string, GalleryEntry>();
 const inFlight = new Map<string, Promise<unknown>>();
@@ -59,6 +62,31 @@ export async function loadYearSummary(year: number) {
         if (revision === archiveRevision) {
           summaries.set(year, { value: data, expiresAt: Date.now() + TTL });
           pruneCache(summaries, MAX_SUMMARIES);
+        }
+        return data;
+      })
+      .finally(() => inFlight.delete(key));
+    inFlight.set(key, pending);
+  }
+  return pending;
+}
+
+export function getCachedMonthPreviews(year: number) {
+  return readCache(monthPreviews, year);
+}
+
+export function loadMonthPreviews(year: number) {
+  const cached = getCachedMonthPreviews(year);
+  if (cached) return Promise.resolve(cached);
+  const key = `month-previews:${archiveRevision}:${year}`;
+  let pending = inFlight.get(key) as Promise<TimelineMonthPreviews> | undefined;
+  if (!pending) {
+    const revision = archiveRevision;
+    pending = apiJson<TimelineMonthPreviews>(`/timeline/years/${year}/month-previews`)
+      .then((data) => {
+        if (revision === archiveRevision) {
+          monthPreviews.set(year, { value: data, expiresAt: Date.now() + TTL });
+          pruneCache(monthPreviews, MAX_MONTH_PREVIEWS);
         }
         return data;
       })
@@ -134,6 +162,7 @@ export function loadGalleryPage(year: number, month: TimelineMonth, cursor: stri
 export function invalidateTimelineCache() {
   archiveRevision += 1;
   summaries.clear();
+  monthPreviews.clear();
   years = null;
   galleries.clear();
   galleryCachedPhotos = 0;

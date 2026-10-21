@@ -1,6 +1,7 @@
 'use client';
 
 import { useReducedMotion } from 'motion/react';
+import { createPortal } from 'react-dom';
 import {
   createContext,
   useContext,
@@ -14,6 +15,7 @@ import {
 } from 'react';
 import type { SkyOrientation } from './orientation';
 import { SkyEngine, type SkyFrame, type SkyItem } from './sky-engine';
+import { registerSkyStage } from './sky-registry';
 import './sky.css';
 
 type SkyContextValue = {
@@ -24,14 +26,11 @@ type SkyContextValue = {
   reduced: boolean;
   worldRef: RefObject<HTMLDivElement | null>;
   trackRef: RefObject<HTMLDivElement | null>;
+  /** Fixed layer above the moving track, for chrome that must not travel with it. */
+  overlayNode: HTMLDivElement | null;
 };
 
 const SkyContext = createContext<SkyContextValue | null>(null);
-
-/** Travel and chrome also work on depths that render without a stage. */
-export function useOptionalSky() {
-  return useContext(SkyContext);
-}
 
 export function useSky() {
   const context = useContext(SkyContext);
@@ -77,6 +76,12 @@ export function useSkyMeasure(callback: () => void) {
   useEffect(() => engine.onMeasure(() => latest.current()), [engine]);
 }
 
+/** Renders fixed chrome (rail, hint) from inside a depth, outside the transformed track. */
+export function SkyOverlay({ children }: { children: ReactNode }) {
+  const { overlayNode } = useSky();
+  return overlayNode ? createPortal(children, overlayNode) : null;
+}
+
 const readViewport = () =>
   typeof window === 'undefined'
     ? { width: 1280, height: 800 }
@@ -99,6 +104,7 @@ export function SkyStage({
   const [engine] = useState(() => new SkyEngine());
   const reduced = useReducedMotion() ?? false;
   const [viewport, setViewport] = useState(readViewport);
+  const [overlayNode, setOverlayNode] = useState<HTMLDivElement | null>(null);
   const scrollerRef = useRef<HTMLElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const worldRef = useRef<HTMLDivElement>(null);
@@ -112,7 +118,11 @@ export function SkyStage({
     if (!scroller || !canvas || !world || !track) return;
     engine.configure({ orientation, reduced });
     engine.attach({ scroller, canvas, world, track });
-    return () => engine.detach();
+    const unregister = registerSkyStage({ engine, world });
+    return () => {
+      unregister();
+      engine.detach();
+    };
     // Orientation and motion changes are applied by the effect below.
   }, [engine]);
 
@@ -142,14 +152,21 @@ export function SkyStage({
       reduced,
       worldRef,
       trackRef,
+      overlayNode,
     }),
-    [engine, onOrientationChange, orientation, reduced, viewport],
+    [engine, onOrientationChange, orientation, overlayNode, reduced, viewport],
   );
 
   return (
     <SkyContext.Provider value={value}>
       <div className="sky" data-orientation={orientation} data-reduced={reduced ? 'true' : 'false'}>
-        <main ref={scrollerRef} className="sky-scroller" aria-label={label}>
+        <main
+          ref={scrollerRef}
+          id="timeline-main"
+          tabIndex={-1}
+          className="sky-scroller"
+          aria-label={label}
+        >
           <div className="sky-sticky">
             <canvas ref={canvasRef} className="sky-canvas" aria-hidden="true" />
             <div ref={worldRef} className="sky-world">
@@ -159,7 +176,9 @@ export function SkyStage({
             </div>
           </div>
         </main>
-        {overlay}
+        <div ref={setOverlayNode} className="sky-overlay">
+          {overlay}
+        </div>
       </div>
     </SkyContext.Provider>
   );

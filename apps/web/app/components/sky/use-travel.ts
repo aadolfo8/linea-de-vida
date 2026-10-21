@@ -2,7 +2,8 @@
 
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useLayoutEffect, useRef } from 'react';
-import { useOptionalSky, useSky } from './SkyStage';
+import { activeSkyStage } from './sky-registry';
+import { useSky } from './SkyStage';
 import {
   consumeTravelEntry,
   setPendingTravel,
@@ -31,7 +32,6 @@ const EXIT_GUARD = 3500;
  */
 export function useTravel(): TravelTo {
   const router = useRouter();
-  const sky = useOptionalSky();
   const travelling = useRef(false);
 
   return useCallback(
@@ -43,19 +43,22 @@ export function useTravel(): TravelTo {
       const origin = travelCenterOf(originEl);
       setPendingTravel({ mode, origin, landKey });
 
-      const world = sky?.worldRef.current;
-      const animates = Boolean(sky && world && !sky.reduced && typeof world.animate === 'function');
-      const finish = async () => {
-        if (sky && world && animates) {
-          sky.engine.busy = true;
-          sky.engine.startWarp(mode === 'in' ? 1 : -1);
+      const stage = activeSkyStage();
+      const world = stage?.world;
+      const animates = Boolean(
+        stage && world && !stage.engine.reduced && typeof world.animate === 'function',
+      );
+      const go = async () => {
+        if (stage && world && animates) {
+          stage.engine.busy = true;
+          stage.engine.startWarp(mode === 'in' ? 1 : -1);
           world.style.transformOrigin = `${origin.x}px ${origin.y}px`;
           const { keyframes, options } = travelAnimation('exit', mode);
           await world.animate(keyframes, options).finished.catch(() => undefined);
           window.setTimeout(() => {
             if (window.location.pathname !== target.pathname) {
               world.getAnimations().forEach((animation) => animation.cancel());
-              sky.engine.busy = false;
+              stage.engine.busy = false;
               setPendingTravel(null);
             }
           }, EXIT_GUARD);
@@ -63,9 +66,9 @@ export function useTravel(): TravelTo {
         router.push(href, { scroll: false });
         travelling.current = false;
       };
-      void finish();
+      void go();
     },
-    [router, sky],
+    [router],
   );
 }
 

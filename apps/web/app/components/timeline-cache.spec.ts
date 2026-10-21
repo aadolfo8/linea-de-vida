@@ -5,10 +5,12 @@ vi.mock('../../lib/api', () => ({ apiJson }));
 
 import {
   getCachedGallery,
+  getCachedMonthPreviews,
   getCachedTimelineYears,
   getCachedYearSummary,
   invalidateTimelineCache,
   loadGalleryPage,
+  loadMonthPreviews,
   loadTimelineYears,
   loadYearSummary,
 } from './timeline-cache';
@@ -73,5 +75,47 @@ describe('timeline data cache', () => {
     resolveRequest({ items: [photo('old')], nextCursor: null });
     await pending;
     expect(getCachedGallery(2026, 3)).toBeNull();
+  });
+
+  it('deduplicates and caches month previews, then forgets them when the archive changes', async () => {
+    const data = {
+      year: 2004,
+      items: [
+        { month: 8, kind: 'MONTH' as const, label: null, photoCount: 3, previews: [photo('a')] },
+      ],
+    };
+    apiJson.mockResolvedValue(data);
+    const [a, b] = await Promise.all([loadMonthPreviews(2004), loadMonthPreviews(2004)]);
+    expect(a).toBe(data);
+    expect(b).toBe(data);
+    expect(apiJson).toHaveBeenCalledTimes(1);
+    expect(apiJson).toHaveBeenCalledWith('/timeline/years/2004/month-previews');
+    expect(getCachedMonthPreviews(2004)).toBe(data);
+    await expect(loadMonthPreviews(2004)).resolves.toBe(data);
+    expect(apiJson).toHaveBeenCalledTimes(1);
+
+    invalidateTimelineCache();
+    expect(getCachedMonthPreviews(2004)).toBeNull();
+  });
+
+  it('expires month previews after the cache lifetime and ignores stale responses', async () => {
+    vi.useFakeTimers();
+    try {
+      const data = { year: 2004, items: [] };
+      apiJson.mockResolvedValue(data);
+      await loadMonthPreviews(2004);
+      vi.advanceTimersByTime(5 * 60 * 1000 + 1);
+      expect(getCachedMonthPreviews(2004)).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+
+    let resolveRequest!: (value: unknown) => void;
+    apiJson.mockImplementation(() => new Promise((resolve) => (resolveRequest = resolve)));
+    const pending = loadMonthPreviews(1999);
+    invalidateTimelineCache();
+    resolveRequest({ year: 1999, items: [] });
+    await pending;
+    expect(getCachedMonthPreviews(1999)).toBeNull();
   });
 });

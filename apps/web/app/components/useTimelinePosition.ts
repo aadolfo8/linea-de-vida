@@ -4,11 +4,19 @@ import { useEffect } from 'react';
 
 const positions = new Map<string, number>();
 
-/** Keep each temporal destination's position while its asynchronous gallery returns. */
-export function useTimelinePosition(path: string) {
+/**
+ * Keep each temporal destination's position while its asynchronous content returns. A depth
+ * with nothing to restore starts at the top, because the document outlives route changes.
+ * Pass `restorePosition: false` when something else (landing on a group) decides the position.
+ */
+export function useTimelinePosition(
+  path: string,
+  { restorePosition = true }: { restorePosition?: boolean } = {},
+) {
   useEffect(() => {
-    const target = positions.get(path) ?? 0;
+    const target = restorePosition ? (positions.get(path) ?? 0) : 0;
     let restoring = target > 0;
+    if (!restoring && window.scrollY > 0) window.scrollTo({ top: 0, behavior: 'instant' });
     const remember = () => {
       if (!restoring) positions.set(path, window.scrollY);
     };
@@ -40,5 +48,5 @@ export function useTimelinePosition(path: string) {
       window.removeEventListener('keydown', stop);
       if (positions.size > 100) positions.delete(positions.keys().next().value!);
     };
-  }, [path]);
+  }, [path, restorePosition]);
 }
