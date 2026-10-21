@@ -34,7 +34,7 @@ TDD mode: not configured (source: no project/session setting) — ordinary funct
 - [x] **CN-3 — Years and year depths.** Years and months constellations on real data (lazy year summaries, month previews), thread, rail, travel between depths through the real routes. Route: delegated writer.
 - [x] **CN-4 — Month depth.** All photos of a month or "sin mes", keyset paging while travelling, day groups, masonry in both orientations, day rail. Route: delegated writer.
 - [x] **CN-5 — Viewer.** Zoom/pan/pinch/double-click, swipe, filmstrip, ambient backdrop, grow-from-tile, keeping the existing viewer contract (focus trap, HEIC, original fallback, no wrap, loadMore). Route: delegated writer.
-- [ ] **CN-6 — Cleanup and finish.** Remove obsolete timeline components and styles, update specs, document the design (DESIGN.md), run all checks. Route: delegated writer.
+- [x] **CN-6 — Cleanup and finish.** Remove obsolete timeline components and styles, update specs, document the design (DESIGN.md), run all checks. Route: delegated writer.
 
 ## Delivery
 
@@ -53,6 +53,11 @@ Forecast: about 3,000 authored changed lines across six work-unit commits, above
 - CN-4 done in `292919b` (`feat(timeline): travel every photo of a month`; +1566/-84) and CN-5 in `10c5e91` (`feat(timeline): zoom and travel photos in the viewer`; +1882/-368), one delegated writer. Writer checks at `10c5e91`: web test 28 files/215 passed, typecheck, lint, build, format clean. A third review STATUS/START on the whole branch was refused with `stale_target_identity` because CN-4 landed while consent was being answered; no authority created.
 - Parent visual QA (CDP-driven headless Edge + mock API): month depth paged to 120 tiles, viewer opened from a tile, wheel zoom reached 294%, Escape reset zoom then closed; horizontal years and month render well. Defects found: (1) at 390px the top chrome (ArchiveNav, "Concentrar vista", orientation) overlaps headers and content and the rail covers photos; (2) the viewer image overlaps the date/precision meta; (3) desktop top-right controls stacked in three rows.
 
+- CN-6 done in `3c12334` (responsive sky bar with collapsible menu, slim rail with content gutter, viewer fit between meta and filmstrip, dark loading, viewer↔sky follow), `f0bd6a0` (legacy timeline, Embla and dead helpers removed; travel and thread tests) and `bbfeade` (`DESIGN.md`, README).
+- Review: on the user's instruction gentle-ai review was dropped and disabled for this clone (`gentle-ai review mode disable --scope clone`); the parent ran its own code review of `4e25514..HEAD` (high effort). Ten findings, all fixed with regression tests in `63c0742` (browser zoom kept, pinch-out detector; viewer paging end), `8aa2ab2` (idle render loop, keyed lookups) and `a0fbd5f` (orientation keeps position, previews refetch after invalidation, per-trip exit guard, paging never stalls, back/forward landing wins over saved position, shared helpers, short-year slim rail). Parent QA after the fixes: tiles still reveal with the idle loop, a 160-photo month pages to the end, orientation switch keeps 50% progress; bar veiled over travelling photos in `d53dd3b`.
+- Final checks (parent): web test 31 files/266 passed, api test 18 files/196 passed, format clean; writer: typecheck, lint, build clean.
+- Not verified: the new SQL against the real project database with real photos; real Google Drive media; touch gestures on a physical phone.
+
 ## Next step
 
-CN-6: fix the QA defects, clean up dead timeline code, close test gaps, DESIGN.md.
+Feature complete on `feat/cielo-nocturno` (not pushed). Pending user decisions: push/PR and the chain strategy (the branch also carries earlier unmerged work since `fb25802`); follow-up phase restyles Organizar and Ajustes in the same world.
