@@ -1,5 +1,12 @@
+import { parseFilenameDate } from './filename-date';
 export type Precision = 'DAY' | 'MONTH' | 'YEAR' | 'UNKNOWN';
-export type DateSource = 'EXIF' | 'DRIVE_IMAGE_METADATA' | 'TAKEOUT' | 'FOLDER' | 'NONE';
+export type DateSource =
+  | 'EXIF'
+  | 'DRIVE_IMAGE_METADATA'
+  | 'TAKEOUT'
+  | 'FILENAME'
+  | 'FOLDER'
+  | 'NONE';
 export interface ResolvedDate {
   value: Date | null;
   precision: Precision;
@@ -93,6 +100,7 @@ export class PhotoDateResolver {
     exifDate?: string | null;
     driveImageTime?: string | null;
     takeoutPhotoTakenTime?: string | null;
+    fileName?: string | null;
     folderSegments: string[];
   }): ResolvedDate {
     for (const [raw, source] of [
@@ -110,6 +118,8 @@ export class PhotoDateResolver {
           };
       }
     }
+    const fromName = input.fileName ? parseFilenameDate(input.fileName) : null;
+    if (fromName) return { value: fromName.value, precision: 'DAY', source: 'FILENAME' };
     return this.folders.parse(input.folderSegments);
   }
 }

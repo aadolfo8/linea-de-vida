@@ -27,7 +27,7 @@ PostgreSQL contendrá un modelo normalizado. La identidad de una foto es su **co
 | `SyncMode`              | `INITIAL`, `INCREMENTAL`, `MANUAL`                                                                                                  |
 | `PhotoStatus`           | `ACTIVE`, `MISSING`, `UNSUPPORTED`, `ACCESS_DENIED`                                                                                 |
 | `DatePrecision`         | `DAY`, `MONTH`, `YEAR`, `UNKNOWN`                                                                                                   |
-| `DateSource`            | `EXIF`, `DRIVE_IMAGE_METADATA`, `TAKEOUT`, `FOLDER`, `NONE`                                                                         |
+| `DateSource`            | `EXIF`, `DRIVE_IMAGE_METADATA`, `TAKEOUT`, `FILENAME`, `FOLDER`, `NONE`                                                             |
 | `PhotoSourceType`       | `GENERIC`, `GOOGLE_TAKEOUT`                                                                                                         |
 | `TakeoutMatchStatus`    | `NOT_APPLICABLE`, `TAKEOUT_MATCHED`, `TAKEOUT_NOT_FOUND`, `TAKEOUT_AMBIGUOUS`                                                       |
 | `SyncIssueCode`         | `RATE_LIMITED`, `DRIVE_UNAVAILABLE`, `ACCESS_DENIED`, `INVALID_TAKEOUT_JSON`, `UNREADABLE_METADATA`, `UNSUPPORTED_MEDIA`, `UNKNOWN` |

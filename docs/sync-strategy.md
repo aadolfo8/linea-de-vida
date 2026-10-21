@@ -36,8 +36,9 @@ El resolver es una función determinista que recibe metadatos normalizados y pro
 | ---------------------: | -------------------------------------------------- | ----------------------------------------------- |
 |                      1 | EXIF válido o `imageMediaMetadata.time` de Drive   | Día si existe fecha completa.                   |
 |                      2 | `photoTakenTime` Takeout emparejado sin ambigüedad | Día si existe fecha completa.                   |
-|                      3 | Ruta de carpetas determinista                      | Día, mes o año según los segmentos encontrados. |
-|                      4 | Sin evidencia aceptable                            | `null`, `UNKNOWN`, `NONE`.                      |
+|                      3 | Nombre de archivo con fecha completa y plausible   | Día (`FILENAME`).                               |
+|                      4 | Ruta de carpetas determinista                      | Día, mes o año según los segmentos encontrados. |
+|                      5 | Sin evidencia aceptable                            | `null`, `UNKNOWN`, `NONE`.                      |
 
 `MANUAL` no se ubica en esta tabla: su valor no es una detección. Al construir `effectiveDate`, un `ManualDateOverride` vigente tiene prioridad absoluta sobre cualquier resultado de la tabla. Esta separación resuelve la contradicción de listar MANUAL con un orden distinto sin reescribir la evidencia automática.
 
@@ -45,7 +46,11 @@ El resolver es una función determinista que recibe metadatos normalizados y pro
 
 Solo se aceptan años de cuatro dígitos (por ejemplo, `1998`, `2024`) y meses inequívocos: números `01`–`12`, español (`enero`…`diciembre`) o inglés (`january`…`december`), sin distinguir mayúsculas/acentos. Segmentos como `2024-03-14`, `14 marzo 2024` o una jerarquía inequívoca `2024/marzo/14` pueden aportar día. Términos ambiguos como `verano`, `vacaciones`, `antiguas`, un año de dos dígitos o un número de carpeta sin contexto no crean fecha.
 
-La implementación debe definir una tabla de patrones con pruebas de tabla. No debe extraer una fecha de fragmentos arbitrarios del nombre de archivo ni sustituir falta de información con el 1 de enero.
+La implementación define una tabla de patrones con pruebas de tabla. No sustituye falta de información con el 1 de enero.
+
+### Fechas en el nombre de archivo
+
+Solo se leen patrones completos y deterministas (`src/filename-date.ts`), siempre con precisión `DAY`: WhatsApp (`IMG-20190812-WA0001`, `VID-…-WA…`, `WhatsApp Image 2019-08-12 at …`, `Imagen de WhatsApp 2019-08-12 a las …`), cámaras Android (`IMG_/VID_/MVIMG_/PANO_/BURST_YYYYMMDD_HHMMSS`), Pixel (`PXL_YYYYMMDD_…`), capturas (`Screenshot_2019-08-12-…`, `Screenshot_YYYYMMDD-HHMMSS`, `Screenshot from …`, `Captura de pantalla …`, `Screen Shot …`), Signal (`signal-YYYY-MM-DD-…`) y marcas de tiempo (`YYYYMMDD_HHMMSS`, `YYYY-MM-DD HH.MM.SS`). Se rechaza un mes o día imposible, una hora inválida, un año anterior a 1900 y una fecha posterior a hoy; un número de ocho cifras suelto o un nombre como `foto 2019-08-12` no cuentan.
 
 ## Takeout: Fase 4
 
