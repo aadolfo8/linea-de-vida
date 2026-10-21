@@ -77,6 +77,14 @@ export function consumeTravelEntry(next: TravelLocation): PendingTravel | null {
   return travel;
 }
 
+/**
+ * Whether a depth that is mounting should restore its saved scroll position. Landing on the
+ * group we came from (explicit travel, or the one browser back/forward implies) decides the
+ * position instead, so the two must never fight. Reads the entry without consuming it.
+ */
+export const shouldRestorePosition = (location: TravelLocation) =>
+  !(pending ?? inferTravel(lastLocation, location))?.landKey;
+
 export const travelCenterOf = (element: Element | null | undefined): TravelPoint => {
   if (!element) return viewportCenter();
   const rect = element.getBoundingClientRect();

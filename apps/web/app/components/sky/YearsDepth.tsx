@@ -25,8 +25,11 @@ import { SkyRail, type SkyRailEntry } from './SkyRail';
 import { SkyOverlay, useSky } from './SkyStage';
 import { SkyEmptyArchive, SkyError, SkyLoading } from './SkyStates';
 import { SkyThread } from './SkyThread';
-import { peekPendingTravel, travelLocation } from './travel';
+import { shouldRestorePosition, travelLocation } from './travel';
 import { useTravelEntry, type TravelTo } from './use-travel';
+
+const monthsWithPhotos = (summary: TimelineYearSummary | null | undefined) =>
+  summary?.months.filter((month) => month.photoCount > 0).length;
 
 type YearsState = 'loading' | 'ready' | 'error';
 const ROOT = travelLocation('/timeline');
@@ -47,13 +50,15 @@ export function YearsDepth({
   onLanded: () => void;
 }) {
   const { orientation } = useSky();
-  const restore = useRef(!peekPendingTravel()?.landKey);
-  useTimelinePosition(`sky:${orientation}:/timeline`, { restorePosition: restore.current });
+  const [restore] = useState(() => shouldRestorePosition(ROOT));
+  useTimelinePosition('sky:/timeline', { restorePosition: restore, variant: orientation });
 
   const [years, setYears] = useState<TimelineYearsPage | null>(() => getCachedTimelineYears());
   const [state, setState] = useState<YearsState>(() => (years ? 'ready' : 'loading'));
   const [attempt, setAttempt] = useState(0);
   const [summaries, setSummaries] = useState<Record<number, TimelineYearSummary>>({});
+  // Bumped when the archive index changes, so groups that already asked ask for their photos again.
+  const [epoch, setEpoch] = useState(0);
   const requested = useRef(new Set<number>());
 
   useEffect(
@@ -61,6 +66,7 @@ export function YearsDepth({
       subscribeArchiveIndexUpdated(() => {
         requested.current.clear();
         setSummaries({});
+        setEpoch((value) => value + 1);
         setAttempt((value) => value + 1);
       }),
     [],
@@ -103,7 +109,7 @@ export function YearsDepth({
   const items = useMemo(() => (years?.items ?? []).filter((item) => item.photoCount > 0), [years]);
   const keys = useMemo(() => items.map((item) => String(item.year)), [items]);
   const summaryOf = (year: number) => summaries[year] ?? getCachedYearSummary(year);
-  const monthsOf = (year: number) => summaryOf(year)?.months.filter((m) => m.photoCount > 0).length;
+  const monthsOf = (year: number) => monthsWithPhotos(summaryOf(year));
 
   const empty = state === 'ready' && items.length === 0;
   useTravelEntry({ ready: state !== 'loading', location: ROOT, onLanded });
@@ -111,12 +117,11 @@ export function YearsDepth({
   const rail = useMemo<SkyRailEntry[]>(
     () =>
       items.map((item) => {
-        const months = (summaries[item.year] ?? getCachedYearSummary(item.year))?.months.filter(
-          (m) => m.photoCount > 0,
-        ).length;
+        const months = monthsWithPhotos(summaries[item.year] ?? getCachedYearSummary(item.year));
         return {
           key: String(item.year),
           label: String(item.year),
+          short: `’${String(item.year).slice(-2)}`,
           small: months ? `${months}m` : null,
           aria: `Ir a ${item.year}`,
         };
@@ -162,6 +167,7 @@ export function YearsDepth({
             href={timelineHrefWithReturn(timelineHref({ year: item.year }), returnTo, returnLabel)}
             photos={summary ? summary.previews : null}
             more={summary ? Math.max(0, item.photoCount - summary.previews.length) : 0}
+            epoch={epoch}
             onNear={() => requestSummary(item.year)}
             onEnter={(href, cluster) => travel(href, 'in', cluster, null)}
           />

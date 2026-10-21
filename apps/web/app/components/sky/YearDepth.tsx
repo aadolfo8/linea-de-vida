@@ -1,7 +1,7 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { subscribeArchiveIndexUpdated } from '../../../lib/archive-index-events';
 import { getCachedMonthPreviews, loadMonthPreviews } from '../timeline-cache';
 import {
@@ -22,7 +22,7 @@ import { SkyRail, type SkyRailEntry } from './SkyRail';
 import { SkyOverlay, useSky } from './SkyStage';
 import { SkyError, SkyLoading } from './SkyStates';
 import { PeriodHeader, SkyThread } from './SkyThread';
-import { peekPendingTravel, travelLocation } from './travel';
+import { shouldRestorePosition, travelLocation } from './travel';
 import { useTravelEntry, type TravelTo } from './use-travel';
 
 const SHORT_MONTHS = [
@@ -62,10 +62,8 @@ export function YearDepth({
 }) {
   const router = useRouter();
   const { orientation } = useSky();
-  const restore = useRef(!peekPendingTravel()?.landKey);
-  useTimelinePosition(`sky:${orientation}:/timeline/${year}`, {
-    restorePosition: restore.current,
-  });
+  const [restore] = useState(() => shouldRestorePosition(travelLocation(`/timeline/${year}`)));
+  useTimelinePosition(`sky:/timeline/${year}`, { restorePosition: restore, variant: orientation });
 
   const [data, setData] = useState<TimelineMonthPreviews | null>(() =>
     getCachedMonthPreviews(year),

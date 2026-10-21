@@ -112,6 +112,61 @@ describe('useTravel', () => {
     stage.unregister();
   });
 
+  describe('exit guard', () => {
+    const guarded = () => {
+      const stage = fakeStage(false);
+      const cancel = vi.fn();
+      stage.world.getAnimations = (() => [
+        { cancel },
+      ]) as unknown as typeof stage.world.getAnimations;
+      return { stage, cancel };
+    };
+
+    afterEach(() => vi.useRealTimers());
+
+    it('gives the world back when the navigation never lands', async () => {
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+      const { stage, cancel } = guarded();
+      await act(async () => travel('/timeline/2004', 'in', null, null));
+      stage.engine.busy = true;
+
+      await act(async () => vi.advanceTimersByTimeAsync(3600));
+      expect(cancel).toHaveBeenCalledOnce();
+      expect(stage.engine.busy).toBe(false);
+      expect(peekPendingTravel()).toBeNull();
+      stage.unregister();
+    });
+
+    it('never lets an earlier trip cancel the animations of a later one', async () => {
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+      const { stage, cancel } = guarded();
+      await act(async () => travel('/timeline/2004', 'in', null, null));
+      await act(async () => vi.advanceTimersByTimeAsync(2000));
+      await act(async () => travel('/timeline/2004/8', 'in', null, null));
+      stage.engine.busy = true;
+
+      // The first trip's guard would fire here; it was replaced by the second trip's.
+      await act(async () => vi.advanceTimersByTimeAsync(1600));
+      expect(cancel).not.toHaveBeenCalled();
+      expect(stage.engine.busy).toBe(true);
+
+      await act(async () => vi.advanceTimersByTimeAsync(2000));
+      expect(cancel).toHaveBeenCalledOnce();
+      stage.unregister();
+    });
+
+    it('clears the guard when the owner unmounts', async () => {
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+      const { stage, cancel } = guarded();
+      await act(async () => travel('/timeline/2004', 'in', null, null));
+      await act(async () => root.render(null));
+
+      await act(async () => vi.advanceTimersByTimeAsync(5000));
+      expect(cancel).not.toHaveBeenCalled();
+      stage.unregister();
+    });
+  });
+
   it('ignores a second travel while one is still leaving', async () => {
     const stage = fakeStage(false);
     let release: () => void = () => undefined;

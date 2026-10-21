@@ -33,6 +33,14 @@ const EXIT_GUARD = 3500;
 export function useTravel(): TravelTo {
   const router = useRouter();
   const travelling = useRef(false);
+  /** The guard of the latest trip only: an earlier trip's timer must never cancel a later one. */
+  const guard = useRef<{ trip: number; timer: number } | null>(null);
+  const trips = useRef(0);
+  const clearGuard = useCallback(() => {
+    if (guard.current) window.clearTimeout(guard.current.timer);
+    guard.current = null;
+  }, []);
+  useEffect(() => clearGuard, [clearGuard]);
 
   return useCallback(
     (href, mode, originEl, landKey) => {
@@ -40,6 +48,8 @@ export function useTravel(): TravelTo {
       const target = new URL(href, window.location.origin);
       if (target.pathname === window.location.pathname) return;
       travelling.current = true;
+      clearGuard();
+      const trip = (trips.current += 1);
       const origin = travelCenterOf(originEl);
       setPendingTravel({ mode, origin, landKey });
 
@@ -55,20 +65,24 @@ export function useTravel(): TravelTo {
           world.style.transformOrigin = `${origin.x}px ${origin.y}px`;
           const { keyframes, options } = travelAnimation('exit', mode);
           await world.animate(keyframes, options).finished.catch(() => undefined);
-          window.setTimeout(() => {
+          const timer = window.setTimeout(() => {
+            if (guard.current?.trip !== trip) return;
+            guard.current = null;
             if (window.location.pathname !== target.pathname) {
               world.getAnimations().forEach((animation) => animation.cancel());
               stage.engine.busy = false;
               setPendingTravel(null);
             }
           }, EXIT_GUARD);
+          if (trip === trips.current) guard.current = { trip, timer };
+          else window.clearTimeout(timer);
         }
         router.push(href, { scroll: false });
         travelling.current = false;
       };
       void go();
     },
-    [router],
+    [clearGuard, router],
   );
 }
 
