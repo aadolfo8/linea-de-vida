@@ -38,6 +38,16 @@ export function photoDateLabel(photo: Pick<TimelinePhoto, 'effectiveDate'>) {
   return photoDateFormats[precision].format(date);
 }
 
+/** What the archive really knows about a photo's date, as a short chip. */
+export function photoPrecisionLabel(photo: Pick<TimelinePhoto, 'effectiveDate'>) {
+  const { value, precision } = photo.effectiveDate;
+  if (!value) return null;
+  if (precision === 'DAY') return 'Día exacto';
+  if (precision === 'MONTH') return 'Día sin concretar';
+  if (precision === 'YEAR') return 'Mes sin concretar';
+  return null;
+}
+
 export type TimelineYearItem = { year: number; photoCount: number };
 
 export type TimelineYearsPage = {

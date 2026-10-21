@@ -1,20 +1,57 @@
 'use client';
 
-import useEmblaCarousel from 'embla-carousel-react';
+import { Minus, Plus, X } from 'lucide-react';
 import { useReducedMotion } from 'motion/react';
-import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type KeyboardEvent,
+  type MouseEvent as ReactMouseEvent,
+  type PointerEvent,
+} from 'react';
 import { api } from '../../lib/api';
 import { mediaUrl, thumbnailVariantUrl } from '../../lib/media';
-import { Button } from '../../components/ui/button';
+import './photo-viewer.css';
 import {
   photoDateLabel,
+  photoPrecisionLabel,
   wrappedFocusIndex,
   type TimelinePhoto,
   type TimelinePhotoPage,
 } from './timeline-model';
+import {
+  BUTTON_ZOOM_STEP,
+  IDENTITY,
+  KEY_PAN_STEP,
+  KEY_ZOOM_STEP,
+  clampView,
+  doubleTapScale,
+  fitSize,
+  flipTransform,
+  isRectVisible,
+  isZoomed,
+  wheelScale,
+  zoomAround,
+  type Size,
+  type View,
+} from './viewer-zoom';
 
 const focusableSelector =
   'button:not(:disabled), a[href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"]), [contenteditable="true"]';
+
+const EASE = 'cubic-bezier(.22,1,.36,1)';
+/** Chrome fades away after this long without pointer or keyboard activity. */
+const IDLE_DELAY = 2600;
+const OPEN_DURATION = 520;
+const CLOSE_DURATION = 380;
+const SWIPE_DISTANCE = 70;
+const DISMISS_DISTANCE = 110;
+const TAP_SLOP = 8;
+const DOUBLE_TAP_WINDOW = 320;
+const ORIGINAL_MIME = /^image\/(jpeg|png|webp|gif)$/i;
 
 const isEditable = (target: EventTarget | null) =>
   target instanceof HTMLInputElement ||
@@ -22,59 +59,158 @@ const isEditable = (target: EventTarget | null) =>
   target instanceof HTMLSelectElement ||
   (target instanceof HTMLElement && target.isContentEditable);
 
-function ArrowIcon({ direction }: { direction: 'left' | 'right' }) {
-  return (
-    <svg
-      className="w-[1.15rem] fill-none stroke-current [stroke-linecap:round] [stroke-linejoin:round] [stroke-width:1.8]"
-      viewBox="0 0 24 24"
-      aria-hidden="true"
-    >
-      <path d={direction === 'left' ? 'M15 5l-7 7 7 7' : 'M9 5l7 7-7 7'} />
-    </svg>
-  );
-}
+const readStage = (): Size =>
+  typeof window === 'undefined'
+    ? { width: 1280, height: 800 }
+    : { width: window.innerWidth, height: window.innerHeight };
+
+/** Where the viewer grows from and shrinks back to: the tile the photo was opened from. */
+export type ViewerSource = {
+  /** On-screen rect of that photo's tile, or null when it is not visible. */
+  rectOf: (
+    photoId: string,
+  ) => Pick<DOMRect, 'left' | 'top' | 'right' | 'bottom' | 'width' | 'height'> | null;
+  /** Gives focus back to that tile; false when it is gone. */
+  focusTile?: (photoId: string) => boolean;
+};
+
+type Gesture = {
+  mode: 'pan' | 'swipe' | 'pinch';
+  startX: number;
+  startY: number;
+  view: View;
+  distance: number;
+  axis: 'x' | 'y' | null;
+  moved: boolean;
+  onStage: boolean;
+};
+
+const gap = (a: { x: number; y: number }, b: { x: number; y: number }) =>
+  Math.hypot(a.x - b.x, a.y - b.y);
 
 export function TimelinePhotoViewer({
   photos,
   initialIndex,
+  total,
   loadMore,
+  source,
   onClose,
 }: {
   photos: TimelinePhoto[];
   initialIndex: number;
+  /** How many photos the period holds, when known; the counter shows it instead of the loaded count. */
+  total?: number | null;
   loadMore?: () => Promise<TimelinePhotoPage | null>;
+  source?: ViewerSource;
   onClose: () => void;
 }) {
-  const reduceMotion = useReducedMotion();
-  const jump = Boolean(reduceMotion);
-  const [viewportRef, embla] = useEmblaCarousel({
-    loop: false,
-    duration: jump ? 0 : 24,
-    watchDrag: true,
-  });
+  const reduceMotion = useReducedMotion() ?? false;
   const [loadedPhotos, setLoadedPhotos] = useState(photos);
   const [hasMore, setHasMore] = useState(Boolean(loadMore));
   const [loadingMore, setLoadingMore] = useState(false);
   const [loadMoreError, setLoadMoreError] = useState(false);
   const [index, setIndex] = useState(initialIndex);
   const [pendingAdvance, setPendingAdvance] = useState<number | null>(null);
-  const [thumbnailFallbackPhotoId, setThumbnailFallbackPhotoId] = useState<string | null>(null);
-  const dialog = useRef<HTMLElement>(null);
+  const [stage, setStage] = useState(readStage);
+  const [measured, setMeasured] = useState<{ id: string; width: number; height: number } | null>(
+    null,
+  );
+  const [zoomPercent, setZoomPercent] = useState(100);
+  const [dragging, setDragging] = useState(false);
+  const [idle, setIdle] = useState(false);
+  const [closing, setClosing] = useState(false);
+
   const backdrop = useRef<HTMLDivElement>(null);
+  const dialog = useRef<HTMLElement>(null);
+  const stageEl = useRef<HTMLDivElement>(null);
+  const frame = useRef<HTMLDivElement>(null);
+  const strip = useRef<HTMLElement>(null);
+  const closeButton = useRef<HTMLButtonElement>(null);
   const loadingMoreRef = useRef(false);
+  const viewRef = useRef<View>(IDENTITY);
+  const stageRef = useRef(stage);
+  const fitRef = useRef<Size>({ width: 1, height: 1 });
+  const direction = useRef<-1 | 0 | 1>(0);
+  const pointers = useRef(new Map<number, { x: number; y: number }>());
+  const gesture = useRef<Gesture | null>(null);
+  const lastTap = useRef<{ time: number; x: number; y: number } | null>(null);
+  const touchToggledAt = useRef(0);
+  const closingRef = useRef(false);
+  const idleTimer = useRef(0);
+  const overChrome = useRef(false);
+  const keyboardInput = useRef(false);
+  const preloaded = useRef(new Set<string>());
+  const currentId = useRef<string | undefined>(undefined);
+  const sourceRef = useRef(source);
+  const onCloseRef = useRef(onClose);
+  useLayoutEffect(() => {
+    sourceRef.current = source;
+    onCloseRef.current = onClose;
+  });
+
+  const selected = loadedPhotos[index];
+  const [shownState, setShownState] = useState<Shown | null>(null);
+  const shown = selected
+    ? shownState?.id === selected.id
+      ? shownState
+      : freshShown(selected)
+    : null;
+  const updateShown = (change: Partial<Shown>) => {
+    if (selected) setShownState({ ...shown!, ...change });
+  };
+  const natural =
+    selected?.dimensions ?? (selected && measured?.id === selected.id ? measured : null);
+  const fit = fitSize(natural, stage);
+  useLayoutEffect(() => {
+    stageRef.current = stage;
+    fitRef.current = fit;
+    currentId.current = selected?.id;
+  });
+
+  const writeView = useCallback(
+    (next: View, animate = false) => {
+      const clamped = clampView(next, fitRef.current, stageRef.current);
+      viewRef.current = clamped;
+      const element = frame.current;
+      if (element) {
+        element.style.transition = animate && !reduceMotion ? `transform .35s ${EASE}` : 'none';
+        element.style.transform = `translate3d(${clamped.x}px,${clamped.y}px,0) scale(${clamped.scale})`;
+      }
+      setZoomPercent(Math.round(clamped.scale * 100));
+    },
+    [reduceMotion],
+  );
+
+  // A new fit (resize, or the real size of the photo arriving) re-clamps the current view.
+  useLayoutEffect(() => {
+    writeView(viewRef.current);
+  }, [fit.width, fit.height, stage.width, stage.height, writeView]);
 
   useEffect(() => {
-    if (!embla) return;
-    embla.scrollTo(initialIndex, true);
-    const select = () => {
-      setIndex(embla.selectedScrollSnap());
-      setThumbnailFallbackPhotoId(null);
-    };
-    embla.on('select', select);
-    return () => {
-      embla.off('select', select);
-    };
-  }, [embla, initialIndex]);
+    const onResize = () => setStage(readStage());
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
+
+  // Idle chrome: it fades after a still moment, but never from under a keyboard user.
+  const poke = useCallback((keyboard = false) => {
+    keyboardInput.current = keyboard;
+    setIdle(false);
+    window.clearTimeout(idleTimer.current);
+    idleTimer.current = window.setTimeout(() => {
+      const active = document.activeElement;
+      const focusInChrome =
+        active instanceof HTMLElement &&
+        active !== dialog.current &&
+        dialog.current?.contains(active);
+      if (overChrome.current || (keyboardInput.current && focusInChrome)) return;
+      setIdle(true);
+    }, IDLE_DELAY);
+  }, []);
+  useEffect(() => {
+    poke();
+    return () => window.clearTimeout(idleTimer.current);
+  }, [poke]);
 
   useEffect(() => {
     const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
@@ -107,8 +243,9 @@ export function TimelinePhotoViewer({
     if (scrollbarWidth > 0) document.body.style.paddingRight = `${scrollbarWidth}px`;
 
     const focusFirst = () => {
-      const first = dialog.current?.querySelector<HTMLElement>(focusableSelector);
-      if (first) first.focus();
+      const first =
+        closeButton.current ?? dialog.current?.querySelector<HTMLElement>(focusableSelector);
+      if (first) first.focus({ preventScroll: true });
       else dialog.current?.focus();
     };
     const containFocus = (event: FocusEvent) => {
@@ -126,14 +263,29 @@ export function TimelinePhotoViewer({
         if (ariaHidden === null) element.removeAttribute('aria-hidden');
         else element.setAttribute('aria-hidden', ariaHidden);
       });
-      if (previous?.isConnected) previous.focus({ preventScroll: true });
+      const photoId = currentId.current;
+      const refocused = photoId ? sourceRef.current?.focusTile?.(photoId) : false;
+      if (!refocused && previous?.isConnected) previous.focus({ preventScroll: true });
     };
   }, []);
 
-  const selected = loadedPhotos[index];
-  if (!selected) return null;
-  const isDownloadOnly = /^image\/(heic|heif)$/i.test(selected.mimeType);
-  const eagerIndexes = galleryEagerIndexes(index, loadedPhotos.length);
+  // The photo grows out of its tile.
+  useLayoutEffect(() => {
+    const element = frame.current;
+    const photoId = currentId.current;
+    const rect = photoId ? sourceRef.current?.rectOf(photoId) : null;
+    if (!element || !rect || reduceMotion || typeof element.animate !== 'function') return;
+    if (!isRectVisible(rect, stageRef.current)) return;
+    const from = flipTransform(rect, fitRef.current, stageRef.current);
+    element.animate(
+      [
+        { transform: `translate3d(${from.x}px,${from.y}px,0) scale(${from.scale})` },
+        { transform: 'translate3d(0,0,0) scale(1)' },
+      ],
+      { duration: OPEN_DURATION, easing: EASE },
+    );
+    // Only the first paint grows from the tile.
+  }, []);
 
   const fetchNextPage = useCallback(async () => {
     if (!loadMore || !hasMore || loadingMoreRef.current) return;
@@ -171,17 +323,294 @@ export function TimelinePhotoViewer({
     if (!loadMoreError && hasMore && loadedPhotos.length - index <= 5) void fetchNextPage();
   }, [fetchNextPage, hasMore, index, loadMoreError, loadedPhotos.length]);
 
+  const select = useCallback((next: number, step: -1 | 1) => {
+    direction.current = step;
+    setIndex(next);
+  }, []);
+
   useEffect(() => {
     if (pendingAdvance === null || pendingAdvance >= loadedPhotos.length) return;
-    embla?.scrollTo(pendingAdvance, jump);
+    select(pendingAdvance, 1);
     setPendingAdvance(null);
-  }, [embla, jump, loadedPhotos.length, pendingAdvance]);
+  }, [loadedPhotos.length, pendingAdvance, select]);
+
+  /** Moves one photo along, never wrapping; at the loaded end it waits for the next page. */
+  const step = useCallback(
+    (delta: -1 | 1) => {
+      if (delta < 0) {
+        if (index > 0) select(index - 1, -1);
+      } else if (index < loadedPhotos.length - 1) select(index + 1, 1);
+      else if (hasMore) {
+        setPendingAdvance(loadedPhotos.length);
+        void fetchNextPage();
+      }
+    },
+    [fetchNextPage, hasMore, index, loadedPhotos.length, select],
+  );
+
+  // Every photo starts at fit; the new one slides in from the side it came from.
+  useLayoutEffect(() => {
+    writeView(IDENTITY);
+    const element = frame.current;
+    const slide = direction.current;
+    direction.current = 0;
+    if (!slide || reduceMotion || !element || typeof element.animate !== 'function') return;
+    element.animate(
+      [
+        { opacity: 0, transform: `translate3d(${slide * 40}px,0,0)` },
+        { opacity: 1, transform: 'translate3d(0,0,0)' },
+      ],
+      { duration: 320, easing: EASE },
+    );
+  }, [index, reduceMotion, writeView]);
+
+  // Neighbours are fetched ahead of time, thumbnails and originals alike.
+  useEffect(() => {
+    if (typeof Image === 'undefined') return;
+    for (const offset of [1, -1, 2]) {
+      const neighbour = loadedPhotos[index + offset];
+      if (!neighbour) continue;
+      const urls = [thumbnailVariantUrl(api, neighbour.thumbnailUrl, 1280)];
+      if (ORIGINAL_MIME.test(neighbour.mimeType))
+        urls.push(mediaUrl(api, `/v1/photos/${neighbour.id}/content`));
+      for (const url of urls) {
+        if (preloaded.current.has(url)) continue;
+        preloaded.current.add(url);
+        const image = new Image();
+        image.decoding = 'async';
+        image.src = url;
+      }
+    }
+  }, [index, loadedPhotos]);
+
+  // The filmstrip keeps the current photo in view.
+  useEffect(() => {
+    const element = strip.current;
+    const current = element?.children[index];
+    if (!element || !(current instanceof HTMLElement)) return;
+    const left = current.offsetLeft - element.clientWidth / 2 + current.clientWidth / 2;
+    if (typeof element.scrollTo === 'function')
+      element.scrollTo({ left, behavior: reduceMotion ? 'auto' : 'smooth' });
+    else element.scrollLeft = left;
+  }, [index, loadedPhotos.length, reduceMotion]);
+
+  const requestClose = useCallback(() => {
+    if (closingRef.current) return;
+    closingRef.current = true;
+    const element = frame.current;
+    const photoId = currentId.current;
+    const rect = photoId ? sourceRef.current?.rectOf(photoId) : null;
+    const finish = () => {
+      closingRef.current = false;
+      onCloseRef.current();
+    };
+    if (
+      !element ||
+      !rect ||
+      reduceMotion ||
+      isZoomed(viewRef.current) ||
+      typeof element.animate !== 'function' ||
+      !isRectVisible(rect, stageRef.current)
+    ) {
+      finish();
+      return;
+    }
+    setClosing(true);
+    const to = flipTransform(rect, fitRef.current, stageRef.current);
+    const from = viewRef.current;
+    const animation = element.animate(
+      [
+        { transform: `translate3d(${from.x}px,${from.y}px,0) scale(${from.scale})` },
+        { transform: `translate3d(${to.x}px,${to.y}px,0) scale(${to.scale})` },
+      ],
+      { duration: CLOSE_DURATION, easing: EASE, fill: 'forwards' },
+    );
+    animation.finished.then(finish, finish);
+  }, [reduceMotion]);
+
+  const pointOf = (clientX: number, clientY: number) => ({
+    x: clientX - stageRef.current.width / 2,
+    y: clientY - stageRef.current.height / 2,
+  });
+
+  const zoomTo = useCallback(
+    (scale: number, point = { x: 0, y: 0 }, animate = true) => {
+      writeView(
+        zoomAround(viewRef.current, scale, point, fitRef.current, stageRef.current),
+        animate,
+      );
+    },
+    [writeView],
+  );
+  const panBy = useCallback(
+    (x: number, y: number) => {
+      const view = viewRef.current;
+      writeView({ ...view, x: view.x + x, y: view.y + y }, true);
+    },
+    [writeView],
+  );
+
+  // Wheel and trackpad pinch zoom around the pointer; React's wheel listener is passive.
+  useEffect(() => {
+    const element = stageEl.current;
+    if (!element) return;
+    const onWheel = (event: WheelEvent) => {
+      event.preventDefault();
+      poke();
+      const view = viewRef.current;
+      zoomTo(
+        wheelScale(view.scale, event.deltaY, event.ctrlKey, event.deltaMode),
+        pointOf(event.clientX, event.clientY),
+        false,
+      );
+    };
+    element.addEventListener('wheel', onWheel, { passive: false });
+    return () => element.removeEventListener('wheel', onWheel);
+  }, [poke, zoomTo]);
+
+  const beginGesture = (pointerId: number): Gesture | null => {
+    const first = pointers.current.get(pointerId);
+    if (!first) return null;
+    return {
+      mode: isZoomed(viewRef.current) ? 'pan' : 'swipe',
+      startX: first.x,
+      startY: first.y,
+      view: viewRef.current,
+      distance: 0,
+      axis: null,
+      moved: false,
+      onStage: false,
+    };
+  };
+
+  const onPointerDown = (event: PointerEvent<HTMLDivElement>) => {
+    if (event.pointerType === 'mouse' && event.button !== 0) return;
+    try {
+      event.currentTarget.setPointerCapture?.(event.pointerId);
+    } catch {
+      // Synthetic pointers cannot be captured; the gesture still works without it.
+    }
+    pointers.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
+    if (pointers.current.size === 1) {
+      const next = beginGesture(event.pointerId);
+      if (next) gesture.current = { ...next, onStage: event.target === event.currentTarget };
+    } else if (pointers.current.size === 2) {
+      const [a, b] = [...pointers.current.values()];
+      gesture.current = {
+        mode: 'pinch',
+        startX: 0,
+        startY: 0,
+        view: viewRef.current,
+        distance: Math.max(1, gap(a!, b!)),
+        axis: null,
+        moved: true,
+        onStage: false,
+      };
+    }
+    setDragging(gesture.current?.mode === 'pan');
+  };
+
+  const dragFrame = (x: number, y: number, fade: number) => {
+    const element = frame.current;
+    if (!element) return;
+    element.style.transition = 'none';
+    element.style.transform = `translate3d(${x}px,${y}px,0) scale(${1 - Math.min(0.2, y / 1200)})`;
+    element.style.opacity = String(fade);
+  };
+  const settleFrame = () => {
+    const element = frame.current;
+    if (!element) return;
+    element.style.opacity = '';
+    writeView(viewRef.current, true);
+  };
+
+  const onPointerMove = (event: PointerEvent<HTMLDivElement>) => {
+    poke();
+    const active = gesture.current;
+    if (!active || !pointers.current.has(event.pointerId)) return;
+    pointers.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
+    const dx = event.clientX - active.startX;
+    const dy = event.clientY - active.startY;
+    if (active.mode === 'pinch') {
+      if (pointers.current.size < 2) return;
+      const [a, b] = [...pointers.current.values()];
+      const middle = pointOf((a!.x + b!.x) / 2, (a!.y + b!.y) / 2);
+      writeView(
+        zoomAround(
+          active.view,
+          active.view.scale * (gap(a!, b!) / active.distance),
+          middle,
+          fitRef.current,
+          stageRef.current,
+        ),
+      );
+      return;
+    }
+    if (Math.hypot(dx, dy) > TAP_SLOP) active.moved = true;
+    if (active.mode === 'pan') {
+      writeView({ ...active.view, x: active.view.x + dx, y: active.view.y + dy });
+      return;
+    }
+    if (!active.axis && Math.hypot(dx, dy) > TAP_SLOP)
+      active.axis = Math.abs(dx) >= Math.abs(dy) ? 'x' : 'y';
+    if (active.axis === 'x') dragFrame(dx * 0.6, 0, 1 - Math.min(0.5, Math.abs(dx) / 600));
+    else if (active.axis === 'y')
+      dragFrame(dx * 0.2, Math.max(0, dy) * 0.6, 1 - Math.min(0.5, Math.max(0, dy) / 500));
+  };
+
+  const onPointerUp = (event: PointerEvent<HTMLDivElement>) => {
+    const active = gesture.current;
+    if (!pointers.current.has(event.pointerId)) return;
+    pointers.current.delete(event.pointerId);
+    setDragging(false);
+    if (active?.mode === 'swipe') {
+      const dx = event.clientX - active.startX;
+      const dy = event.clientY - active.startY;
+      if (active.axis === 'x' && Math.abs(dx) > SWIPE_DISTANCE && event.type === 'pointerup') {
+        settleFrame();
+        step(dx < 0 ? 1 : -1);
+      } else if (active.axis === 'y' && dy > DISMISS_DISTANCE && event.type === 'pointerup') {
+        settleFrame();
+        requestClose();
+      } else if (active.axis) {
+        settleFrame();
+      } else if (!active.moved && event.type === 'pointerup') {
+        const now = Date.now();
+        const previous = lastTap.current;
+        if (
+          event.pointerType !== 'mouse' &&
+          previous &&
+          now - previous.time < DOUBLE_TAP_WINDOW &&
+          Math.hypot(event.clientX - previous.x, event.clientY - previous.y) < 30
+        ) {
+          lastTap.current = null;
+          touchToggledAt.current = now;
+          zoomTo(doubleTapScale(viewRef.current), pointOf(event.clientX, event.clientY));
+        } else {
+          lastTap.current = { time: now, x: event.clientX, y: event.clientY };
+          if (active.onStage && event.pointerType === 'mouse') requestClose();
+        }
+      }
+    }
+    const [rest] = [...pointers.current.entries()];
+    if (rest) {
+      const next = beginGesture(rest[0]);
+      gesture.current = next ? { ...next, moved: true } : null;
+    } else gesture.current = null;
+  };
+
+  const onDoubleClick = (event: ReactMouseEvent<HTMLDivElement>) => {
+    // A double tap already toggled; browsers may still report it as a double click.
+    if (Date.now() - touchToggledAt.current < 500) return;
+    zoomTo(doubleTapScale(viewRef.current), pointOf(event.clientX, event.clientY));
+  };
 
   const keyDown = (event: KeyboardEvent<HTMLElement>) => {
+    poke(true);
     if (event.key === 'Tab') {
       const focusable = [
         ...(dialog.current?.querySelectorAll<HTMLElement>(focusableSelector) ?? []),
-      ];
+      ].filter((element) => element.tabIndex >= 0);
       const currentIndex = focusable.indexOf(document.activeElement as HTMLElement);
       const atBoundary = event.shiftKey
         ? currentIndex <= 0
@@ -189,256 +618,333 @@ export function TimelinePhotoViewer({
       if (atBoundary) {
         event.preventDefault();
         const nextIndex = wrappedFocusIndex(currentIndex, focusable.length, event.shiftKey);
-        if (nextIndex >= 0) focusable[nextIndex].focus();
+        if (nextIndex >= 0) focusable[nextIndex]!.focus();
         else dialog.current?.focus();
       }
       return;
     }
-    if (isEditable(event.target)) return;
-    if (event.key === 'Escape' || event.key === 'Backspace') {
-      event.preventDefault();
-      onClose();
+    if (isEditable(event.target) || event.ctrlKey || event.metaKey || event.altKey) return;
+    const zoomed = isZoomed(viewRef.current);
+    switch (event.key) {
+      case 'Escape':
+        event.preventDefault();
+        if (zoomed) zoomTo(1);
+        else requestClose();
+        break;
+      case 'Backspace':
+        event.preventDefault();
+        requestClose();
+        break;
+      case 'ArrowLeft':
+        event.preventDefault();
+        if (zoomed) panBy(KEY_PAN_STEP, 0);
+        else step(-1);
+        break;
+      case 'ArrowRight':
+        event.preventDefault();
+        if (zoomed) panBy(-KEY_PAN_STEP, 0);
+        else step(1);
+        break;
+      case 'ArrowUp':
+      case 'ArrowDown':
+        if (!zoomed) break;
+        event.preventDefault();
+        panBy(0, event.key === 'ArrowUp' ? KEY_PAN_STEP : -KEY_PAN_STEP);
+        break;
+      case '+':
+      case '=':
+        event.preventDefault();
+        zoomTo(viewRef.current.scale * KEY_ZOOM_STEP);
+        break;
+      case '-':
+      case '_':
+        event.preventDefault();
+        zoomTo(viewRef.current.scale / KEY_ZOOM_STEP);
+        break;
+      case '0':
+        event.preventDefault();
+        zoomTo(1);
+        break;
     }
-    if (event.key === 'ArrowLeft') {
-      event.preventDefault();
-      if (index > 0) embla?.scrollPrev(jump);
-    }
-    if (event.key === 'ArrowRight') {
-      event.preventDefault();
-      if (index < loadedPhotos.length - 1) embla?.scrollNext(jump);
-      else if (hasMore) {
-        setPendingAdvance(loadedPhotos.length);
-        void fetchNextPage();
-      }
-    }
+  };
+
+  if (!selected) return null;
+  const isDownloadOnly = /^image\/(heic|heif)$/i.test(selected.mimeType);
+  const zoomed = zoomPercent > 101;
+  const count = Math.max(total ?? 0, loadedPhotos.length);
+  const precision = photoPrecisionLabel(selected);
+  const ambient = thumbnailVariantUrl(api, selected.thumbnailUrl, 640).replace(/["\\]/g, '');
+  const keepVisible = {
+    onPointerEnter: () => {
+      overChrome.current = true;
+    },
+    onPointerLeave: () => {
+      overChrome.current = false;
+    },
   };
 
   return (
     <div
       ref={backdrop}
-      className="fixed inset-0 z-50 grid place-items-center bg-[rgb(6_10_8_/_0.94)] p-4 max-[42rem]:p-2"
-      onPointerDown={(event) => {
-        if (event.target === event.currentTarget) onClose();
-      }}
+      className="pv"
+      data-idle={idle}
+      data-closing={closing}
+      onPointerMove={() => poke()}
     >
+      <div className="pv-amb" style={{ backgroundImage: `url("${ambient}")` }} aria-hidden="true" />
       <section
         ref={dialog}
-        className="timeline-photo-dialog grid max-h-[calc(100dvh-2rem)] w-[min(70rem,100%)] grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden rounded-2xl bg-[#f3f0e8] text-[#151a16] shadow-[0_1.75rem_5rem_rgb(0_0_0_/_0.38)] outline-none max-[42rem]:max-h-[calc(100dvh-1rem)]"
+        className="pv-dialog"
         role="dialog"
         aria-modal="true"
         aria-label={`Vista ampliada de ${selected.fileName}`}
         tabIndex={-1}
         onKeyDown={keyDown}
       >
-        <header className="flex min-h-16 items-center justify-between gap-4 border-b border-[#cbd0c7] px-4 py-3 max-[42rem]:min-h-14 max-[42rem]:px-3">
-          <span className="tabular-nums" aria-live="polite">
-            {index + 1} de {loadedPhotos.length}
-          </span>
-          <Button
-            variant="outline"
-            className="min-w-11 rounded-xl border-[#66705f] bg-transparent px-3 text-[#151a16] transition-[background,color,transform] hover:bg-[#151a16] hover:text-[#f3f0e8] active:translate-y-px focus-visible:outline-[#b7d43b] disabled:cursor-not-allowed disabled:opacity-40"
-            onClick={onClose}
-          >
-            Cerrar
-          </Button>
-        </header>
-        <div className="min-h-0 overflow-hidden" ref={viewportRef}>
-          <div className="flex h-full touch-pan-y touch-pinch-zoom">
-            {loadedPhotos.map((photo, photoIndex) => (
-              <ViewerPhotoSlide
-                key={photo.id}
-                photo={photo}
-                active={photoIndex === index}
-                eager={eagerIndexes.has(photoIndex)}
-                requestOriginal={
-                  photoIndex === index &&
-                  /^image\/(jpeg|png|webp|gif)$/i.test(photo.mimeType) &&
-                  thumbnailFallbackPhotoId !== photo.id
-                }
-                onOriginalUnavailable={() => setThumbnailFallbackPhotoId(photo.id)}
-              />
-            ))}
+        <div
+          ref={stageEl}
+          className="pv-stage"
+          data-zoomed={zoomed}
+          data-dragging={dragging}
+          onPointerDown={onPointerDown}
+          onPointerMove={onPointerMove}
+          onPointerUp={onPointerUp}
+          onPointerCancel={onPointerUp}
+          onDoubleClick={onDoubleClick}
+        >
+          <div ref={frame} className="pv-frame" style={{ width: fit.width, height: fit.height }}>
+            <ViewerImage
+              photo={selected}
+              shown={shown!}
+              onLoad={(width, height) => {
+                updateShown({ status: 'ready' });
+                if (width > 0 && height > 0) setMeasured({ id: selected.id, width, height });
+              }}
+              onError={() =>
+                shown!.variant === 'original'
+                  ? updateShown({ variant: 'thumbnail', status: 'loading', fallback: true })
+                  : updateShown({ status: 'error' })
+              }
+            />
           </div>
         </div>
-        <footer className="flex min-h-16 items-center justify-between gap-4 border-t border-[#cbd0c7] px-4 py-3 max-[42rem]:min-h-14 max-[42rem]:flex-wrap max-[42rem]:px-3">
-          <div className="grid min-w-0 gap-1">
-            <strong className="overflow-hidden text-ellipsis whitespace-nowrap text-sm">
-              {selected.fileName}
-            </strong>
-            <span className="text-[0.76rem] tabular-nums text-[#566156]">
-              {photoDateLabel(selected)}
+
+        <header className="pv-top pv-ui" {...keepVisible}>
+          <div className="pv-meta">
+            <p className="pv-date">{photoDateLabel(selected)}</p>
+            <p className="pv-folder">
+              <span className="pv-file">{selected.fileName}</span>
+              {precision && <em className="pv-chip">{precision}</em>}
+            </p>
+          </div>
+          <div className="pv-tools">
+            <span className="pv-count" aria-live="polite">
+              {(index + 1).toLocaleString('es-ES')} / {count.toLocaleString('es-ES')}
             </span>
+            <button
+              type="button"
+              className="pv-btn"
+              aria-label="Alejar"
+              disabled={zoomPercent <= 100}
+              onClick={() => zoomTo(viewRef.current.scale / BUTTON_ZOOM_STEP)}
+            >
+              <Minus aria-hidden="true" />
+            </button>
+            <output className="pv-zoom" aria-label="Zoom">
+              {zoomPercent}%
+            </output>
+            <button
+              type="button"
+              className="pv-btn"
+              aria-label="Acercar"
+              onClick={() => zoomTo(viewRef.current.scale * BUTTON_ZOOM_STEP)}
+            >
+              <Plus aria-hidden="true" />
+            </button>
+            <button
+              ref={closeButton}
+              type="button"
+              className="pv-btn"
+              aria-label="Cerrar visor"
+              onClick={requestClose}
+            >
+              <X aria-hidden="true" />
+            </button>
           </div>
-          <div className="flex items-center gap-2 max-[42rem]:flex-wrap max-[42rem]:justify-end">
-            {isDownloadOnly && (
-              <a
-                className="inline-flex min-h-11 items-center px-3 text-[0.8rem] text-inherit underline-offset-4 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#b7d43b]"
-                href={mediaUrl(api, `/v1/photos/${selected.id}/content`)}
-              >
-                Descargar original
-              </a>
-            )}
-            {loadingMore && (
-              <span role="status" aria-live="polite">
-                Cargando más fotografías…
-              </span>
-            )}
-            {loadMoreError && (
-              <Button
+        </header>
+
+        <button
+          type="button"
+          className="pv-btn pv-nav pv-ui"
+          data-side="prev"
+          aria-label="Foto anterior"
+          disabled={index === 0}
+          onClick={() => step(-1)}
+          {...keepVisible}
+        >
+          <ArrowIcon direction="left" />
+        </button>
+        <button
+          type="button"
+          className="pv-btn pv-nav pv-ui"
+          data-side="next"
+          aria-label="Foto siguiente"
+          disabled={index === loadedPhotos.length - 1 && !hasMore}
+          onClick={() => step(1)}
+          {...keepVisible}
+        >
+          <ArrowIcon direction="right" />
+        </button>
+
+        <div className="pv-notes">
+          {shown!.status === 'loading' && (
+            <p className="pv-note" role="status" aria-live="polite">
+              {shown!.variant === 'original'
+                ? 'Cargando fotografía en alta calidad…'
+                : 'Cargando fotografía…'}
+            </p>
+          )}
+          {shown!.status === 'ready' && shown!.fallback && (
+            <p className="pv-note" role="status" aria-live="polite">
+              El original no se pudo cargar; se muestra la miniatura.
+            </p>
+          )}
+          {shown!.status === 'error' && (
+            <div className="pv-note" role="alert">
+              <p>No se pudo cargar la fotografía.</p>
+              <button
                 type="button"
-                variant="outline"
-                className="min-w-11 rounded-xl border-[#66705f] text-[#151a16] hover:bg-[#151a16] hover:text-[#f3f0e8]"
-                onClick={() => void fetchNextPage()}
+                onClick={() => updateShown({ status: 'loading', retry: shown!.retry + 1 })}
               >
+                Reintentar miniatura
+              </button>
+            </div>
+          )}
+          {isDownloadOnly && (
+            <p className="pv-note pv-ui" {...keepVisible}>
+              <span>Este formato se muestra con una vista previa.</span>
+              <a href={mediaUrl(api, `/v1/photos/${selected.id}/content`)}>Descargar original</a>
+            </p>
+          )}
+          {loadingMore && (
+            <p className="pv-note" role="status" aria-live="polite">
+              Cargando más fotografías…
+            </p>
+          )}
+          {loadMoreError && (
+            <p className="pv-note pv-ui" {...keepVisible}>
+              <button type="button" onClick={() => void fetchNextPage()}>
                 Reintentar carga
-              </Button>
-            )}
-            <Button
-              variant="outline"
-              size="icon"
-              className="min-h-11 rounded-xl border-[#66705f] bg-transparent text-[#151a16] hover:bg-[#151a16] hover:text-[#f3f0e8] focus-visible:outline-[#b7d43b] disabled:bg-transparent disabled:text-[#151a16]"
-              aria-label="Foto anterior"
-              disabled={index === 0}
-              onClick={() => embla?.scrollPrev(jump)}
+              </button>
+            </p>
+          )}
+        </div>
+
+        <nav ref={strip} className="pv-strip pv-ui" aria-label="Fotos" {...keepVisible}>
+          {loadedPhotos.map((photo, photoIndex) => (
+            <button
+              key={photo.id}
+              type="button"
+              aria-label={`Foto ${photoIndex + 1}: ${photoDateLabel(photo)}`}
+              aria-current={photoIndex === index ? 'true' : undefined}
+              tabIndex={photoIndex === index ? 0 : -1}
+              onClick={() => select(photoIndex, photoIndex > index ? 1 : -1)}
             >
-              <ArrowIcon direction="left" />
-            </Button>
-            <Button
-              variant="outline"
-              size="icon"
-              className="min-h-11 rounded-xl border-[#66705f] bg-transparent text-[#151a16] hover:bg-[#151a16] hover:text-[#f3f0e8] focus-visible:outline-[#b7d43b] disabled:bg-transparent disabled:text-[#151a16]"
-              aria-label="Foto siguiente"
-              disabled={index === loadedPhotos.length - 1 && !hasMore}
-              onClick={() => {
-                if (index < loadedPhotos.length - 1) embla?.scrollNext(jump);
-                else if (hasMore) {
-                  setPendingAdvance(loadedPhotos.length);
-                  void fetchNextPage();
-                }
-              }}
-            >
-              <ArrowIcon direction="right" />
-            </Button>
-          </div>
-        </footer>
+              {/* eslint-disable-next-line @next/next/no-img-element -- Private media URLs rely on the browser's session cookies. */}
+              <img
+                src={thumbnailVariantUrl(api, photo.thumbnailUrl, 640)}
+                alt=""
+                width={photo.dimensions?.width}
+                height={photo.dimensions?.height}
+                loading="lazy"
+                decoding="async"
+                draggable={false}
+              />
+            </button>
+          ))}
+        </nav>
       </section>
     </div>
   );
 }
 
-function ViewerPhotoSlide({
+function ArrowIcon({ direction }: { direction: 'left' | 'right' }) {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d={direction === 'left' ? 'M15 5l-7 7 7 7' : 'M9 5l7 7-7 7'} />
+    </svg>
+  );
+}
+
+/** What the viewer is currently trying to show for the open photo. */
+type Shown = {
+  id: string;
+  variant: 'thumbnail' | 'original';
+  status: 'loading' | 'ready' | 'error';
+  /** Bumped to remount the image when the thumbnail is retried. */
+  retry: number;
+  /** The original failed and the thumbnail stands in for it. */
+  fallback: boolean;
+};
+
+const freshShown = (photo: TimelinePhoto): Shown => ({
+  id: photo.id,
+  variant: ORIGINAL_MIME.test(photo.mimeType) ? 'original' : 'thumbnail',
+  status: 'loading',
+  retry: 0,
+  fallback: false,
+});
+
+/**
+ * The photo itself: the thumbnail first, then the original on top once it has loaded. The
+ * parent owns the loading, fallback and retry state so its notices stay outside the zoomed frame.
+ */
+function ViewerImage({
   photo,
-  active,
-  eager,
-  requestOriginal,
-  onOriginalUnavailable,
+  shown,
+  onLoad,
+  onError,
 }: {
   photo: TimelinePhoto;
-  active: boolean;
-  eager: boolean;
-  requestOriginal: boolean;
-  onOriginalUnavailable: () => void;
+  shown: Shown;
+  onLoad: (width: number, height: number) => void;
+  onError: () => void;
 }) {
-  const [variant, setVariant] = useState<'thumbnail' | 'original'>('thumbnail');
-  const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
-  const [retryKey, setRetryKey] = useState(0);
-  const [originalFallback, setOriginalFallback] = useState(false);
-
-  useEffect(() => {
-    if (requestOriginal) {
-      setVariant('original');
-      setOriginalFallback(false);
-    } else setVariant('thumbnail');
-    setStatus('loading');
-    setRetryKey(0);
-  }, [photo.id, requestOriginal]);
-
-  const handleError = () => {
-    if (variant === 'original') {
-      setVariant('thumbnail');
-      setStatus('loading');
-      setOriginalFallback(true);
-      onOriginalUnavailable();
-      return;
-    }
-    setStatus('error');
-  };
-
-  const retryThumbnail = () => {
-    setStatus('loading');
-    setRetryKey((current) => current + 1);
-  };
   const thumbnailSrc = thumbnailVariantUrl(api, photo.thumbnailUrl, 1280);
   const src =
-    variant === 'original' ? mediaUrl(api, `/v1/photos/${photo.id}/content`) : thumbnailSrc;
+    shown.variant === 'original' ? mediaUrl(api, `/v1/photos/${photo.id}/content`) : thumbnailSrc;
 
   return (
-    <div
-      className="relative grid min-h-0 min-w-full place-items-center bg-[#080c09]"
-      aria-hidden={!active}
-    >
-      {variant === 'original' && status === 'loading' && (
+    <>
+      {shown.variant === 'original' && shown.status === 'loading' && (
         <>
           {/* Keep the small preview visible until the full image is ready. */}
           {/* eslint-disable-next-line @next/next/no-img-element -- Private media URLs rely on the browser's session cookies. */}
           <img
+            className="pv-under"
             src={thumbnailSrc}
             alt=""
             aria-hidden="true"
-            width={photo.dimensions?.width}
-            height={photo.dimensions?.height}
-            className="absolute left-1/2 top-1/2 z-0 max-h-[min(68dvh,45rem)] max-w-full -translate-x-1/2 -translate-y-1/2 object-contain"
             loading="eager"
+            draggable={false}
           />
         </>
       )}
       {/* eslint-disable-next-line @next/next/no-img-element -- Private media URLs rely on the browser's session cookies. */}
       <img
-        key={`${photo.id}-${variant}-${retryKey}`}
+        key={`${photo.id}-${shown.variant}-${shown.retry}`}
+        className="pv-img"
         src={src}
-        alt={active ? photo.fileName : ''}
-        width={photo.dimensions?.width}
-        height={photo.dimensions?.height}
-        className="relative z-10 max-h-[min(68dvh,45rem)] max-w-full object-contain"
-        loading={eager ? 'eager' : 'lazy'}
-        onLoad={() => setStatus('ready')}
-        onError={handleError}
+        alt={photo.fileName}
+        data-source={shown.variant}
+        data-ready={shown.status === 'ready'}
+        draggable={false}
+        onLoad={(event) =>
+          onLoad(event.currentTarget.naturalWidth, event.currentTarget.naturalHeight)
+        }
+        onError={onError}
       />
-      {active && status === 'loading' && (
-        <span
-          className="absolute bottom-4 left-1/2 w-fit max-w-[calc(100%-2rem)] -translate-x-1/2 rounded-[0.65rem] border border-[#f3f0e8]/30 bg-[#151a16]/95 px-3.5 py-2.5 text-center text-sm text-[#f3f0e8]"
-          role="status"
-          aria-live="polite"
-        >
-          {variant === 'original' ? 'Cargando fotografía en alta calidad…' : 'Cargando fotografía…'}
-        </span>
-      )}
-      {active && status === 'ready' && originalFallback && (
-        <span
-          className="absolute bottom-4 left-1/2 w-fit max-w-[calc(100%-2rem)] -translate-x-1/2 rounded-[0.65rem] border border-[#f3f0e8]/30 bg-[#151a16]/95 px-3.5 py-2.5 text-center text-sm text-[#f3f0e8]"
-          role="status"
-          aria-live="polite"
-        >
-          El original no se pudo cargar; se muestra la miniatura.
-        </span>
-      )}
-      {active && status === 'error' && (
-        <div
-          className="absolute inset-x-4 bottom-4 mx-auto grid w-fit max-w-[calc(100%-2rem)] justify-items-center gap-3 rounded-[0.65rem] border border-[#f3f0e8]/30 bg-[#151a16]/95 px-3.5 py-2.5 text-center text-[#f3f0e8]"
-          role="alert"
-        >
-          <p className="m-0 text-sm">No se pudo cargar la fotografía.</p>
-          <Button
-            type="button"
-            variant="outline"
-            className="min-w-11 rounded-xl border-[#b7d43b] bg-transparent text-[#f3f0e8] hover:bg-[#f3f0e8] hover:text-[#151a16]"
-            onClick={retryThumbnail}
-          >
-            Reintentar miniatura
-          </Button>
-        </div>
-      )}
-    </div>
+    </>
   );
 }
 

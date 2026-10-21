@@ -1,0 +1,335 @@
+/*
+ * The photo viewer: a dark, cinematic overlay. It reads the night-sky tokens when it lives
+ * inside the sky and carries its own fallbacks otherwise.
+ */
+.pv {
+  --pv-accent: var(--sky-accent, #cfe0ff);
+  --pv-glow: var(--sky-glow, rgba(190, 210, 255, 0.55));
+  --pv-ease: var(--sky-ease, cubic-bezier(0.22, 1, 0.36, 1));
+  --pv-ui: var(--sky-ui, system-ui, -apple-system, 'Segoe UI', sans-serif);
+  --pv-mono: var(--sky-mono, ui-monospace, 'Cascadia Mono', Consolas, monospace);
+  --pv-display: var(--sky-display, 'Didot', 'Bodoni 72', Georgia, serif);
+  position: fixed;
+  z-index: 100;
+  inset: 0;
+  overflow: hidden;
+  background: #000;
+  color: #fff;
+  color-scheme: dark;
+  font-family: var(--pv-ui);
+  user-select: none;
+  -webkit-user-select: none;
+  transition: background-color 0.38s;
+  animation: pv-in 0.35s var(--pv-ease);
+}
+.pv[data-closing='true'] {
+  background-color: transparent;
+}
+.pv :focus-visible {
+  outline: 2px solid var(--pv-accent);
+  outline-offset: 3px;
+}
+.pv :is(button, a) {
+  min-width: 44px;
+  min-height: 44px;
+}
+.pv-dialog {
+  position: absolute;
+  inset: 0;
+  outline: none;
+}
+
+/* Ambient light: the photo itself, blurred far beyond recognition. */
+.pv-amb {
+  position: absolute;
+  inset: -10%;
+  background-position: center;
+  background-size: cover;
+  filter: blur(60px) saturate(1.3) brightness(0.45);
+  opacity: 1;
+  transition: opacity 0.6s;
+}
+.pv[data-closing='true'] .pv-amb {
+  opacity: 0;
+}
+
+.pv-stage {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  cursor: zoom-in;
+  touch-action: none;
+}
+.pv-stage[data-zoomed='true'] {
+  cursor: grab;
+}
+.pv-stage[data-dragging='true'] {
+  cursor: grabbing;
+}
+.pv-frame {
+  position: relative;
+  flex: none;
+  transform-origin: 50% 50%;
+  will-change: transform;
+  box-shadow: 0 40px 140px rgba(0, 0, 0, 0.6);
+}
+.pv-img,
+.pv-under {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  object-fit: contain;
+  pointer-events: none;
+}
+.pv-under {
+  z-index: 0;
+}
+.pv-img {
+  z-index: 1;
+}
+.pv-img[data-ready='false'] {
+  opacity: 0;
+}
+
+/* Chrome: fades away after a moment of stillness. */
+.pv-ui {
+  transition: opacity 0.5s var(--pv-ease);
+}
+.pv[data-idle='true'] {
+  cursor: none;
+}
+.pv[data-idle='true'] .pv-ui,
+.pv[data-closing='true'] .pv-ui {
+  opacity: 0;
+  pointer-events: none;
+}
+.pv-top {
+  position: absolute;
+  z-index: 2;
+  top: 0;
+  right: 0;
+  left: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px 16px;
+  padding: calc(env(safe-area-inset-top, 0px) + 18px) max(18px, env(safe-area-inset-right, 0px))
+    40px max(18px, env(safe-area-inset-left, 0px));
+  background: linear-gradient(rgba(0, 0, 0, 0.55), transparent);
+  pointer-events: none;
+}
+.pv-top > * {
+  pointer-events: auto;
+}
+.pv-meta {
+  min-width: 0;
+}
+.pv-date {
+  margin: 0;
+  color: #fff;
+  font-family: var(--pv-display);
+  font-size: clamp(22px, 3vw, 32px);
+  font-weight: 400;
+  text-wrap: balance;
+}
+.pv-folder {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 6px 0 0;
+  color: rgba(255, 255, 255, 0.62);
+  font-size: 13px;
+}
+.pv-file {
+  max-width: 28ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pv-chip {
+  padding: 3px 7px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 999px;
+  font-family: var(--pv-mono);
+  font-size: 10px;
+  font-style: normal;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.pv-tools {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.pv-count {
+  margin-right: 10px;
+  color: rgba(255, 255, 255, 0.6);
+  font-family: var(--pv-mono);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+.pv-zoom {
+  min-width: 48px;
+  color: rgba(255, 255, 255, 0.75);
+  font-family: var(--pv-mono);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+.pv-btn {
+  display: inline-grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.35);
+  color: #fff;
+  cursor: pointer;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  transition:
+    background-color 0.2s,
+    border-color 0.2s;
+}
+.pv-btn:hover:not(:disabled) {
+  border-color: rgba(255, 255, 255, 0.35);
+  background: rgba(255, 255, 255, 0.14);
+}
+.pv-btn:disabled {
+  opacity: 0.25;
+  cursor: default;
+}
+.pv-btn svg {
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.4;
+}
+.pv-nav {
+  position: absolute;
+  z-index: 2;
+  top: 50%;
+  width: 52px;
+  height: 52px;
+  transform: translateY(-50%);
+}
+.pv-nav[data-side='prev'] {
+  left: max(14px, env(safe-area-inset-left, 0px));
+}
+.pv-nav[data-side='next'] {
+  right: max(14px, env(safe-area-inset-right, 0px));
+}
+
+/* Bottom: notices above the filmstrip. */
+.pv-notes {
+  position: absolute;
+  z-index: 2;
+  right: 16px;
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 96px);
+  left: 16px;
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+  pointer-events: none;
+}
+.pv-note {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 8px 12px;
+  max-width: 100%;
+  margin: 0;
+  padding: 8px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 14px;
+  background: rgba(8, 10, 16, 0.82);
+  font-size: 13px;
+  text-align: center;
+  pointer-events: auto;
+}
+.pv-note p {
+  margin: 0;
+}
+.pv-note :is(button, a) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 14px;
+  border: 1px solid var(--pv-accent);
+  border-radius: 999px;
+  background: transparent;
+  color: #fff;
+  font-size: 13px;
+  text-decoration: none;
+}
+.pv-strip {
+  position: absolute;
+  z-index: 2;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  display: flex;
+  align-items: flex-end;
+  gap: 6px;
+  overflow-x: auto;
+  padding: 40px max(18px, env(safe-area-inset-left, 0px))
+    calc(env(safe-area-inset-bottom, 0px) + 16px);
+  background: linear-gradient(transparent, rgba(0, 0, 0, 0.6));
+  scrollbar-width: none;
+}
+.pv-strip::-webkit-scrollbar {
+  display: none;
+}
+.pv-strip button {
+  flex: none;
+  min-width: 0;
+  height: 46px;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  border-radius: 3px;
+  background: #111;
+  cursor: pointer;
+  opacity: 0.45;
+  transition:
+    opacity 0.25s,
+    transform 0.35s var(--pv-ease);
+}
+.pv-strip button img {
+  display: block;
+  width: auto;
+  height: 100%;
+}
+.pv-strip button:hover {
+  opacity: 0.8;
+}
+.pv-strip button[aria-current='true'] {
+  opacity: 1;
+  transform: translateY(-4px) scale(1.12);
+  box-shadow: 0 0 0 1px var(--pv-accent);
+}
+
+@keyframes pv-in {
+  from {
+    background-color: transparent;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .pv,
+  .pv-amb,
+  .pv-ui,
+  .pv-btn,
+  .pv-strip button {
+    transition: none;
+    animation: none;
+  }
+}
