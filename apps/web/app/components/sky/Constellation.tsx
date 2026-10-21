@@ -1,14 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import {
-  useLayoutEffect,
-  useMemo,
-  useRef,
-  type CSSProperties,
-  type MouseEvent,
-  type ReactNode,
-} from 'react';
+import { useLayoutEffect, useMemo, useRef, type CSSProperties, type ReactNode } from 'react';
 import { api } from '../../../lib/api';
 import { thumbnailVariantUrl } from '../../../lib/media';
 import { photoAspectRatio, type TimelinePhoto } from '../timeline-model';
@@ -20,6 +13,7 @@ import {
 } from './constellation-layout';
 import { mosaic } from './mosaic';
 import { clamp, seededRng, smooth } from './rng';
+import { isPlainClick } from './SkyChrome';
 import { useSky, useSkyFrame, useSkyItem } from './SkyStage';
 
 /** Shapes of the stars shown while a group's photos are still on their way. */
@@ -45,9 +39,6 @@ const STAR_STYLE = {
   borderRadius: '50%',
   '--dot': 1,
 } as CSSProperties;
-
-const isPlainClick = (event: MouseEvent) =>
-  event.button === 0 && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey;
 
 function useCells(
   photos: TimelinePhoto[] | null,
@@ -94,6 +85,7 @@ export function Constellation({
   photos,
   more,
   afterHeader = false,
+  epoch = 0,
   onNear,
   onEnter,
 }: {
@@ -114,11 +106,13 @@ export function Constellation({
   /** Photos beyond the previews, shown as "+N más". */
   more: number;
   afterHeader?: boolean;
-  /** Fires once, when the group approaches the viewport. */
+  /** Changing it (e.g. the archive index was invalidated) lets `onNear` fire again. */
+  epoch?: number;
+  /** Fires once per epoch, when the group approaches the viewport. */
   onNear?: () => void;
   onEnter: (href: string, cluster: Element | null) => void;
 }) {
-  const { viewport, orientation, reduced } = useSky();
+  const { engine, viewport, orientation, reduced } = useSky();
   const horizontal = orientation === 'horizontal';
   const geometry = useMemo(
     () => constellationGeometry(kind, viewport, orientation, index, count, { afterHeader }),
@@ -135,6 +129,14 @@ export function Constellation({
   useLayoutEffect(() => {
     near.current = onNear;
   });
+  // Previews requested before an invalidation are gone: ask again once the group is near.
+  const seenEpoch = useRef(epoch);
+  useLayoutEffect(() => {
+    if (seenEpoch.current === epoch) return;
+    seenEpoch.current = epoch;
+    requested.current = false;
+    engine.wake();
+  }, [engine, epoch]);
   // New tiles (or a new layout) must be painted at least once even if the track is at rest.
   useLayoutEffect(() => {
     settled.current = false;

@@ -7,6 +7,8 @@ export type SkyRailEntry = {
   /** Matches the key of the registered item this entry jumps to. */
   key: string;
   label: string;
+  /** Compact label for the slim rail of narrow screens, where `label` is hidden. */
+  short?: string | null;
   small?: string | null;
   aria: string;
   /** Empty periods stay visible but cannot be selected. */
@@ -46,6 +48,7 @@ export function SkyRail({
           key={entry.key}
           type="button"
           disabled={entry.disabled}
+          data-short={entry.short ? 'true' : undefined}
           aria-label={entry.aria}
           aria-current={entry.key === currentKey ? 'true' : undefined}
           onClick={() => {
@@ -54,6 +57,7 @@ export function SkyRail({
           }}
         >
           <span>{entry.label}</span>
+          {entry.short ? <i className="sky-short">{entry.short}</i> : null}
           {entry.small ? <small>{entry.small}</small> : null}
         </button>
       ))}

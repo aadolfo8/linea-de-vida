@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect } from 'react';
+import { useEffect, useLayoutEffect, useRef } from 'react';
 
 const positions = new Map<string, number>();
 
@@ -8,17 +8,24 @@ const positions = new Map<string, number>();
  * Keep each temporal destination's position while its asynchronous content returns. A depth
  * with nothing to restore starts at the top, because the document outlives route changes.
  * Pass `restorePosition: false` when something else (landing on a group) decides the position.
+ * `variant` (e.g. the travel orientation) splits the saved slot without restarting the hook:
+ * changing it keeps the position the owner of the variant chose and leaves the other slot alone.
  */
 export function useTimelinePosition(
   path: string,
-  { restorePosition = true }: { restorePosition?: boolean } = {},
+  { restorePosition = true, variant = '' }: { restorePosition?: boolean; variant?: string } = {},
 ) {
+  const variantRef = useRef(variant);
+  useLayoutEffect(() => {
+    variantRef.current = variant;
+  });
   useEffect(() => {
-    const target = restorePosition ? (positions.get(path) ?? 0) : 0;
+    const slot = () => `${variantRef.current}:${path}`;
+    const target = restorePosition ? (positions.get(slot()) ?? 0) : 0;
     let restoring = target > 0;
     if (!restoring && window.scrollY > 0) window.scrollTo({ top: 0, behavior: 'instant' });
     const remember = () => {
-      if (!restoring) positions.set(path, window.scrollY);
+      if (!restoring) positions.set(slot(), window.scrollY);
     };
     const stop = () => {
       restoring = false;

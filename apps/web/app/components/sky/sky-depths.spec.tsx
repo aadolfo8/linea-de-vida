@@ -4,6 +4,7 @@ import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { TimelinePhoto } from '../timeline-model';
+import { notifyArchiveIndexUpdated } from '../../../lib/archive-index-events';
 import { SkyStage } from './SkyStage';
 import { YearDepth } from './YearDepth';
 import { YearsDepth } from './YearsDepth';
@@ -154,6 +155,38 @@ describe('sky depths', () => {
         'Ir a 1998',
         'Ir a 2004',
       ]);
+    });
+
+    it('asks again for the previews of near groups after the archive index changes', async () => {
+      cache.loadTimelineYears.mockResolvedValue(years);
+      cache.loadYearSummary.mockImplementation(async (year: number) => ({
+        year,
+        total: 12,
+        months: [{ month: 1, photoCount: 5 }],
+        unknownMonthCount: 0,
+        previews: [photo(`p${year}a`)],
+      }));
+      await mount(depth);
+      expect(cache.loadYearSummary.mock.calls.map((call) => call[0])).toEqual([1998, 2004]);
+
+      await act(async () => notifyArchiveIndexUpdated());
+      await settle();
+      expect(cache.loadYearSummary.mock.calls.map((call) => call[0])).toEqual([
+        1998, 2004, 1998, 2004,
+      ]);
+      expect(links()[0]!.querySelectorAll('img')).toHaveLength(1);
+    });
+
+    it('labels the slim rail with the short year so it reads without the month counts', async () => {
+      cache.loadTimelineYears.mockResolvedValue(years);
+      cache.loadYearSummary.mockReturnValue(new Promise(() => undefined));
+      await mount(depth);
+
+      expect(
+        railButtons().map((button) => button.querySelector('.sky-short')?.textContent),
+      ).toEqual(['’98', '’04']);
+      expect(railButtons().every((button) => button.dataset.short === 'true')).toBe(true);
+      expect(railButtons()[0]!.getAttribute('aria-label')).toBe('Ir a 1998');
     });
 
     it('shows stars, not photos, while a summary is still on its way', async () => {

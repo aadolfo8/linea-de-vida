@@ -5,6 +5,7 @@ import {
   peekPendingTravel,
   resetTravel,
   setPendingTravel,
+  shouldRestorePosition,
   travelAnimation,
   travelDepth,
   travelLocation,
@@ -20,6 +21,31 @@ afterEach(resetTravel);
 describe('travel depth', () => {
   it('maps routes to depths', () => {
     expect([years, year, month, unknown].map(travelDepth)).toEqual([0, 1, 2, 2]);
+  });
+});
+
+describe('restoring a saved position', () => {
+  it('restores when nothing decides the position', () => {
+    expect(shouldRestorePosition(year)).toBe(true);
+    consumeTravelEntry(year);
+    expect(shouldRestorePosition(year)).toBe(true);
+  });
+
+  it('lets an explicit landing win without consuming the travel', () => {
+    setPendingTravel({ mode: 'out', origin: { x: 0, y: 0 }, landKey: '8' });
+    expect(shouldRestorePosition(year)).toBe(false);
+    expect(peekPendingTravel()).not.toBeNull();
+  });
+
+  it('lets the landing of browser back win too, before the depth consumes it', () => {
+    consumeTravelEntry(month);
+    expect(shouldRestorePosition(year)).toBe(false);
+    expect(consumeTravelEntry(year)).toMatchObject({ mode: 'out', landKey: '8' });
+  });
+
+  it('keeps restoring when going deeper, which lands on no group', () => {
+    consumeTravelEntry(year);
+    expect(shouldRestorePosition(month)).toBe(true);
   });
 });
 

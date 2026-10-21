@@ -30,7 +30,7 @@ import { useTimelinePosition } from '../useTimelinePosition';
 import './month.css';
 import { SkyHint } from './SkyChrome';
 import { SkyRail, type SkyRailEntry } from './SkyRail';
-import { SkyOverlay, useSky, useSkyFrame, useSkyItem } from './SkyStage';
+import { SkyOverlay, useSky, useSkyFrame, useSkyItem, useSkyMeasure } from './SkyStage';
 import { SkyError, SkyLoading } from './SkyStates';
 import { PeriodHeader } from './SkyThread';
 import {
@@ -43,12 +43,18 @@ import {
   type MonthSection,
   type SectionLayout,
 } from './month-layout';
-import { peekPendingTravel, travelLocation } from './travel';
+import { shouldRestorePosition, travelLocation } from './travel';
 import { useMonthPhotos } from './use-month-photos';
 import { useTravelEntry } from './use-travel';
 
 /** Tiles appear once as they come within this many viewports of the leading edge. */
 const REVEAL_REACH = 1.02;
+
+/** `CSS.escape` where it exists; ids are opaque strings, so quotes and backslashes are escaped otherwise. */
+const cssEscape = (value: string) =>
+  typeof CSS !== 'undefined' && typeof CSS.escape === 'function'
+    ? CSS.escape(value)
+    : value.replace(/["\\]/g, '\\$&');
 
 const totalOf = (data: TimelineMonthPreviews | null, month: TimelineMonth) => {
   const wanted = month === 'sin-mes' ? null : month;
@@ -76,8 +82,8 @@ export function MonthDepth({
   const { engine, orientation, viewport, reduced } = useSky();
   const undated = month === 'sin-mes';
   const path = `/timeline/${year}/${month}`;
-  const restore = useRef(!peekPendingTravel()?.landKey);
-  useTimelinePosition(`sky:${orientation}:${path}`, { restorePosition: restore.current });
+  const [restore] = useState(() => shouldRestorePosition(travelLocation(path)));
+  useTimelinePosition(`sky:${path}`, { restorePosition: restore, variant: orientation });
 
   const [revision, setRevision] = useState(0);
   const [viewerIndex, setViewerIndex] = useState<number | null>(null);
@@ -139,8 +145,23 @@ export function MonthDepth({
     return result;
   }, [geometry, sections]);
 
-  // Page in more photos when the travel position approaches the end of what is loaded.
+  // Page in more photos when the travel position approaches the end of what is loaded. A
+  // request only waits for the appended photos to be measured: once it settles and the track
+  // did not grow (duplicates, an empty page, a lane that absorbed them) the guard is released
+  // so paging goes on while a cursor exists and the end is near.
   const lastRequestLength = useRef(-1);
+  const awaitingMeasure = useRef(false);
+  const [settledPages, setSettledPages] = useState(0);
+  useEffect(() => {
+    if (settledPages === 0) return;
+    awaitingMeasure.current = true;
+    engine.scheduleMeasure();
+  }, [engine, settledPages]);
+  useSkyMeasure(() => {
+    if (!awaitingMeasure.current) return;
+    awaitingMeasure.current = false;
+    if (engine.trackLength === lastRequestLength.current) lastRequestLength.current = -1;
+  });
   useSkyFrame((frame) => {
     if (!loaded) return;
     if (
@@ -156,7 +177,7 @@ export function MonthDepth({
     )
       return;
     lastRequestLength.current = engine.trackLength;
-    void loadNext();
+    void loadNext().then(() => setSettledPages((value) => value + 1));
   });
 
   const photosRef = useRef(photos);
@@ -171,9 +192,7 @@ export function MonthDepth({
   // The viewer grows from, and shrinks back to, the tile of the photo it shows.
   const tileOf = useCallback(
     (photoId: string) =>
-      [...document.querySelectorAll<HTMLElement>('button.sky-ph')].find(
-        (tile) => tile.dataset.photoId === photoId,
-      ) ?? null,
+      document.querySelector<HTMLElement>(`button.sky-ph[data-photo-id="${cssEscape(photoId)}"]`),
     [],
   );
   // Changing photo moves the hidden track onto the new tile, so closing lands on a real one.

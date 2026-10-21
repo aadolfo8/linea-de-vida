@@ -233,25 +233,56 @@ describe('MonthDepth', () => {
       expect(tiles()).toHaveLength(1);
     });
 
-    it('appends the next page when the track approaches the end, once per measured length', async () => {
+    it('keeps paging while a cursor exists and the end is near, even if the track does not grow', async () => {
       cache.loadGalleryPage
         .mockResolvedValueOnce(page([day('a', 14), day('b', 14), day('c', 13)], 'c1'))
         .mockResolvedValueOnce(page([day('d', 13), day('e', 12)], 'c2'))
         .mockResolvedValueOnce(page([day('f', 12)], null));
       scrollHeight = 100;
       await mount();
+      await settle(250);
 
-      // The jsdom track never changes length, so exactly one follow-up page is asked for.
+      // The jsdom track never changes length: a settled request must not stall the next one.
       expect(cache.loadGalleryPage.mock.calls.map((call) => [call[2], call[3]])).toEqual([
         [null, 60],
         ['c1', 60],
+        ['c2', 60],
       ]);
-      expect(tiles()).toHaveLength(5);
+      expect(tiles()).toHaveLength(6);
       expect(sections().map((section) => section.getAttribute('aria-label'))).toEqual([
         '14 de agosto: 2 fotos',
         '13 de agosto: 2 fotos',
-        '12 de agosto: 1 foto',
+        '12 de agosto: 2 fotos',
       ]);
+    });
+
+    it('goes past a page made only of photos it already has', async () => {
+      cache.loadGalleryPage
+        .mockResolvedValueOnce(page([day('a', 14), day('b', 14)], 'c1'))
+        .mockResolvedValueOnce(page([day('a', 14), day('b', 14)], 'c2'))
+        .mockResolvedValueOnce(page([day('c', 13)], null));
+      scrollHeight = 100;
+      await mount();
+      await settle(250);
+
+      expect(cache.loadGalleryPage.mock.calls.map((call) => call[2])).toEqual([null, 'c1', 'c2']);
+      expect(tiles()).toHaveLength(3);
+    });
+
+    it('asks for one page at a time', async () => {
+      let release: (value: TimelinePhotoPage) => void = () => undefined;
+      cache.loadGalleryPage
+        .mockResolvedValueOnce(page([day('a', 14)], 'c1'))
+        .mockReturnValueOnce(new Promise((resolve) => (release = resolve)));
+      scrollHeight = 100;
+      await mount();
+      await settle(200);
+
+      expect(cache.loadGalleryPage).toHaveBeenCalledTimes(2);
+      await act(async () => release(page([day('b', 13)], null)));
+      await settle();
+      expect(cache.loadGalleryPage).toHaveBeenCalledTimes(2);
+      expect(tiles()).toHaveLength(2);
     });
 
     it('extends the lanes without moving the tiles that were already placed', async () => {

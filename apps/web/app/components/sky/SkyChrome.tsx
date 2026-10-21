@@ -14,7 +14,8 @@ export type SkyCrumb = {
   landKey?: string | null;
 };
 
-const isPlainClick = (event: MouseEvent) =>
+/** A primary-button click with no modifier; anything else is left to the browser (new tab, etc.). */
+export const isPlainClick = (event: MouseEvent) =>
   event.button === 0 && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey;
 
 /**
