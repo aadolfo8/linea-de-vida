@@ -2,6 +2,7 @@ import { Inject, Injectable, NotFoundException, ServiceUnavailableException } fr
 import {
   DatePrecision,
   DateSource,
+  FolderDateRule,
   FolderDateRuleScope,
   PhotoStatus,
   Prisma,
@@ -19,6 +20,9 @@ import { PrismaService } from './prisma.service';
 import { TakeoutMatcher, TakeoutMetadata, TakeoutMetadataParser } from './takeout';
 import { effectiveDate } from './manual-date.service';
 import { photoDimensions } from './photo-dimensions';
+import { contentKeyFor, isProvisionalContentKey, parseSizeBytes } from './photo-identity';
+import { applicableRule, inheritsToSubfolders } from './folder-rule-scope';
+import { isUniqueViolation, mergePhotos, refreshPhotos } from './photo-catalog';
 
 const jobOptions: JobsOptions = {
   attempts: 3,
@@ -43,7 +47,35 @@ type FolderWork = {
   takeout?: { candidates: TakeoutCandidate[]; cursor?: string; complete: boolean; bytes: number };
 };
 type Checkpoint = { pendingFolders: FolderWork[]; seenFolders: string[] };
+/** Lower is stronger evidence; a copy never replaces a photo's date with weaker evidence. */
+const evidenceRank: Record<string, number> = {
+  EXIF: 0,
+  DRIVE_IMAGE_METADATA: 1,
+  TAKEOUT: 2,
+  FILENAME: 3,
+  FOLDER: 4,
+  NONE: 5,
+};
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/** The date rule that applies to photos in `folderId`, walking the stored folder tree. */
+async function folderRuleFor(
+  db: Pick<Prisma.TransactionClient, 'indexedFolder'>,
+  folderId: string | null,
+) {
+  const tree = new Map<string, { parentId: string | null; dateRule: FolderDateRule | null }>();
+  let currentId = folderId;
+  while (currentId && !tree.has(currentId)) {
+    const folder = await db.indexedFolder.findUnique({
+      where: { id: currentId },
+      include: { dateRule: true },
+    });
+    if (!folder) break;
+    tree.set(currentId, { parentId: folder.parentId, dateRule: folder.dateRule });
+    currentId = folder.parentId;
+  }
+  return applicableRule(tree, folderId);
+}
 
 @Injectable()
 export class SyncService {
@@ -293,10 +325,14 @@ export class SyncService {
       } | null,
       candidates: Array<{ fileName: string; metadata: TakeoutMetadata }>,
     ) => {
-      const excluded = await this.prisma.photoExclusion.findUnique({
-        where: { userId_driveFileId: { userId: run.source.userId, driveFileId: item.id } },
+      const userId = run.source.userId;
+      const key = contentKeyFor(item);
+      const exclusions = await this.prisma.photoExclusion.findMany({
+        where: { userId, driveFileId: item.id },
       });
-      if (excluded && !excluded.restoredAt) return false;
+      // A legacy tombstone (a photo removed before soft hide existed) comes back as a hidden photo
+      // carrying its saved manual date; a restored one comes back visible. Either way it is spent.
+      const excluded = exclusions.find((entry) => !entry.restoredAt) ?? exclusions[0];
       const restoredOverride =
         excluded?.manualDateValue && excluded.manualDatePrecision
           ? {
@@ -323,72 +359,179 @@ export class SyncService {
         takeoutPhotoTakenTime: match.metadata?.photoTakenTime
           ? new Date(Number(match.metadata.photoTakenTime) * 1000).toISOString()
           : undefined,
+        fileName: item.name,
         folderSegments: folder.path,
       });
-      await this.prisma.$transaction(async (tx) => {
-        const existing = await tx.photo.findUnique({
-          where: { userId_driveFileId: { userId: run.source.userId, driveFileId: item.id } },
-          include: { override: true },
-        });
-        const effective = effectiveDate({
-          detectedDate: detected.value,
-          detectedPrecision: detected.precision as DatePrecision,
-          detectedSource: detected.source as DateSource,
-          folderRule,
-          override: existing?.override ?? restoredOverride,
-        });
-        const data = {
-          sourceId: run.source.id,
-          folderId: indexedFolderId,
-          fileName: item.name,
-          mimeType: item.mimeType,
-          imageMetadata: dimensions ?? existing?.imageMetadata ?? undefined,
-          status: PhotoStatus.ACTIVE,
-          lastSeenSyncRunId: run.id,
-          detectedDate: detected.value,
-          detectedPrecision: detected.precision as DatePrecision,
-          detectedSource: detected.source as DateSource,
-          takeoutMatchStatus: match.status as TakeoutMatchStatus,
-          takeoutMatchReason: match.reason,
-          gpsLatitude: match.metadata?.location?.latitude ?? null,
-          gpsLongitude: match.metadata?.location?.longitude ?? null,
-        };
-        let indexedPhotoId: string;
-        if (existing) {
-          await tx.photo.update({
-            where: { id: existing.id },
-            data: {
-              ...data,
-              effectiveDateValue: effective.value,
-              effectiveDatePrecision: effective.precision as DatePrecision,
-              effectiveDateSource: effective.origin as DateSource,
-            },
+      const copy = {
+        sourceId: run.source.id,
+        folderId: indexedFolderId,
+        fileName: item.name,
+        mimeType: item.mimeType,
+        md5Checksum: item.md5Checksum?.toLowerCase() ?? null,
+        sizeBytes: parseSizeBytes(item.size),
+      };
+      const attach = () =>
+        this.prisma.$transaction(async (tx) => {
+          const file = await tx.photoFile.findUnique({
+            where: { userId_driveFileId: { userId, driveFileId: item.id } },
           });
-          indexedPhotoId = existing.id;
-        } else {
-          const created = await tx.photo.create({
-            data: {
-              userId: run.source.userId,
+          const byKey = await tx.photo.findUnique({
+            where: { userId_contentKey: { userId, contentKey: key } },
+            include: { override: true },
+          });
+          let existing = file
+            ? await tx.photo.findUnique({
+                where: { id: file.photoId },
+                include: { override: true },
+              })
+            : byKey;
+          let detachedFrom: string | null = null;
+          if (existing && file && existing.contentKey !== key) {
+            const siblings = isProvisionalContentKey(existing.contentKey)
+              ? 0
+              : await tx.photoFile.count({
+                  where: { photoId: existing.id, driveFileId: { not: item.id } },
+                });
+            if (siblings > 0) {
+              // The bytes of this copy changed (edited or replaced in Drive): it no longer belongs
+              // to the photo that keeps its other copies and follows its new content instead.
+              detachedFrom = existing.id;
+              existing = byKey;
+            } else if (byKey && byKey.id !== existing.id) {
+              // Only copy of its photo, and the new content already has a photo (the provisional
+              // key of a file whose checksum is known now follows the same rule).
+              await mergePhotos(tx, byKey, existing);
+              existing = await tx.photo.findUnique({
+                where: { id: byKey.id },
+                include: { override: true },
+              });
+            } else await tx.photo.update({ where: { id: existing.id }, data: { contentKey: key } });
+          }
+          const otherCopies = existing
+            ? await tx.photoFile.count({
+                where: {
+                  photoId: existing.id,
+                  status: 'ACTIVE',
+                  driveFileId: { not: item.id },
+                },
+              })
+            : 0;
+          // The photo mirrors its primary copy: this file when it is the primary or the primary is
+          // no longer available, otherwise the existing primary stays untouched.
+          const primary =
+            existing && existing.driveFileId !== item.id
+              ? await tx.photoFile.findUnique({
+                  where: { userId_driveFileId: { userId, driveFileId: existing.driveFileId } },
+                })
+              : null;
+          const mirrorsThisFile =
+            !existing || existing.driveFileId === item.id || primary?.status !== 'ACTIVE';
+          // Dates always follow the primary copy's folder, never the folder of whichever copy this
+          // is, so they do not flip between syncs.
+          const primaryFolderRule = mirrorsThisFile
+            ? folderRule
+            : await folderRuleFor(tx, existing!.folderId);
+          // With several copies the strongest evidence wins and a secondary copy must beat, not
+          // merely equal, what the photo already has.
+          const detectionApplies =
+            !existing ||
+            otherCopies === 0 ||
+            (mirrorsThisFile
+              ? evidenceRank[detected.source]! <= evidenceRank[existing.detectedSource]!
+              : evidenceRank[detected.source]! < evidenceRank[existing.detectedSource]!);
+          const takeoutApplies =
+            detectionApplies ||
+            (match.status === 'TAKEOUT_MATCHED' &&
+              existing?.takeoutMatchStatus !== 'TAKEOUT_MATCHED');
+          const evidence =
+            detectionApplies || !existing
+              ? {
+                  detectedDate: detected.value,
+                  detectedPrecision: detected.precision as DatePrecision,
+                  detectedSource: detected.source as DateSource,
+                }
+              : {
+                  detectedDate: existing.detectedDate,
+                  detectedPrecision: existing.detectedPrecision,
+                  detectedSource: existing.detectedSource,
+                };
+          const effective = effectiveDate({
+            ...evidence,
+            folderRule: primaryFolderRule,
+            override: existing?.override ?? restoredOverride,
+          });
+          const data = {
+            status: PhotoStatus.ACTIVE,
+            imageMetadata: dimensions ?? existing?.imageMetadata ?? undefined,
+            ...evidence,
+            ...(takeoutApplies
+              ? {
+                  takeoutMatchStatus: match.status as TakeoutMatchStatus,
+                  takeoutMatchReason: match.reason,
+                  gpsLatitude: match.metadata?.location?.latitude ?? null,
+                  gpsLongitude: match.metadata?.location?.longitude ?? null,
+                }
+              : {}),
+            effectiveDateValue: effective.value,
+            effectiveDatePrecision: effective.precision as DatePrecision,
+            effectiveDateSource: effective.origin as DateSource,
+          };
+          const hide =
+            excluded && !excluded.restoredAt && !existing?.hiddenAt
+              ? { hiddenAt: excluded.createdAt ?? new Date() }
+              : {};
+          const mirror = {
+            driveFileId: item.id,
+            sourceId: copy.sourceId,
+            folderId: copy.folderId,
+            fileName: copy.fileName,
+            mimeType: copy.mimeType,
+            lastSeenSyncRunId: run.id,
+          };
+          let photoId: string;
+          if (existing) {
+            await tx.photo.update({
+              where: { id: existing.id },
+              data: { ...data, ...(mirrorsThisFile ? mirror : {}), ...hide },
+            });
+            photoId = existing.id;
+          } else {
+            const created = await tx.photo.create({
+              data: { userId, contentKey: key, ...mirror, ...data, ...hide },
+            });
+            photoId = created.id;
+          }
+          await tx.photoFile.upsert({
+            where: { userId_driveFileId: { userId, driveFileId: item.id } },
+            create: {
+              photoId,
+              userId,
               driveFileId: item.id,
-              ...data,
-              effectiveDateValue: effective.value,
-              effectiveDatePrecision: effective.precision as DatePrecision,
-              effectiveDateSource: effective.origin as DateSource,
+              ...copy,
+              status: 'ACTIVE',
+              lastSeenSyncRunId: run.id,
             },
+            update: { photoId, ...copy, status: 'ACTIVE', lastSeenSyncRunId: run.id },
           });
-          indexedPhotoId = created.id;
+          if (detachedFrom) await refreshPhotos(tx, [detachedFrom]);
+          if (restoredOverride && !existing?.override)
+            await tx.manualDateOverride.upsert({
+              where: { photoId },
+              create: { photoId, ...restoredOverride },
+              update: restoredOverride,
+            });
+          if (excluded) await tx.photoExclusion.deleteMany({ where: { id: excluded.id, userId } });
+        });
+      for (let attempt = 0; ; attempt++) {
+        try {
+          await attach();
+          break;
+        } catch (error) {
+          // Two copies of the same new content in one page race to create the photo; the loser
+          // retries and attaches to the winner.
+          if (!isUniqueViolation(error) || attempt >= 2) throw error;
         }
-        if (restoredOverride && !existing?.override)
-          await tx.manualDateOverride.upsert({
-            where: { photoId: indexedPhotoId },
-            create: { photoId: indexedPhotoId, ...restoredOverride },
-            update: restoredOverride,
-          });
-        if (excluded?.restoredAt)
-          await tx.photoExclusion.deleteMany({
-            where: { id: excluded.id, userId: run.source.userId },
-          });
-      });
+      }
       counts.indexed++;
       return true;
     };
@@ -444,7 +587,8 @@ export class SyncService {
             include: { dateRule: true },
           });
           if (!ancestor) break;
-          if (ancestor.dateRule?.scope !== 'DIRECT_ONLY') folderRule = ancestor.dateRule;
+          if (ancestor.dateRule && inheritsToSubfolders(ancestor.dateRule.scope))
+            folderRule = ancestor.dateRule;
           ancestorId = ancestor.parentId;
         }
         // Collect metadata across the entire folder before matching any image page.
@@ -578,18 +722,27 @@ export class SyncService {
         partial || checkpoint.pendingFolders.length
           ? SyncRunStatus.PARTIAL
           : SyncRunStatus.SUCCEEDED;
+      let removedCount = 0;
+      if (status === SyncRunStatus.SUCCEEDED) {
+        // A copy is gone when its source finished a complete scan without seeing it; the photo is
+        // gone only when none of its copies (in any source) is left.
+        const unseen = {
+          sourceId: run.source.id,
+          status: 'ACTIVE' as const,
+          OR: [{ lastSeenSyncRunId: null }, { lastSeenSyncRunId: { not: run.id } }],
+        };
+        const stale = await this.prisma.photoFile.findMany({
+          where: unseen,
+          select: { photoId: true },
+        });
+        await this.prisma.photoFile.updateMany({ where: unseen, data: { status: 'MISSING' } });
+        removedCount = await refreshPhotos(
+          this.prisma,
+          stale.map((file) => file.photoId),
+        );
+      }
       await this.prisma.$transaction(async (tx) => {
-        let removedCount = 0;
         if (status === SyncRunStatus.SUCCEEDED) {
-          const removed = await tx.photo.updateMany({
-            where: {
-              sourceId: run.source.id,
-              status: PhotoStatus.ACTIVE,
-              lastSeenSyncRunId: { not: run.id },
-            },
-            data: { status: PhotoStatus.MISSING },
-          });
-          removedCount = removed.count;
           await tx.indexedFolder.updateMany({
             where: {
               sourceId: run.source.id,

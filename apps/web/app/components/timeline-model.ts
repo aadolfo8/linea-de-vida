@@ -136,7 +136,8 @@ export function safeOrganizeReturnHref(value: string | null, origin: string) {
   try {
     const base = new URL(origin);
     const target = new URL(value, base);
-    if (target.origin !== base.origin || target.pathname !== '/organizar') return null;
+    const known = target.pathname === '/ordenar' || target.pathname === '/organizar';
+    if (target.origin !== base.origin || !known) return null;
     return `${target.pathname}${target.search}${target.hash}`;
   } catch {
     return null;

@@ -49,6 +49,10 @@ enum PhotoStatus {
  UNSUPPORTED
  ACCESS_DENIED
 }
+enum PhotoFileStatus {
+ ACTIVE
+ MISSING
+}
 enum IndexedFolderStatus {
  ACTIVE
  MISSING
@@ -63,6 +67,7 @@ enum DateSource {
   EXIF
   DRIVE_IMAGE_METADATA
   TAKEOUT
+  FILENAME
   FOLDER
   FOLDER_RULE
   MANUAL
@@ -72,6 +77,7 @@ enum FolderDateRuleScope {
   FALLBACK_DESCENDANTS
   ALL_DESCENDANTS
   DIRECT_ONLY
+  DIRECT_OVERRIDE
 }
 enum SyncIssueCode {
  RATE_LIMITED
@@ -99,6 +105,7 @@ model User {
  connections OAuthConnection[]
  sources PhotoSource[]
  photos Photo[]
+ photoFiles PhotoFile[]
  indexedFolders IndexedFolder[]
  photoExclusions PhotoExclusion[]
 }
@@ -140,6 +147,7 @@ model PhotoSource {
  connection OAuthConnection @relation(fields:[oauthConnectionId],references:[id])
  runs SyncRun[]
  photos Photo[]
+ files PhotoFile[]
  indexedFolders IndexedFolder[]
  @@unique([userId,driveFolderId])
  @@index([userId,status])
@@ -182,9 +190,14 @@ model SyncIssue {
   @@index([driveFolderId])
   @@index([resolvedAt,syncRunId])
 }
+/// One archive photo. `driveFileId`, `sourceId`, `folderId`, `fileName`, `mimeType` and
+/// `lastSeenSyncRunId` are a denormalised projection of the preferred (primary) copy in
+/// `files`; `PhotoFile` is the source of truth for every Drive copy of the same content.
 model Photo {
  id String @id @default(cuid())
  userId String
+ /// Content identity per user: `md5:<md5Checksum>:<size>`, or `drive:<fileId>` when Drive gave no checksum.
+ contentKey String
  driveFileId String
  sourceId String
  folderId String?
@@ -197,6 +210,8 @@ model Photo {
   takeoutMatchReason String?
   gpsLatitude Float?
   gpsLongitude Float?
+ /// Soft hide: a hidden photo keeps its row, dates and copies but leaves the timeline, counts and search.
+ hiddenAt DateTime?
  detectedDate DateTime? @db.Date
  detectedPrecision DatePrecision @default(UNKNOWN)
  detectedSource DateSource @default(NONE)
@@ -209,12 +224,42 @@ model Photo {
  source PhotoSource @relation(fields:[sourceId],references:[id])
  folder IndexedFolder? @relation(fields:[folderId],references:[id],onDelete:SetNull)
  override ManualDateOverride?
- @@unique([userId,driveFileId])
+ files PhotoFile[]
+ @@unique([userId,contentKey])
+ @@index([userId,driveFileId])
  @@index([userId,status])
+ @@index([userId,status,hiddenAt])
   @@index([sourceId,status])
   @@index([sourceId,lastSeenSyncRunId])
   @@index([folderId,status])
  @@index([userId,effectiveDateValue,effectiveDatePrecision])
+}
+/// One Drive file holding the bytes of a Photo. A photo can have several copies (a re-extracted
+/// Takeout export, the same picture in another source); it stays available while one is ACTIVE.
+model PhotoFile {
+ id String @id @default(cuid())
+ photoId String
+ userId String
+ sourceId String
+ driveFileId String
+ folderId String?
+ fileName String
+ mimeType String
+ md5Checksum String?
+ sizeBytes BigInt?
+ status PhotoFileStatus @default(ACTIVE)
+ lastSeenSyncRunId String?
+ createdAt DateTime @default(now())
+ updatedAt DateTime @updatedAt
+ photo Photo @relation(fields:[photoId],references:[id],onDelete:Cascade)
+ user User @relation(fields:[userId],references:[id],onDelete:Cascade)
+ source PhotoSource @relation(fields:[sourceId],references:[id],onDelete:Cascade)
+ folder IndexedFolder? @relation(fields:[folderId],references:[id],onDelete:SetNull)
+ @@unique([userId,driveFileId])
+ @@index([photoId,status])
+ @@index([sourceId,status])
+ @@index([sourceId,lastSeenSyncRunId])
+ @@index([folderId])
 }
 model IndexedFolder {
  id String @id @default(cuid())
@@ -233,6 +278,7 @@ model IndexedFolder {
  parent IndexedFolder? @relation("FolderTree",fields:[parentId],references:[id],onDelete:SetNull)
   children IndexedFolder[] @relation("FolderTree")
   photos Photo[]
+  files PhotoFile[]
   dateRule FolderDateRule?
  @@unique([userId,driveFolderId])
  @@index([sourceId,status])

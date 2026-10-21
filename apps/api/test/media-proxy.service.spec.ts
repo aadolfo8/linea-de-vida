@@ -37,23 +37,44 @@ class FakeDrive extends DriveAdapter {
     this.thumbnailCalls++;
     return { stream: this.thumbnailStream, contentType: 'image/jpeg' };
   }
-  async getContentStream() {
+  contentFileIds: string[] = [];
+  async getContentStream(_connection?: unknown, fileId?: string) {
     this.contentCalls++;
+    if (fileId) this.contentFileIds.push(fileId);
     return { stream: this.contentStream, contentType: 'image/jpeg' };
   }
 }
 
 const request = (query: Record<string, string> = {}) =>
   Object.assign(new EventEmitter(), { query }) as unknown as import('express').Request;
-const ownerPhoto = (overrides: Record<string, unknown> = {}) => ({
-  id: 'photo-owner',
-  userId: 'owner',
-  driveFileId: 'drive-owner',
+const activeSource = () => ({
+  status: 'ACTIVE',
+  connection: { status: 'ACTIVE', refreshTokenCiphertext: null },
+});
+const copy = (driveFileId: string, extra: Record<string, unknown> = {}) => ({
+  id: `file-${driveFileId}`,
+  driveFileId,
   mimeType: 'image/jpeg',
   status: 'ACTIVE',
-  source: { status: 'ACTIVE', connection: { status: 'ACTIVE', refreshTokenCiphertext: null } },
-  ...overrides,
+  createdAt: new Date(0),
+  source: activeSource(),
+  ...extra,
 });
+const ownerPhoto = (overrides: Record<string, unknown> = {}) => {
+  const photo: any = {
+    id: 'photo-owner',
+    userId: 'owner',
+    driveFileId: 'drive-owner',
+    mimeType: 'image/jpeg',
+    status: 'ACTIVE',
+    source: activeSource(),
+    ...overrides,
+  };
+  return {
+    files: [copy(photo.driveFileId, { mimeType: photo.mimeType, source: photo.source })],
+    ...photo,
+  };
+};
 
 function service(photo: any, drive = new FakeDrive()) {
   return {
@@ -233,6 +254,59 @@ describe('media proxy', () => {
       missing.service.content('owner', 'photo-owner', request(), new ResponseMock() as any),
     ).rejects.toMatchObject({ status: 410 });
     expect(missing.drive.contentCalls).toBe(0);
+  });
+
+  it('serves the content through an active copy when the primary copy is no longer active', async () => {
+    const drive = new FakeDrive();
+    // The lookup only loads ACTIVE copies: the deleted old export is not among them.
+    const { service: proxy } = service(
+      ownerPhoto({ driveFileId: 'old-export', files: [copy('new-export')] }),
+      drive,
+    );
+    await proxy.content('owner', 'photo-owner', request(), new ResponseMock() as any);
+    expect(drive.contentFileIds).toEqual(['new-export']);
+  });
+
+  it('prefers the primary copy and skips copies whose source is disconnected', async () => {
+    const drive = new FakeDrive();
+    const disconnected = { status: 'DISCONNECTED', connection: { status: 'ACTIVE' } };
+    const first = service(
+      ownerPhoto({
+        driveFileId: 'second',
+        files: [
+          copy('first', { createdAt: new Date(1) }),
+          copy('second', { createdAt: new Date(2) }),
+        ],
+      }),
+      drive,
+    );
+    await first.service.content('owner', 'photo-owner', request(), new ResponseMock() as any);
+    const skipped = service(
+      ownerPhoto({
+        driveFileId: 'second',
+        files: [
+          copy('first', { createdAt: new Date(1) }),
+          copy('second', { createdAt: new Date(2), source: disconnected }),
+        ],
+      }),
+      drive,
+    );
+    await skipped.service.content('owner', 'photo-owner', request(), new ResponseMock() as any);
+    expect(drive.contentFileIds).toEqual(['second', 'first']);
+
+    const none = service(
+      ownerPhoto({ files: [copy('only', { source: disconnected })], driveFileId: 'only' }),
+    );
+    await expect(
+      none.service.content('owner', 'photo-owner', request(), new ResponseMock() as any),
+    ).rejects.toMatchObject({ status: 503 });
+  });
+
+  it('reports a photo with no active copy as gone', async () => {
+    const gone = service(ownerPhoto({ files: [] }));
+    await expect(
+      gone.service.thumbnail('owner', 'photo-owner', request(), new ResponseMock() as any),
+    ).rejects.toMatchObject({ status: 410 });
   });
 
   it('uses only bounded, expiring hashed thumbnail entries', () => {

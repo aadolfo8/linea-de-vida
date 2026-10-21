@@ -37,6 +37,8 @@ import { loadRuntimeConfig } from './production';
 import { FolderDateRuleService } from './folder-date-rule.service';
 import { findOverlappingFolderSource, FolderAncestryUnavailable } from './folder-source-overlap';
 import { readPhotoDimensions } from './photo-dimensions';
+import { refreshPhotos } from './photo-catalog';
+import { PhotoVisibilityService } from './photo-visibility.service';
 
 @Controller('v1')
 export class AppController {
@@ -49,6 +51,7 @@ export class AppController {
     @Inject(ManualDateService) private readonly manualDates: ManualDateService,
     @Inject(MediaProxyService) private readonly media: MediaProxyService,
     @Inject(FolderDateRuleService) private readonly folderDates: FolderDateRuleService,
+    @Inject(PhotoVisibilityService) private readonly visibility: PhotoVisibilityService,
   ) {}
   private loginRedirectUri() {
     return (
@@ -477,26 +480,38 @@ export class AppController {
   @Delete('photo-sources/:id')
   @HttpCode(HttpStatus.NO_CONTENT)
   async removeSource(@CurrentUserId() userId: string, @Param('id') sourceId: string) {
-    await this.prisma.$transaction(async (tx) => {
-      const source = await tx.photoSource.findFirst({ where: { id: sourceId, userId } });
-      if (!source)
-        throw new NotFoundException({
-          code: 'SOURCE_NOT_FOUND',
-          message: 'Photo source not found.',
+    await this.prisma.$transaction(
+      async (tx) => {
+        const source = await tx.photoSource.findFirst({ where: { id: sourceId, userId } });
+        if (!source)
+          throw new NotFoundException({
+            code: 'SOURCE_NOT_FOUND',
+            message: 'Photo source not found.',
+          });
+        const activeRun = await tx.syncRun.findFirst({
+          where: { photoSourceId: sourceId, status: { in: ['QUEUED', 'RUNNING'] } },
+          select: { id: true },
         });
-      const activeRun = await tx.syncRun.findFirst({
-        where: { photoSourceId: sourceId, status: { in: ['QUEUED', 'RUNNING'] } },
-        select: { id: true },
-      });
-      if (activeRun)
-        throw new ConflictException({
-          code: 'SOURCE_SYNC_ACTIVE',
-          message: 'Wait for the current source review to finish before removing it.',
+        if (activeRun)
+          throw new ConflictException({
+            code: 'SOURCE_SYNC_ACTIVE',
+            message: 'Wait for the current source review to finish before removing it.',
+          });
+        // Only this source's copies go: a photo that also lives in another source stays, mirroring
+        // one of its remaining copies; a photo with no copy left is deleted.
+        const affected = await tx.photoFile.findMany({
+          where: { userId, sourceId },
+          select: { photoId: true },
         });
-      await tx.photo.deleteMany({ where: { userId, sourceId } });
-      await tx.indexedFolder.deleteMany({ where: { userId, sourceId } });
-      await tx.photoSource.delete({ where: { id: sourceId } });
-    });
+        const photoIds = [...new Set(affected.map((file) => file.photoId))];
+        await tx.photoFile.deleteMany({ where: { userId, sourceId } });
+        await tx.photo.deleteMany({ where: { userId, sourceId, files: { none: {} } } });
+        await refreshPhotos(tx, photoIds);
+        await tx.indexedFolder.deleteMany({ where: { userId, sourceId } });
+        await tx.photoSource.delete({ where: { id: sourceId } });
+      },
+      { timeout: 60_000 },
+    );
   }
   @UseGuards(SessionGuard, CsrfGuard) @Post('photo-sources') async createSource(
     @CurrentUserId() userId: string,
@@ -655,12 +670,12 @@ export class AppController {
         take: limit + 1,
         include: {
           dateRule: true,
-          _count: { select: { photos: { where: { status: 'ACTIVE' } } } },
+          _count: { select: { photos: { where: { status: 'ACTIVE', hiddenAt: null } } } },
         },
       }),
       this.prisma.photo.groupBy({
         by: ['folderId'],
-        where: { sourceId, userId, status: 'ACTIVE', folderId: { not: null } },
+        where: { sourceId, userId, status: 'ACTIVE', hiddenAt: null, folderId: { not: null } },
         _count: { _all: true },
       }),
       this.prisma.photo.groupBy({
@@ -669,6 +684,7 @@ export class AppController {
           sourceId,
           userId,
           status: 'ACTIVE',
+          hiddenAt: null,
           folderId: { not: null },
           effectiveDateValue: null,
         },
@@ -718,7 +734,7 @@ export class AppController {
                 }
               : {};
     const records = await this.prisma.photo.findMany({
-      where: { userId, folderId, status: 'ACTIVE', ...classificationWhere },
+      where: { userId, folderId, status: 'ACTIVE', hiddenAt: null, ...classificationWhere },
       orderBy: [{ fileName: 'asc' }, { id: 'asc' }],
       skip: offset,
       take: limit + 1,
@@ -793,7 +809,7 @@ export class AppController {
       throw new NotFoundException({ code: 'SOURCE_NOT_FOUND', message: 'Photo source not found.' });
     const groups = await this.prisma.photo.groupBy({
       by: ['effectiveDateSource'],
-      where: { sourceId, userId, status: 'ACTIVE' },
+      where: { sourceId, userId, status: 'ACTIVE', hiddenAt: null },
       _count: { _all: true },
     });
     const count = (sources: string[]) =>
@@ -801,7 +817,7 @@ export class AppController {
         .filter((group) => sources.includes(group.effectiveDateSource))
         .reduce((total, group) => total + group._count._all, 0);
     const unclassified = await this.prisma.photo.count({
-      where: { sourceId, userId, status: 'ACTIVE', effectiveDateValue: null },
+      where: { sourceId, userId, status: 'ACTIVE', hiddenAt: null, effectiveDateValue: null },
     });
     return {
       total:
@@ -825,7 +841,7 @@ export class AppController {
     const scope = `source-pending-photos:${sourceId}`;
     const { limit, offset } = this.page(cursor, rawLimit, scope);
     const records = await this.prisma.photo.findMany({
-      where: { sourceId, userId, status: 'ACTIVE', effectiveDateValue: null },
+      where: { sourceId, userId, status: 'ACTIVE', hiddenAt: null, effectiveDateValue: null },
       orderBy: [{ folderId: 'asc' }, { fileName: 'asc' }, { id: 'asc' }],
       skip: offset,
       take: limit + 1,
@@ -865,7 +881,7 @@ export class AppController {
       }),
     ]);
     const page = records.slice(0, limit);
-    const relatedPhotos = await this.prisma.photo.findMany({
+    const relatedFiles = await this.prisma.photoFile.findMany({
       where: {
         sourceId,
         userId,
@@ -873,9 +889,14 @@ export class AppController {
           in: page.flatMap((issue) => (issue.driveFileId ? [issue.driveFileId] : [])),
         },
       },
-      select: { id: true, driveFileId: true, fileName: true, folderId: true },
+      select: { photoId: true, driveFileId: true, fileName: true, folderId: true },
     });
-    const photosByDriveId = new Map(relatedPhotos.map((photo) => [photo.driveFileId, photo]));
+    const photosByDriveId = new Map(
+      relatedFiles.map((file) => [
+        file.driveFileId,
+        { id: file.photoId, fileName: file.fileName, folderId: file.folderId },
+      ]),
+    );
     return {
       items: page.map((issue) => {
         const photo = issue.driveFileId ? photosByDriveId.get(issue.driveFileId) : null;
@@ -947,6 +968,7 @@ export class AppController {
         userId,
         sourceId,
         status: 'ACTIVE',
+        hiddenAt: null,
         ...(query ? { fileName: { contains: query, mode: 'insensitive' as const } } : {}),
         ...(folderId ? { folderId } : {}),
         ...classificationWhere,
@@ -972,14 +994,23 @@ export class AppController {
   ) {
     const scope = `photo-exclusions:${userId}`;
     const { limit, offset } = this.page(cursor, rawLimit, scope);
-    const records = await this.prisma.photoExclusion.findMany({
-      where: { userId },
-      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-      skip: offset,
-      take: limit + 1,
-    });
-    return {
-      items: records.slice(0, limit).map((item) => ({
+    // Photos hidden through the soft-hide state (including via the deprecated removal endpoints)
+    // are listed next to the unconverted tombstones so the legacy restore path stays coherent.
+    const [tombstones, hidden] = await Promise.all([
+      this.prisma.photoExclusion.findMany({
+        where: { userId },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        take: offset + limit + 1,
+      }),
+      this.prisma.photo.findMany({
+        where: { userId, hiddenAt: { not: null } },
+        orderBy: [{ hiddenAt: 'desc' }, { id: 'desc' }],
+        take: offset + limit + 1,
+        include: { source: { select: { name: true } }, folder: { select: { path: true } } },
+      }),
+    ]);
+    const merged = [
+      ...tombstones.map((item) => ({
         id: item.id,
         sourceId: item.sourceId,
         sourceName: item.sourceName,
@@ -989,7 +1020,23 @@ export class AppController {
         restoredAt: item.restoredAt,
         createdAt: item.createdAt,
       })),
-      nextCursor: records.length > limit ? this.cursor(scope, offset + limit) : null,
+      ...hidden.map((photo) => ({
+        id: photo.id,
+        sourceId: photo.sourceId as string | null,
+        sourceName: (photo.source?.name ?? null) as string | null,
+        folderPath: photo.folder?.path ?? [],
+        fileName: photo.fileName as string | null,
+        mimeType: photo.mimeType as string | null,
+        restoredAt: null as Date | null,
+        createdAt: photo.hiddenAt!,
+      })),
+    ].sort(
+      (a, b) =>
+        b.createdAt.getTime() - a.createdAt.getTime() || (a.id < b.id ? 1 : a.id > b.id ? -1 : 0),
+    );
+    return {
+      items: merged.slice(offset, offset + limit),
+      nextCursor: merged.length > offset + limit ? this.cursor(scope, offset + limit) : null,
     };
   }
   @UseGuards(SessionGuard, CsrfGuard)
@@ -997,11 +1044,21 @@ export class AppController {
   @HttpCode(HttpStatus.NO_CONTENT)
   async restorePhotoExclusion(@CurrentUserId() userId: string, @Param('id') id: string) {
     const exclusion = await this.prisma.photoExclusion.findFirst({ where: { id, userId } });
-    if (!exclusion)
+    if (!exclusion) {
+      // The ID may belong to a photo hidden with the soft-hide state: showing it again is the restore.
+      const hidden = await this.prisma.photo.findFirst({
+        where: { id, userId, hiddenAt: { not: null } },
+        select: { id: true },
+      });
+      if (hidden) {
+        await this.visibility.unhide(userId, [id]);
+        return;
+      }
       throw new NotFoundException({
         code: 'PHOTO_EXCLUSION_NOT_FOUND',
         message: 'Excluded photo not found.',
       });
+    }
     if (!exclusion.restoredAt)
       await this.prisma.photoExclusion.updateMany({
         where: { id, userId, restoredAt: null },
@@ -1050,7 +1107,7 @@ export class AppController {
     >(
       `SELECT MIN(EXTRACT(YEAR FROM "effectiveDateValue")::int) AS "firstYear",
               MAX(EXTRACT(YEAR FROM "effectiveDateValue")::int) AS "lastYear"
-       FROM "Photo" WHERE "userId" = $1 AND status = 'ACTIVE' AND "effectiveDateValue" IS NOT NULL`,
+       FROM "Photo" WHERE "userId" = $1 AND status = 'ACTIVE' AND "hiddenAt" IS NULL AND "effectiveDateValue" IS NOT NULL`,
       userId,
     );
     const firstYear = rows[0]?.firstYear;
@@ -1059,7 +1116,7 @@ export class AppController {
       return { firstYear: null, lastYear: null, latestYear: null, items: [] };
     const counts = await this.prisma.$queryRawUnsafe<{ year: number; photoCount: bigint }[]>(
       `SELECT EXTRACT(YEAR FROM "effectiveDateValue")::int AS year, COUNT(*)::bigint AS "photoCount"
-       FROM "Photo" WHERE "userId" = $1 AND status = 'ACTIVE' AND "effectiveDateValue" IS NOT NULL
+       FROM "Photo" WHERE "userId" = $1 AND status = 'ACTIVE' AND "hiddenAt" IS NULL AND "effectiveDateValue" IS NOT NULL
        GROUP BY 1`,
       userId,
     );
@@ -1096,7 +1153,7 @@ export class AppController {
       }[]
     >(
       `SELECT EXTRACT(MONTH FROM "effectiveDateValue")::int AS month, COUNT(*)::bigint AS "photoCount"
-       FROM "Photo" WHERE "userId" = $1 AND status = 'ACTIVE'
+       FROM "Photo" WHERE "userId" = $1 AND status = 'ACTIVE' AND "hiddenAt" IS NULL
          AND "effectiveDateValue" >= $2 AND "effectiveDateValue" < $3
          AND "effectiveDatePrecision" IN ('MONTH', 'DAY')
        GROUP BY 1`,
@@ -1106,7 +1163,7 @@ export class AppController {
     );
     const unknownRows = await this.prisma.$queryRawUnsafe<{ photoCount: bigint }[]>(
       `SELECT COUNT(*)::bigint AS "photoCount" FROM "Photo"
-       WHERE "userId" = $1 AND status = 'ACTIVE'
+       WHERE "userId" = $1 AND status = 'ACTIVE' AND "hiddenAt" IS NULL
          AND "effectiveDateValue" >= $2 AND "effectiveDateValue" < $3
          AND "effectiveDatePrecision" = 'YEAR'`,
       userId,
@@ -1116,7 +1173,7 @@ export class AppController {
     const previewIds = await this.prisma.$queryRawUnsafe<{ id: string }[]>(
       `WITH ordered AS (
          SELECT id, "effectiveDateValue", NTILE(8) OVER (ORDER BY "effectiveDateValue" DESC, id DESC) AS bucket
-         FROM "Photo" WHERE "userId" = $1 AND status = 'ACTIVE'
+         FROM "Photo" WHERE "userId" = $1 AND status = 'ACTIVE' AND "hiddenAt" IS NULL
            AND "effectiveDateValue" >= $2 AND "effectiveDateValue" < $3
        ) SELECT DISTINCT ON (bucket) id FROM ordered ORDER BY bucket, "effectiveDateValue" DESC, id DESC`,
       userId,
@@ -1189,6 +1246,7 @@ export class AppController {
       where: {
         userId,
         status: 'ACTIVE',
+        hiddenAt: null,
         effectiveDateValue: { gte: start, lt: end },
         effectiveDatePrecision: unknownMonth ? 'YEAR' : { in: ['MONTH', 'DAY'] },
         ...(after
@@ -1224,11 +1282,11 @@ export class AppController {
     const { limit, offset } = this.page(cursor, rawLimit, `months:${parsedYear}`);
     const rows = await this.prisma.$queryRawUnsafe<{ month: number | null; photoCount: bigint }[]>(
       `SELECT EXTRACT(MONTH FROM "effectiveDateValue")::int AS month, COUNT(*)::bigint AS "photoCount"
-       FROM "Photo" WHERE "userId" = $1 AND status = 'ACTIVE' AND EXTRACT(YEAR FROM "effectiveDateValue")::int = $2
+       FROM "Photo" WHERE "userId" = $1 AND status = 'ACTIVE' AND "hiddenAt" IS NULL AND EXTRACT(YEAR FROM "effectiveDateValue")::int = $2
          AND "effectiveDatePrecision" IN ('MONTH', 'DAY') GROUP BY 1
        UNION ALL
        SELECT NULL::int AS month, COUNT(*)::bigint AS "photoCount" FROM "Photo"
-       WHERE "userId" = $1 AND status = 'ACTIVE' AND EXTRACT(YEAR FROM "effectiveDateValue")::int = $2
+       WHERE "userId" = $1 AND status = 'ACTIVE' AND "hiddenAt" IS NULL AND EXTRACT(YEAR FROM "effectiveDateValue")::int = $2
          AND "effectiveDatePrecision" = 'YEAR'
        ORDER BY month NULLS LAST LIMIT $3 OFFSET $4`,
       userId,
@@ -1265,7 +1323,7 @@ export class AppController {
          SELECT id, "effectiveDateValue",
                 CASE WHEN "effectiveDatePrecision" = 'YEAR' THEN NULL
                      ELSE EXTRACT(MONTH FROM "effectiveDateValue")::int END AS month
-         FROM "Photo" WHERE "userId" = $1 AND status = 'ACTIVE'
+         FROM "Photo" WHERE "userId" = $1 AND status = 'ACTIVE' AND "hiddenAt" IS NULL
            AND "effectiveDateValue" >= $2 AND "effectiveDateValue" < $3
            AND "effectiveDatePrecision" IN ('YEAR', 'MONTH', 'DAY')
        ), bucketed AS (
@@ -1319,11 +1377,11 @@ export class AppController {
     const { limit, offset } = this.page(cursor, rawLimit, scope);
     const rows = await this.prisma.$queryRawUnsafe<{ day: number | null; photoCount: bigint }[]>(
       `SELECT EXTRACT(DAY FROM "effectiveDateValue")::int AS day, COUNT(*)::bigint AS "photoCount"
-       FROM "Photo" WHERE "userId" = $1 AND status = 'ACTIVE' AND EXTRACT(YEAR FROM "effectiveDateValue")::int = $2
+       FROM "Photo" WHERE "userId" = $1 AND status = 'ACTIVE' AND "hiddenAt" IS NULL AND EXTRACT(YEAR FROM "effectiveDateValue")::int = $2
          AND EXTRACT(MONTH FROM "effectiveDateValue")::int = $3 AND "effectiveDatePrecision" = 'DAY' GROUP BY 1
        UNION ALL
        SELECT NULL::int AS day, COUNT(*)::bigint AS "photoCount" FROM "Photo"
-       WHERE "userId" = $1 AND status = 'ACTIVE' AND EXTRACT(YEAR FROM "effectiveDateValue")::int = $2
+       WHERE "userId" = $1 AND status = 'ACTIVE' AND "hiddenAt" IS NULL AND EXTRACT(YEAR FROM "effectiveDateValue")::int = $2
          AND EXTRACT(MONTH FROM "effectiveDateValue")::int = $3 AND "effectiveDatePrecision" = 'MONTH'
        ORDER BY day NULLS LAST LIMIT $4 OFFSET $5`,
       userId,
@@ -1346,7 +1404,7 @@ export class AppController {
   @UseGuards(SessionGuard) @Get('timeline/undated') async undated(@CurrentUserId() userId: string) {
     const rows = await this.prisma.$queryRawUnsafe<{ photoCount: bigint }[]>(
       `SELECT COUNT(*)::bigint AS "photoCount" FROM "Photo"
-       WHERE "userId" = $1 AND status = 'ACTIVE' AND "effectiveDateValue" IS NULL`,
+       WHERE "userId" = $1 AND status = 'ACTIVE' AND "hiddenAt" IS NULL AND "effectiveDateValue" IS NULL`,
       userId,
     );
     return { photoCount: Number(rows[0]?.photoCount ?? 0) };
@@ -1407,6 +1465,7 @@ export class AppController {
       where: {
         userId,
         status: 'ACTIVE',
+        hiddenAt: null,
         ...(precision === 'UNKNOWN'
           ? { effectiveDateValue: null }
           : {
@@ -1484,6 +1543,7 @@ export class AppController {
   async deleteManualDate(@CurrentUserId() userId: string, @Param('id') id: string) {
     await this.manualDates.remove(userId, id);
   }
+  /** @deprecated Superseded by `POST /v1/photos/hide`; kept so older clients keep working. */
   @UseGuards(SessionGuard, CsrfGuard)
   @Post('photo-removals')
   @HttpCode(HttpStatus.OK)
@@ -1499,63 +1559,26 @@ export class AppController {
         code: 'INVALID_PHOTO_BATCH',
         message: 'Provide 1–50 photo IDs.',
       });
-    const results: Array<{ id: string; status: 'REMOVED' | 'ABSENT' | 'FAILED' }> = [];
-    for (const id of new Set<string>(ids)) {
-      try {
-        await this.deletePhoto(userId, id);
-        results.push({ id, status: 'REMOVED' });
-      } catch (error) {
-        // ABSENT means absent from this user's archive, not globally absent.
-        // Never disclose whether another user owns the supplied ID.
-        results.push({ id, status: error instanceof NotFoundException ? 'ABSENT' : 'FAILED' });
-      }
-    }
-    return { results };
+    const { results } = await this.visibility.hide(userId, ids);
+    // ABSENT means absent from this user's archive, not globally absent.
+    // Never disclose whether another user owns the supplied ID.
+    return {
+      results: results.map(({ id, status }) => ({
+        id,
+        status:
+          status === 'NOT_FOUND' ? 'ABSENT' : status === 'FAILED' ? 'FAILED' : ('REMOVED' as const),
+      })),
+    };
   }
+  /** @deprecated Superseded by `POST /v1/photos/hide`; hides the photo instead of deleting it. */
   @UseGuards(SessionGuard, CsrfGuard)
   @Delete('photos/:id')
   @HttpCode(HttpStatus.NO_CONTENT)
   async deletePhoto(@CurrentUserId() userId: string, @Param('id') id: string) {
-    const photo = await this.prisma.photo.findFirst({
-      where: { id, userId },
-      include: {
-        source: { select: { name: true } },
-        folder: { select: { path: true } },
-        override: true,
-      },
-    });
-    if (!photo)
+    const [result] = (await this.visibility.hide(userId, [id])).results;
+    if (result?.status === 'NOT_FOUND')
       throw new NotFoundException({ code: 'PHOTO_NOT_FOUND', message: 'Photo not found.' });
-    await this.prisma.$transaction(async (tx) => {
-      await tx.photoExclusion.upsert({
-        where: { userId_driveFileId: { userId, driveFileId: photo.driveFileId } },
-        create: {
-          userId,
-          driveFileId: photo.driveFileId,
-          sourceId: photo.sourceId,
-          sourceName: photo.source.name,
-          folderPath: photo.folder?.path ?? [],
-          fileName: photo.fileName,
-          mimeType: photo.mimeType,
-          manualDateValue: photo.override?.dateValue ?? null,
-          manualDatePrecision: photo.override?.precision ?? null,
-          manualDateReason: photo.override?.reason ?? null,
-          restoredAt: null,
-        },
-        update: {
-          sourceId: photo.sourceId,
-          sourceName: photo.source.name,
-          folderPath: photo.folder?.path ?? [],
-          fileName: photo.fileName,
-          mimeType: photo.mimeType,
-          manualDateValue: photo.override?.dateValue ?? null,
-          manualDatePrecision: photo.override?.precision ?? null,
-          manualDateReason: photo.override?.reason ?? null,
-          restoredAt: null,
-        },
-      });
-      await tx.photo.delete({ where: { id: photo.id } });
-    });
+    if (result?.status === 'FAILED') throw new ServiceUnavailableException();
   }
   @UseGuards(SessionGuard) @Get('photos/:id/thumbnail') async thumbnail(
     @CurrentUserId() userId: string,

@@ -175,7 +175,7 @@ export function TimelineRoute() {
           Este periodo reúne fotografías de tus carpetas. Puedes volver a continuar con{' '}
           <strong>{organizeReturn.label}</strong>.
         </p>
-        <a href={organizeReturn.href}>Volver a Organizar</a>
+        <a href={organizeReturn.href}>Volver a Ordenar</a>
       </aside>
     );
 

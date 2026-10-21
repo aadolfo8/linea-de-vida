@@ -45,7 +45,7 @@ Las bibliotecas personales de Drive suelen estar distribuidas en carpetas y cont
 
 `effectiveDate` es la fecha de presentación y ordenación. Si existe una corrección manual vigente, esta gana siempre. Si no existe, usa `detectedDate` y su precisión. Si no se detecta fecha, la foto aparece en «Fecha sin concretar».
 
-La detección automática se consulta en este orden: EXIF y `imageMediaMetadata.time` de Drive, `photoTakenTime` de Takeout y carpetas deterministas. La prioridad de `MANUAL` parece contradictoria si se la enumera junto a las fuentes de detección: se resuelve separando conceptos. `MANUAL` **no participa** en `detectedDate`; es la prioridad final de `effectiveDate`.
+La detección automática se consulta en este orden: EXIF y `imageMediaMetadata.time` de Drive, `photoTakenTime` de Takeout, fecha completa en el nombre de archivo (WhatsApp, cámaras, capturas) y carpetas deterministas. La prioridad de `MANUAL` parece contradictoria si se la enumera junto a las fuentes de detección: se resuelve separando conceptos. `MANUAL` **no participa** en `detectedDate`; es la prioridad final de `effectiveDate`.
 
 ## Diseño de experiencia
 

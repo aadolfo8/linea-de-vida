@@ -29,8 +29,8 @@ export function SkyEmptyArchive() {
       <h2>Tu archivo todavía no tiene fechas disponibles.</h2>
       <p>Añade una carpeta o revisa las fotografías que todavía no tienen fecha.</p>
       <div className="sky-state-actions">
-        <a href="/organizar">Ir a Organizar</a>
-        <a href="/organizar?filter=undated#photos-workspace">Fotografías sin fecha</a>
+        <a href="/ordenar">Ir a Ordenar</a>
+        <a href="/ordenar?pile=undated">Fotografías sin fecha</a>
       </div>
     </div>
   );

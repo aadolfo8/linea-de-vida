@@ -1,24 +1,13 @@
-'use client';
+import { redirect } from 'next/navigation';
+import { legacyOrganizarHref } from '../../lib/ordering/location';
 
-import { ArchiveNav } from '../components/ArchiveNav';
-import { ArchiveWorkspace } from '../components/ArchiveWorkspace';
-import { ProtectedSurface } from '../components/ProtectedSurface';
-import { activeDriveConnection } from '../../lib/api';
+type SearchParams = Record<string, string | string[] | undefined>;
 
-export default function OrganizePage() {
-  return (
-    <ProtectedSurface>
-      {(session) => (
-        <>
-          <ArchiveNav name={session.user.displayName} />
-          <ArchiveWorkspace
-            area="organize"
-            sessionConnection={activeDriveConnection(session)}
-            userName={session.user.displayName}
-            userEmail={session.user.email}
-          />
-        </>
-      )}
-    </ProtectedSurface>
-  );
+/** The old address keeps working: it lands on Ordenar with the same source and folder. */
+export default async function LegacyOrganizarPage({
+  searchParams,
+}: {
+  searchParams: Promise<SearchParams>;
+}) {
+  redirect(legacyOrganizarHref(await searchParams));
 }

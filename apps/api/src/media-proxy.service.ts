@@ -231,26 +231,50 @@ export class MediaProxyService {
     await this.stream(request, response, photo, 'content', mimeType);
   }
 
+  /**
+   * Authorizes the owner and picks the Drive copy that serves the bytes: an ACTIVE copy whose
+   * source and connection are usable, the photo's primary copy first.
+   */
   private async authorize(userId: string, photoId: string) {
     const photo = await this.prisma.photo.findFirst({
       where: { id: photoId, userId },
-      include: { source: { include: { connection: true } } },
+      include: {
+        files: {
+          where: { status: 'ACTIVE' },
+          orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+          include: { source: { include: { connection: true } } },
+        },
+      },
     });
     if (!photo)
       throw new NotFoundException({ code: 'PHOTO_NOT_FOUND', message: 'Photo not found.' });
-    if (photo.status === 'MISSING')
+    if (photo.status === 'MISSING' || (photo.status === 'ACTIVE' && !photo.files.length))
       throw new GoneException({
         code: 'PHOTO_MISSING',
         message: 'This photo is no longer available in Drive.',
       });
     if (photo.status !== 'ACTIVE')
       throw new NotFoundException({ code: 'PHOTO_UNAVAILABLE', message: 'Photo is unavailable.' });
-    if (photo.source.status !== 'ACTIVE' || photo.source.connection.status !== 'ACTIVE')
+    const usable = photo.files
+      .filter(
+        (file) => file.source.status === 'ACTIVE' && file.source.connection.status === 'ACTIVE',
+      )
+      .sort(
+        (a, b) =>
+          Number(b.driveFileId === photo.driveFileId) - Number(a.driveFileId === photo.driveFileId),
+      );
+    const copy = usable[0];
+    if (!copy)
       throw new ServiceUnavailableException({
         code: 'DRIVE_DISCONNECTED',
         message: 'Drive access is disconnected. Reconnect it before loading media.',
       });
-    return photo;
+    return {
+      ...photo,
+      driveFileId: copy.driveFileId,
+      mimeType: copy.mimeType,
+      source: copy.source,
+    };
   }
 
   private async stream(
