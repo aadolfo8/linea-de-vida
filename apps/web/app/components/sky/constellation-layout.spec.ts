@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
+  SMALL_GUTTER,
+  SMALL_RAIL,
   YEAR_CONSTELLATION,
   constellationGeometry,
   periodHeaderGeometry,
@@ -16,7 +18,7 @@ describe('constellation geometry', () => {
     expect(geometry.sectionSize).toBeCloseTo(geometry.clusterHeight + Math.min(900 * 0.16, 150));
   });
 
-  it('zigzags desktop constellations and centres them on small screens', () => {
+  it('zigzags desktop constellations and keeps the rail column free on small screens', () => {
     const even = constellationGeometry(YEAR_CONSTELLATION, desktop, 'vertical', 0, 3);
     const odd = constellationGeometry(YEAR_CONSTELLATION, desktop, 'vertical', 1, 3);
     const centred = (1440 - even.clusterWidth) / 2;
@@ -24,7 +26,8 @@ describe('constellation geometry', () => {
     expect(odd.clusterX).toBeGreaterThan(centred);
 
     const small = constellationGeometry(YEAR_CONSTELLATION, phone, 'vertical', 0, 3);
-    expect(small.clusterX).toBeCloseTo((390 - small.clusterWidth) / 2);
+    expect(small.clusterX).toBe(SMALL_GUTTER);
+    expect(small.clusterX + small.clusterWidth + SMALL_RAIL).toBeLessThanOrEqual(390);
     expect(small.tileGap).toBe(5);
   });
 

@@ -169,11 +169,22 @@ export function MonthDepth({
   }, []);
 
   // The viewer grows from, and shrinks back to, the tile of the photo it shows.
-  const viewerSource = useMemo<ViewerSource>(() => {
-    const tileOf = (photoId: string) =>
+  const tileOf = useCallback(
+    (photoId: string) =>
       [...document.querySelectorAll<HTMLElement>('button.sky-ph')].find(
         (tile) => tile.dataset.photoId === photoId,
-      ) ?? null;
+      ) ?? null,
+    [],
+  );
+  // Changing photo moves the hidden track onto the new tile, so closing lands on a real one.
+  const followPhoto = useCallback(
+    (photoId: string) => {
+      const tile = tileOf(photoId);
+      if (tile) engine.follow(tile);
+    },
+    [engine, tileOf],
+  );
+  const viewerSource = useMemo<ViewerSource>(() => {
     return {
       rectOf: (photoId) => tileOf(photoId)?.getBoundingClientRect() ?? null,
       focusTile: (photoId) => {
@@ -182,7 +193,7 @@ export function MonthDepth({
         return tile !== null;
       },
     };
-  }, []);
+  }, [tileOf]);
 
   // While the viewer is open the sky stays put behind it.
   const viewerOpen = viewerIndex !== null;
@@ -283,6 +294,7 @@ export function MonthDepth({
             initialIndex={viewerIndex!}
             total={total}
             source={viewerSource}
+            onPhotoChange={followPhoto}
             loadMore={cursor ? loadMoreForViewer : undefined}
             onClose={() => setViewerIndex(null)}
           />

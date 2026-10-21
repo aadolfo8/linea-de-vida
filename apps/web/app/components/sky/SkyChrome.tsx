@@ -17,7 +17,11 @@ export type SkyCrumb = {
 const isPlainClick = (event: MouseEvent) =>
   event.button === 0 && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey;
 
-/** Brand, breadcrumb, back button, orientation switch and any extra actions. */
+/**
+ * One top bar: brand and breadcrumb at the left, a compact control cluster at the right
+ * (archive menu, extra actions, orientation switch). Its height is the `--sky-bar-h` token, which
+ * the depths reserve so nothing starts underneath it.
+ */
 export function SkyChrome({
   crumbs,
   onTravel,
@@ -25,16 +29,17 @@ export function SkyChrome({
   orientation,
   onOrientationChange,
   actions,
-  placement = 'fixed',
+  menu,
 }: {
   crumbs: SkyCrumb[];
   onTravel: TravelTo;
   currentRef?: Ref<HTMLSpanElement>;
   orientation?: SkyOrientation;
   onOrientationChange?: (orientation: SkyOrientation) => void;
+  /** Extra buttons of the cluster, e.g. the concentration toggle. */
   actions?: ReactNode;
-  /** Static sits in the page flow (depths without a stage); fixed floats over the sky. */
-  placement?: 'fixed' | 'static';
+  /** Archive navigation; collapses into a disclosure on narrow screens. */
+  menu?: ReactNode;
 }) {
   const parent = crumbs.length > 1 ? crumbs[crumbs.length - 2]! : null;
   const goUp = (event: MouseEvent<HTMLElement>, crumb: SkyCrumb) => {
@@ -44,10 +49,11 @@ export function SkyChrome({
   };
 
   return (
-    <header className={placement === 'static' ? 'sky-bar sky-bar-static' : 'sky-bar'}>
+    <header className="sky-bar">
       <div className="sky-where">
         <Link className="sky-brand" href="/timeline" aria-label="Línea de vida, ir a la cronología">
-          Línea de vida
+          <i className="sky-brand-mark" aria-hidden="true" />
+          <span className="sky-brand-text">Línea de vida</span>
         </Link>
         <div className="sky-crumbs">
           {parent?.href && (
@@ -90,30 +96,29 @@ export function SkyChrome({
           </nav>
         </div>
       </div>
-      <div className="sky-actions">
+      <div className="sky-controls">
+        {menu}
         {actions}
         {orientation && onOrientationChange && (
-          <div className="sky-actions-row">
-            <div className="sky-seg" role="group" aria-label="Orientación de la línea">
-              <button
-                type="button"
-                aria-pressed={orientation === 'vertical'}
-                title="Vertical"
-                onClick={() => onOrientationChange('vertical')}
-              >
-                <ArrowDownUp aria-hidden="true" />
-                <span className="sky-long">Vertical</span>
-              </button>
-              <button
-                type="button"
-                aria-pressed={orientation === 'horizontal'}
-                title="Horizontal"
-                onClick={() => onOrientationChange('horizontal')}
-              >
-                <ArrowLeftRight aria-hidden="true" />
-                <span className="sky-long">Horizontal</span>
-              </button>
-            </div>
+          <div className="sky-seg" role="group" aria-label="Orientación de la línea">
+            <button
+              type="button"
+              aria-pressed={orientation === 'vertical'}
+              title="Vertical"
+              onClick={() => onOrientationChange('vertical')}
+            >
+              <ArrowDownUp aria-hidden="true" />
+              <span className="sky-sr">Vertical</span>
+            </button>
+            <button
+              type="button"
+              aria-pressed={orientation === 'horizontal'}
+              title="Horizontal"
+              onClick={() => onOrientationChange('horizontal')}
+            >
+              <ArrowLeftRight aria-hidden="true" />
+              <span className="sky-sr">Horizontal</span>
+            </button>
           </div>
         )}
       </div>

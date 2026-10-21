@@ -1,5 +1,6 @@
 import { masonryLanes, type MasonryPlacement, type TravelAxis } from './masonry';
 import { clamp } from './rng';
+import { SMALL_GUTTER, SMALL_RAIL } from './constellation-layout';
 import { monthLabel, photoAspectRatio, type TimelinePhoto } from '../timeline-model';
 
 export type MonthSectionKind = 'day' | 'month' | 'year' | 'unknown';
@@ -115,8 +116,8 @@ export function monthGeometry(
       tail: vw * 0.3,
     };
   }
-  const pad = small ? 16 : Math.max(24, vw * 0.06);
-  const rail = small ? 30 : 110;
+  const pad = small ? SMALL_GUTTER : Math.max(24, vw * 0.06);
+  const rail = small ? SMALL_RAIL : 110;
   const available = vw - pad - rail;
   const columns = clamp(Math.floor(available / (small ? 150 : 250)), 2, 6);
   return {

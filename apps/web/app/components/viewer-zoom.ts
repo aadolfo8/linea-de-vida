@@ -21,13 +21,31 @@ export const isZoomed = (view: View) => view.scale > 1.01;
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 
-/** Largest size at which the whole photo fits the stage, leaving room for the chrome. */
+/** The band of the window the photo may use: full width, between the top meta and the filmstrip. */
+export type StageBox = Size & { top: number };
+
+/** Smallest band worth fitting a photo into; anything thinner means nothing was measured. */
+const MIN_BAND = 120;
+
+/**
+ * The free band between the bottom edge of the top meta block and the top edge of the filmstrip,
+ * measured in window pixels. Without usable measures (no layout yet) it falls back to the whole
+ * window, so the viewer never collapses.
+ */
+export function stageBox(viewport: Size, topEdge: number, bottomEdge: number): StageBox {
+  const top = clamp(topEdge, 0, viewport.height);
+  const bottom = clamp(bottomEdge, 0, viewport.height);
+  if (bottom - top < MIN_BAND) return { width: viewport.width, height: viewport.height, top: 0 };
+  return { width: viewport.width, height: bottom - top, top };
+}
+
+/** Largest size at which the whole photo fits the stage band, with a little air around it. */
 export function fitSize(natural: Size | null, stage: Size): Size {
   const source = natural && natural.width > 0 && natural.height > 0 ? natural : null;
   const narrow = stage.width < 640;
   const room = {
     width: Math.max(1, stage.width - (narrow ? 0 : 96)),
-    height: Math.max(1, stage.height - (narrow ? 120 : 150)),
+    height: Math.max(1, stage.height - 24),
   };
   if (!source) return { width: room.width * 0.6, height: room.height * 0.6 };
   const factor = Math.min(room.width / source.width, room.height / source.height);
@@ -81,10 +99,12 @@ export function flipTransform(
   to: { left: number; top: number; width: number; height: number },
   fit: Size,
   stage: Size,
+  /** Window distance from the top to the stage band, when the band does not start there. */
+  stageTop = 0,
 ) {
   return {
     x: to.left + to.width / 2 - stage.width / 2,
-    y: to.top + to.height / 2 - stage.height / 2,
+    y: to.top + to.height / 2 - (stageTop + stage.height / 2),
     scale: to.width / Math.max(1, fit.width),
   };
 }

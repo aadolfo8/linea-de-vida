@@ -24,6 +24,10 @@ export const MONTH_CONSTELLATION: ConstellationKind = {
   maxW: 700,
 };
 
+/** Narrow vertical travel keeps a left gutter and the slim rail's column free of content. */
+export const SMALL_GUTTER = 16;
+export const SMALL_RAIL = 44;
+
 export type ConstellationGeometry = {
   clusterWidth: number;
   clusterHeight: number;
@@ -58,7 +62,7 @@ export function constellationGeometry(
   const small = vw < 640;
   const clusterWidth = horizontal
     ? Math.min(vh * kind.hFrac * kind.ratio, vw * 0.84)
-    : Math.min(vw * (small ? 0.86 : kind.vFrac), kind.maxW);
+    : Math.min(small ? vw - SMALL_GUTTER - SMALL_RAIL : vw * kind.vFrac, kind.maxW);
   const clusterHeight = clusterWidth / kind.ratio;
   const between = horizontal ? vw * (small ? 0.2 : 0.11) : vh * 0.2;
   const first = horizontal ? vw * (afterHeader ? 0.04 : 0.08) : vh * (afterHeader ? 0.06 : 0.26);
@@ -91,7 +95,7 @@ export function constellationGeometry(
 
   const labelHeight = Math.min(vh * 0.16, 150);
   const clusterX = small
-    ? (vw - clusterWidth) / 2
+    ? SMALL_GUTTER
     : (vw - clusterWidth) / 2 + zigzag * Math.min(vw * 0.07, (vw - clusterWidth) / 2 - 24);
   return {
     clusterWidth,
@@ -103,7 +107,7 @@ export function constellationGeometry(
     marginTail,
     numeralSize: Math.min(labelHeight * 0.62, vw * 0.14),
     labelBottom: 0,
-    nodeX: clusterX - 18,
+    nodeX: clusterX - (small ? 8 : 18),
     nodeY: 8,
     tileGap,
   };

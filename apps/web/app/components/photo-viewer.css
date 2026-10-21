@@ -55,7 +55,9 @@
 
 .pv-stage {
   position: absolute;
-  inset: 0;
+  /* Top and height come from the measured band between the meta block and the filmstrip. */
+  inset: 0 0 auto;
+  height: 100%;
   display: grid;
   place-items: center;
   cursor: zoom-in;

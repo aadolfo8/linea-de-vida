@@ -76,4 +76,89 @@ describe('ArchiveNav', () => {
       'No se pudo cerrar la sesión',
     );
   });
+
+  describe('sky variant', () => {
+    const toggle = () => container.querySelector<HTMLButtonElement>('button[aria-controls]')!;
+    const panel = () => container.querySelector<HTMLElement>('.sky-nav-panel')!;
+
+    it('collapses the archive links behind a menu button that names and controls its panel', async () => {
+      await act(async () => root.render(<ArchiveNav variant="sky" name="Ana" />));
+
+      expect(toggle().getAttribute('aria-label')).toBe('Menú principal');
+      expect(toggle().getAttribute('aria-expanded')).toBe('false');
+      expect(toggle().getAttribute('aria-controls')).toBe(panel().id);
+      expect(container.querySelector('.sky-nav')?.getAttribute('data-open')).toBe('false');
+      expect(panel().querySelectorAll('nav a')).toHaveLength(3);
+      expect(panel().textContent).toContain('Cerrar sesión');
+    });
+
+    it('opens and closes with the button', async () => {
+      await act(async () => root.render(<ArchiveNav variant="sky" name="Ana" />));
+
+      await act(async () => toggle().click());
+      expect(toggle().getAttribute('aria-expanded')).toBe('true');
+      expect(container.querySelector('.sky-nav')?.getAttribute('data-open')).toBe('true');
+      await act(async () => toggle().click());
+      expect(toggle().getAttribute('aria-expanded')).toBe('false');
+    });
+
+    it('closes on Escape, returns focus to the button and keeps the key from going further', async () => {
+      await act(async () => root.render(<ArchiveNav variant="sky" name="Ana" />));
+      await act(async () => toggle().click());
+      const link = panel().querySelector<HTMLAnchorElement>('a')!;
+      link.focus();
+
+      const escape = new KeyboardEvent('keydown', {
+        key: 'Escape',
+        bubbles: true,
+        cancelable: true,
+      });
+      await act(async () => link.dispatchEvent(escape));
+
+      expect(escape.defaultPrevented).toBe(true);
+      expect(toggle().getAttribute('aria-expanded')).toBe('false');
+      expect(document.activeElement).toBe(toggle());
+    });
+
+    it('closes on Escape even when focus never entered the menu', async () => {
+      await act(async () => root.render(<ArchiveNav variant="sky" name="Ana" />));
+      await act(async () => toggle().click());
+      (document.activeElement as HTMLElement | null)?.blur();
+      await act(async () => {
+        document.body.dispatchEvent(
+          new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }),
+        );
+      });
+      expect(toggle().getAttribute('aria-expanded')).toBe('false');
+      expect(document.activeElement).toBe(toggle());
+    });
+
+    it('leaves Escape alone while the menu is closed', async () => {
+      await act(async () => root.render(<ArchiveNav variant="sky" name="Ana" />));
+      const escape = new KeyboardEvent('keydown', {
+        key: 'Escape',
+        bubbles: true,
+        cancelable: true,
+      });
+      await act(async () => toggle().dispatchEvent(escape));
+      expect(escape.defaultPrevented).toBe(false);
+    });
+
+    it('closes when the visitor taps outside of it', async () => {
+      await act(async () => root.render(<ArchiveNav variant="sky" name="Ana" />));
+      await act(async () => toggle().click());
+      await act(async () => {
+        document.body.dispatchEvent(new Event('pointerdown', { bubbles: true }));
+      });
+      expect(toggle().getAttribute('aria-expanded')).toBe('false');
+    });
+
+    it('closes after navigating', async () => {
+      await act(async () => root.render(<ArchiveNav variant="sky" name="Ana" />));
+      await act(async () => toggle().click());
+      route.pathname = '/timeline/2004';
+      await act(async () => root.render(<ArchiveNav variant="sky" name="Ana" />));
+      expect(toggle().getAttribute('aria-expanded')).toBe('false');
+    });
+  });
 });
