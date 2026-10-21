@@ -279,11 +279,27 @@ describe('Timeline shell targets', () => {
       expect(zoom.defaultPrevented).toBe(false);
       expect(navigation.router.push).not.toHaveBeenCalled();
 
-      const pinch = new WheelEvent('wheel', { ctrlKey: true, deltaY: 20, cancelable: true });
+      // Zooming in, or a pinch that has not added up yet, stays with the browser.
+      const zoomIn = new WheelEvent('wheel', { ctrlKey: true, deltaY: -4.5, cancelable: true });
+      const start = new WheelEvent('wheel', { ctrlKey: true, deltaY: 4.5, cancelable: true });
       await act(async () => {
-        window.dispatchEvent(pinch);
+        window.dispatchEvent(zoomIn);
+        window.dispatchEvent(start);
       });
-      expect(pinch.defaultPrevented).toBe(true);
+      expect(zoomIn.defaultPrevented).toBe(false);
+      expect(start.defaultPrevented).toBe(false);
+      expect(navigation.router.push).not.toHaveBeenCalled();
+
+      // A sustained pinch-out is consumed once it clearly adds up.
+      const pinches = Array.from(
+        { length: 40 },
+        () => new WheelEvent('wheel', { ctrlKey: true, deltaY: 4.5, cancelable: true }),
+      );
+      await act(async () => {
+        pinches.forEach((pinch) => window.dispatchEvent(pinch));
+      });
+      expect(pinches.some((pinch) => pinch.defaultPrevented)).toBe(true);
+      expect(pinches[0]!.defaultPrevented).toBe(false);
       expect(navigation.router.push).toHaveBeenCalledWith('/timeline', { scroll: false });
     });
   });
