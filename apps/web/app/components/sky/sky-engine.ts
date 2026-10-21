@@ -35,6 +35,8 @@ type Parts = {
 
 const SMOOTHING = 0.1;
 const JUMP_LEAD = 0.12;
+/** Rate of the canvas-only redraw while the track rests. */
+const TWINKLE_INTERVAL = 100;
 const TEXT_ENTRY = 'input, textarea, select, [contenteditable="true"], [role="dialog"]';
 
 /**
@@ -55,6 +57,7 @@ export class SkyEngine {
   private parts: Parts | null = null;
   private ctx: CanvasRenderingContext2D | null = null;
   private items = new Set<SkyItem>();
+  private keyed = new Map<string, SkyItem>();
   private frameListeners = new Set<(frame: SkyFrame) => void>();
   private measureListeners = new Set<() => void>();
   private stars: Star[] = [];
@@ -63,6 +66,7 @@ export class SkyEngine {
   private dpr = 1;
   private warp = { start: 0, active: false, value: 0, direction: 1 as 1 | -1 };
   private raf = 0;
+  private twinkleTimer = 0;
   private lastDraw = -1;
   private dirty = true;
   private measureQueued = false;
@@ -93,7 +97,9 @@ export class SkyEngine {
     on(
       'scroll',
       () => {
-        if (!this.busy) this.target = clamp(window.scrollY, 0, this.maxScroll);
+        if (this.busy) return;
+        this.target = clamp(window.scrollY, 0, this.maxScroll);
+        this.startLoop();
       },
       { passive: true },
     );
@@ -124,7 +130,10 @@ export class SkyEngine {
     });
     const onVisibility = () => {
       if (document.hidden) this.stopLoop();
-      else this.startLoop();
+      else {
+        this.dirty = true;
+        this.startLoop();
+      }
     };
     document.addEventListener('visibilitychange', onVisibility);
     this.cleanups.push(() => document.removeEventListener('visibilitychange', onVisibility));
@@ -161,6 +170,7 @@ export class SkyEngine {
       this.jumpTo(progress * this.maxScroll);
       this.current = this.target;
     }
+    this.startLoop();
   }
 
   /** Viewport size changed: rebuild the sky and re-measure. */
@@ -173,23 +183,25 @@ export class SkyEngine {
     this.parts.canvas.height = this.height * this.dpr;
     this.stars = createStars(starCount(this.width, this.height), seededRng(3));
     this.dirty = true;
+    this.startLoop();
   }
 
   register(el: HTMLElement, key: string | null = null) {
     const item: SkyItem = { key, el, x: 0, y: 0, o: 0, s: 0, measured: false };
     this.items.add(item);
+    if (key !== null) this.keyed.set(key, item);
     this.scheduleMeasure();
     return {
       item,
       release: () => {
         this.items.delete(item);
+        if (key !== null && this.keyed.get(key) === item) this.keyed.delete(key);
       },
     };
   }
 
   itemByKey(key: string) {
-    for (const item of this.items) if (item.key === key) return item;
-    return null;
+    return this.keyed.get(key) ?? null;
   }
 
   /** Re-measure on the next frame; cheap to call from many places. */
@@ -228,12 +240,14 @@ export class SkyEngine {
     )}px`;
     this.target = clamp(this.target, 0, this.maxScroll);
     this.measureListeners.forEach((listener) => listener());
+    this.startLoop();
   }
 
   jumpTo(position: number) {
     const next = clamp(position, 0, this.maxScroll);
     window.scrollTo({ top: next, behavior: 'instant' });
     this.target = next;
+    this.startLoop();
   }
 
   /** Centre of an item in viewport pixels once the track rests at `position`. */
@@ -253,6 +267,7 @@ export class SkyEngine {
 
   subscribe(listener: (frame: SkyFrame) => void) {
     this.frameListeners.add(listener);
+    this.startLoop();
     return () => {
       this.frameListeners.delete(listener);
     };
@@ -297,17 +312,36 @@ export class SkyEngine {
   /** Sync the track to wherever native scroll is now, e.g. after a restored position. */
   syncToScroll() {
     this.target = clamp(window.scrollY, 0, this.maxScroll);
+    this.startLoop();
+  }
+
+  /** Runs a frame soon, e.g. after something a subscriber reacts to changed outside the track. */
+  wake() {
+    this.startLoop();
   }
 
   private startLoop() {
-    if (this.raf || !this.parts || document.hidden) return;
+    if (!this.parts || document.hidden) return;
+    if (this.twinkleTimer) window.clearTimeout(this.twinkleTimer);
+    this.twinkleTimer = 0;
+    if (this.raf) return;
     this.raf = requestAnimationFrame(this.frame);
   }
 
   private stopLoop() {
     if (this.raf) cancelAnimationFrame(this.raf);
     this.raf = 0;
+    if (this.twinkleTimer) window.clearTimeout(this.twinkleTimer);
+    this.twinkleTimer = 0;
   }
+
+  /** At rest the stars still twinkle, but only the canvas redraws, at a low rate. */
+  private twinkle = () => {
+    this.twinkleTimer = 0;
+    if (!this.parts || document.hidden || this.reduced) return;
+    this.draw(performance.now(), false);
+    this.twinkleTimer = window.setTimeout(this.twinkle, TWINKLE_INTERVAL);
+  };
 
   private frame = (time: number) => {
     this.raf = 0;
@@ -334,12 +368,21 @@ export class SkyEngine {
       orientation: this.orientation,
     };
     this.frameListeners.forEach((listener) => listener(frame));
-    this.startLoop();
+    // Keep going while anything moves; the frame after the last movement already ran, so
+    // subscribers saw the track at rest. Everything that changes state wakes the loop again.
+    if (moved || this.warp.active || this.dirty || Math.abs(this.target - this.current) > 0) {
+      this.startLoop();
+    } else if (!this.reduced) {
+      this.twinkleTimer = window.setTimeout(this.twinkle, TWINKLE_INTERVAL);
+    }
   };
 
   private draw(time: number, moved: boolean) {
     const ctx = this.ctx;
-    if (!ctx) return;
+    if (!ctx) {
+      this.dirty = false;
+      return;
+    }
     const warping = this.warp.value > 0.002;
     // Twinkle needs periodic redraws; reduced motion only redraws when something changed.
     const stale = !this.reduced && time - this.lastDraw >= 33;
