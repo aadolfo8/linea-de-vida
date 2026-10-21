@@ -809,4 +809,31 @@ describe('robust sync', () => {
       detectedDate: new Date('1998-01-01T00:00:00.000Z'),
     });
   });
+
+  it('dates a photo from its file name above the folder name and below camera metadata', async () => {
+    const f = fixture({
+      'root:': {
+        items: [
+          image('whatsapp', 'IMG-20190812-WA0001.jpg'),
+          { ...image('camera', 'IMG-20190812-WA0002.jpg'), imageTime: '2001-02-03T10:00:00Z' },
+          image('plain', 'IMG_1234.jpg'),
+        ],
+      },
+    });
+    f.drive.getFolder = async () => ({
+      id: 'root',
+      name: '1998',
+      mimeType: 'application/vnd.google-apps.folder',
+      parents: [],
+    });
+    await f.service.execute('run');
+    expect(f.photos.get('whatsapp')).toMatchObject({
+      detectedSource: 'FILENAME',
+      detectedPrecision: 'DAY',
+      detectedDate: new Date('2019-08-12T00:00:00.000Z'),
+      effectiveDateSource: 'FILENAME',
+    });
+    expect(f.photos.get('camera')).toMatchObject({ detectedSource: 'DRIVE_IMAGE_METADATA' });
+    expect(f.photos.get('plain')).toMatchObject({ detectedSource: 'FOLDER' });
+  });
 });

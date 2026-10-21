@@ -344,6 +344,7 @@ export class SyncService {
         takeoutPhotoTakenTime: match.metadata?.photoTakenTime
           ? new Date(Number(match.metadata.photoTakenTime) * 1000).toISOString()
           : undefined,
+        fileName: item.name,
         folderSegments: folder.path,
       });
       const copy = {
