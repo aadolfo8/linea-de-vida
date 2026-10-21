@@ -6,12 +6,19 @@ import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties }
 import { api, ApiError, apiJson } from '../../lib/api';
 import { subscribeArchiveIndexUpdated } from '../../lib/archive-index-events';
 import { thumbnailVariantUrl } from '../../lib/media';
+import {
+  getCachedGallery,
+  getCachedTimelineYears,
+  getCachedYearSummary,
+  loadGalleryPage,
+  loadTimelineYears,
+  loadYearSummary,
+} from './timeline-cache';
 import { TemporalCarousel, type TemporalCarouselItem } from './TemporalCarousel';
 import { TimelinePhotoViewer } from './TimelinePhotoViewer';
 import { TimelineNavigation } from './TimelineNavigation';
 import { useTimelinePosition } from './useTimelinePosition';
 import {
-  collectTimelineYears,
   groupTimelineGalleryRows,
   isCurrentTimelineRequest,
   monthLabel,
@@ -101,7 +108,7 @@ const styles: Record<string, string> = {
   galleryDescription: 'm-0 leading-relaxed text-map-muted text-pretty',
   galleryGrid: 'grid gap-[clamp(0.75rem,1.5vw,1.25rem)] max-[42.5rem]:gap-3',
   galleryRow:
-    'grid h-[clamp(18rem,34vw,32rem)] grid-cols-12 gap-[clamp(0.65rem,1.25vw,1rem)] data-[size=3]:h-[clamp(17rem,28vw,26rem)] data-[size=1]:h-[clamp(20rem,38vw,34rem)] max-[42.5rem]:h-[clamp(13rem,52vw,20rem)] max-[42.5rem]:gap-2 max-[42.5rem]:data-[size=3]:h-[clamp(11rem,42vw,17rem)] max-[42.5rem]:data-[size=1]:h-[clamp(18rem,76vw,28rem)]',
+    'grid h-[clamp(18rem,34vw,32rem)] grid-cols-12 gap-[clamp(0.65rem,1.25vw,1rem)] [content-visibility:auto] [contain-intrinsic-size:auto_28rem] data-[size=3]:h-[clamp(17rem,28vw,26rem)] data-[size=1]:h-[clamp(20rem,38vw,34rem)] max-[42.5rem]:h-[clamp(13rem,52vw,20rem)] max-[42.5rem]:gap-2 max-[42.5rem]:data-[size=3]:h-[clamp(11rem,42vw,17rem)] max-[42.5rem]:data-[size=1]:h-[clamp(18rem,76vw,28rem)]',
   galleryTile: '[grid-column:span_var(--gallery-span)] h-full',
   galleryPhoto: 'bg-map-panel shadow-[0_1rem_2rem_rgb(12_41_53_/_0.1)]',
   photoFallback:
@@ -131,8 +138,12 @@ const styles: Record<string, string> = {
 };
 
 function useYearSummary(year: number | null, archiveRevision: number) {
-  const [data, setData] = useState<TimelineYearSummary | null>(null);
-  const [state, setState] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
+  const [data, setData] = useState<TimelineYearSummary | null>(() =>
+    year ? getCachedYearSummary(year) : null,
+  );
+  const [state, setState] = useState<'idle' | 'loading' | 'ready' | 'error'>(() =>
+    year ? (getCachedYearSummary(year) ? 'ready' : 'loading') : 'idle',
+  );
   const request = useRef(0);
 
   useEffect(() => {
@@ -144,10 +155,11 @@ function useYearSummary(year: number | null, archiveRevision: number) {
     }
 
     const controller = new AbortController();
-    setData((current) => (current?.year === year ? current : null));
-    setState('loading');
+    const cached = getCachedYearSummary(year);
+    setData(cached);
+    setState(cached ? 'ready' : 'loading');
     const timer = window.setTimeout(() => {
-      apiJson<TimelineYearSummary>(`/timeline/years/${year}`, { signal: controller.signal })
+      loadYearSummary(year)
         .then((summary) => {
           if (!isCurrentTimelineRequest(requestId, request.current)) return;
           setData(summary);
@@ -184,8 +196,10 @@ export function ImmersiveTimelineExperience({
   const router = useRouter();
   const reduceMotion = useReducedMotion();
   const route = parseTimelineRoute(pathname);
-  const [years, setYears] = useState<TimelineYearsPage | null>(null);
-  const [yearsState, setYearsState] = useState<'loading' | 'ready' | 'error'>('loading');
+  const [years, setYears] = useState<TimelineYearsPage | null>(() => getCachedTimelineYears());
+  const [yearsState, setYearsState] = useState<'loading' | 'ready' | 'error'>(() =>
+    getCachedTimelineYears() ? 'ready' : 'loading',
+  );
   const [yearSelection, setYearSelection] = useState(() =>
     resolveTimelineYearSelection(null, route.year),
   );
@@ -213,11 +227,14 @@ export function ImmersiveTimelineExperience({
 
   useEffect(() => {
     const controller = new AbortController();
-    setYearsState('loading');
-    collectTimelineYears((cursor) =>
+    const cached = getCachedTimelineYears();
+    if (cached) {
+      setYears(cached);
+      setYearsState('ready');
+    } else setYearsState('loading');
+    loadTimelineYears((cursor) =>
       apiJson<TimelineYearsPage>(
         `/timeline/years?limit=100${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`,
-        { signal: controller.signal },
       ),
     )
       .then((data) => {
@@ -246,6 +263,30 @@ export function ImmersiveTimelineExperience({
   );
   const summary = loadedSummary?.year === selectedSettledYear ? loadedSummary : null;
   const isMonthRoute = Boolean(route.month || route.unknown);
+
+  useEffect(() => {
+    if (!summary || !selectedSettledYear) return;
+    let target: { year: number; month: TimelineMonth } | null = null;
+    if (route.year && (route.month || route.unknown)) {
+      const available = summary.months
+        .filter((item) => item.photoCount > 0)
+        .map((item) => item.month);
+      const selected = route.unknown ? -1 : (route.month ?? -1);
+      const nearby = available.find((month) => month > selected) ?? available.at(-1);
+      if (nearby && nearby !== selected) target = { year: route.year, month: nearby };
+    }
+    const yearIndex = years?.items.findIndex((item) => item.year === selectedSettledYear) ?? -1;
+    const nearbyYear = years?.items[yearIndex > 0 ? yearIndex - 1 : yearIndex + 1]?.year;
+    const timer = window.setTimeout(() => {
+      if (target) {
+        if (!getCachedGallery(target.year, target.month))
+          void loadGalleryPage(target.year, target.month, null).catch(() => {});
+      } else if (nearbyYear && !getCachedYearSummary(nearbyYear)) {
+        void loadYearSummary(nearbyYear).catch(() => {});
+      }
+    }, 350);
+    return () => window.clearTimeout(timer);
+  }, [route.month, route.unknown, route.year, selectedSettledYear, summary, years]);
 
   const yearItems = useMemo<TemporalCarouselItem[]>(
     () =>
@@ -683,15 +724,20 @@ function ImmersiveMonthGallery({
     loadMore?: () => Promise<TimelinePhotoPage | null>;
   }) => void;
 }) {
-  const [photos, setPhotos] = useState<TimelinePhoto[]>([]);
-  const [cursor, setCursor] = useState<string | null>(null);
-  const [state, setState] = useState<'loading' | 'ready' | 'error'>('loading');
+  const initialGallery = getCachedGallery(year, month);
+  const [photos, setPhotos] = useState<TimelinePhoto[]>(() => initialGallery?.photos ?? []);
+  const [cursor, setCursor] = useState<string | null>(() => initialGallery?.nextCursor ?? null);
+  const [state, setState] = useState<'loading' | 'ready' | 'error'>(() =>
+    initialGallery ? 'ready' : 'loading',
+  );
   const [cooldownUntil, setCooldownUntil] = useState(0);
   const cooldown = useRef(0);
   const loading = useRef(false);
   const request = useRef(0);
   const controller = useRef<AbortController | null>(null);
   const cursorRef = useRef<string | null>(null);
+  const loadingCursor = useRef<string | null | undefined>(undefined);
+  const sentinel = useRef<HTMLDivElement>(null);
 
   const load = useCallback(
     async (next?: string | null, reset = false) => {
@@ -701,6 +747,8 @@ function ImmersiveMonthGallery({
         loading.current = false;
         cursorRef.current = null;
       }
+      if (loading.current && !reset && loadingCursor.current === (next ?? null))
+        return loadGalleryPage(year, month, next ?? null).catch(() => null);
       if (
         !shouldStartTimelineRequest({
           reset,
@@ -714,25 +762,18 @@ function ImmersiveMonthGallery({
       controller.current = activeController;
       const requestId = ++request.current;
       loading.current = true;
-      if (reset) setState('loading');
+      loadingCursor.current = next ?? null;
+      setState('loading');
       try {
-        const path =
-          month === 'sin-mes'
-            ? `/timeline/years/${year}/unknown-month/photos`
-            : `/timeline/years/${year}/months/${month}/photos`;
-        const page = await apiJson<TimelinePhotoPage>(
-          `${path}?limit=30${next ? `&cursor=${encodeURIComponent(next)}` : ''}`,
-          { signal: activeController.signal },
-        );
+        const page = await loadGalleryPage(year, month, next ?? null);
         if (!isCurrentTimelineRequest(requestId, request.current)) return null;
-        setPhotos((current) =>
-          next
-            ? [
-                ...current,
-                ...page.items.filter((item) => !current.some((photo) => photo.id === item.id)),
-              ]
-            : page.items,
-        );
+        setPhotos((current) => {
+          const cachedPhotos = getCachedGallery(year, month)?.photos;
+          if (cachedPhotos) return cachedPhotos;
+          if (!next) return page.items;
+          const seen = new Set(current.map((photo) => photo.id));
+          return [...current, ...page.items.filter((photo) => !seen.has(photo.id))];
+        });
         cursorRef.current = page.nextCursor;
         setCursor(page.nextCursor);
         setState('ready');
@@ -748,13 +789,24 @@ function ImmersiveMonthGallery({
         setState('error');
         return null;
       } finally {
-        if (isCurrentTimelineRequest(requestId, request.current)) loading.current = false;
+        if (isCurrentTimelineRequest(requestId, request.current)) {
+          loading.current = false;
+          loadingCursor.current = undefined;
+        }
       }
     },
     [month, year],
   );
 
   useEffect(() => {
+    const cachedGallery = getCachedGallery(year, month);
+    if (cachedGallery) {
+      setPhotos(cachedGallery.photos);
+      setCursor(cachedGallery.nextCursor);
+      cursorRef.current = cachedGallery.nextCursor;
+      setState('ready');
+      return;
+    }
     setPhotos([]);
     setCursor(null);
     cursorRef.current = null;
@@ -767,6 +819,20 @@ function ImmersiveMonthGallery({
       loading.current = false;
     };
   }, [load]);
+
+  useEffect(() => {
+    const target = sentinel.current;
+    if (!target || !cursor || state === 'error' || state === 'loading') return;
+    if (typeof IntersectionObserver === 'undefined') return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) void load(cursor);
+      },
+      { rootMargin: `${window.innerHeight}px 0px` },
+    );
+    observer.observe(target);
+    return () => observer.disconnect();
+  }, [cursor, load, photos.length, state]);
 
   useEffect(() => {
     if (!cooldownUntil) return;
@@ -845,13 +911,14 @@ function ImmersiveMonthGallery({
         />
       )}
       {cursor && state !== 'error' && (
-        <button
-          className={styles.loadMore}
-          disabled={loading.current}
-          onClick={() => void load(cursor)}
+        <div
+          ref={sentinel}
+          className="mt-10 min-h-10 text-center text-sm text-map-muted"
+          role="status"
+          aria-live="polite"
         >
-          Cargar más fotografías
-        </button>
+          {state === 'loading' ? 'Preparando más fotografías…' : ''}
+        </div>
       )}
     </section>
   );
