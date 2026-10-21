@@ -324,7 +324,12 @@ export class OrderingService {
     const order = (query.order ?? (pile === 'undated' ? 'name' : 'newest')) as PhotoOrder;
     if (!PHOTO_ORDERS.includes(order))
       throw invalid('INVALID_ORDER', `order must be one of ${PHOTO_ORDERS.join(', ')}.`);
-    const limit = Math.min(200, Math.max(1, Number(query.limit ?? 60) || 60));
+    let limit = 60;
+    if (query.limit !== undefined) {
+      if (!/^\d{1,9}$/.test(query.limit.trim()))
+        throw invalid('INVALID_LIMIT', 'limit must be a whole number.');
+      limit = Math.min(200, Math.max(1, Number(query.limit)));
+    }
     const base = await this.scope(userId, query);
     const scopeKey = [
       pile,
@@ -334,6 +339,8 @@ export class OrderingService {
       query.includeSubfolders === false,
     ].join(':');
     const after = this.decodeCursor(scopeKey, query.cursor);
+    if (after && order === 'newest' && after.value && Number.isNaN(Date.parse(after.value)))
+      throw invalid('INVALID_CURSOR', 'The cursor is invalid.');
 
     const conditions: Prisma.PhotoWhereInput[] = [];
     if (after && order === 'name')
@@ -417,14 +424,15 @@ export class OrderingService {
           effectiveDatePrecision: { in: [...TO_DATE] },
           detectedSource: { in: ['NONE', 'FOLDER'] },
           override: { is: null },
-          ...(after ? { id: { gt: after } } : {}),
+          ...(after || only
+            ? { id: { ...(only ? { in: [...only] } : {}), ...(after ? { gt: after } : {}) } }
+            : {}),
         },
         orderBy: { id: 'asc' },
         take: 2_000,
         select: { id: true, fileName: true, folderId: true, sourceId: true },
       });
       for (const photo of photos) {
-        if (only && !only.has(photo.id)) continue;
         const parsed = parseFilenameDate(photo.fileName);
         if (!parsed) continue;
         if (!rulesBySource.has(photo.sourceId))

@@ -21,6 +21,7 @@ type Pattern = { kind: FilenameDateKind; regex: RegExp };
 // Every pattern captures year, month, day as groups 1-3. Time parts, when present, are validated
 // so that a long digit run that merely looks like a timestamp is not accepted.
 const compactTime = String.raw`(?<h>\d{2})(?<mi>\d{2})(?<s>\d{2})`;
+const separatedTime = String.raw`(?<h>\d{2})[.:-](?<mi>\d{2})[.:-](?<s>\d{2})`;
 const patterns: Pattern[] = [
   // IMG-20190812-WA0001.jpg, VID-20190812-WA0003.mp4
   { kind: 'whatsapp', regex: /^(?:IMG|VID)-(\d{4})(\d{2})(\d{2})-WA\d+/i },
@@ -39,27 +40,39 @@ const patterns: Pattern[] = [
     ),
   },
   // PXL_20190812_123456789.jpg
-  { kind: 'pixel', regex: /^PXL_(\d{4})(\d{2})(\d{2})_\d{6,9}(?!\d)/i },
+  {
+    kind: 'pixel',
+    regex: new RegExp(String.raw`^PXL_(\d{4})(\d{2})(\d{2})_${compactTime}\d{0,3}(?!\d)`, 'i'),
+  },
   // Screenshot_2019-08-12-12-34-56, Screenshot_20190812-123456, Screenshot from 2019-08-12 12-34-56,
   // Captura de pantalla 2019-08-12 a las 12.34.56, Screen Shot 2019-08-12 at 10.20.30
   {
     kind: 'screenshot',
     regex: /^Screenshot[_ ](?:from )?(\d{4})-(\d{2})-(\d{2})(?!\d)/i,
   },
-  { kind: 'screenshot', regex: /^Screenshot_(\d{4})(\d{2})(\d{2})-\d{6}(?!\d)/i },
+  {
+    kind: 'screenshot',
+    regex: new RegExp(String.raw`^Screenshot_(\d{4})(\d{2})(\d{2})-${compactTime}(?!\d)`, 'i'),
+  },
   {
     kind: 'screenshot',
     regex: /^(?:Captura de pantalla|Screen ?Shot) (\d{4})-(\d{2})-(\d{2})(?!\d)/i,
   },
   // signal-2019-08-12-12-34-56-123.jpg
-  { kind: 'messenger', regex: /^signal-(\d{4})-(\d{2})-(\d{2})-\d{2}-\d{2}-\d{2}/i },
+  {
+    kind: 'messenger',
+    regex: new RegExp(String.raw`^signal-(\d{4})-(\d{2})-(\d{2})-${separatedTime}`, 'i'),
+  },
   // 20190812_123456.jpg, 20190812_123456_1.jpg
   {
     kind: 'timestamp',
     regex: new RegExp(String.raw`^(\d{4})(\d{2})(\d{2})[_-]${compactTime}(?!\d)`),
   },
   // 2019-08-12 12.34.56.jpg, 2019-08-12_12-34-56.jpg
-  { kind: 'timestamp', regex: /^(\d{4})-(\d{2})-(\d{2})[ _T]\d{2}[.:-]\d{2}[.:-]\d{2}(?!\d)/ },
+  {
+    kind: 'timestamp',
+    regex: new RegExp(String.raw`^(\d{4})-(\d{2})-(\d{2})[ _T]${separatedTime}(?!\d)`),
+  },
 ];
 
 const stripExtension = (name: string) => name.replace(/\.[A-Za-z0-9]{1,5}$/, '');

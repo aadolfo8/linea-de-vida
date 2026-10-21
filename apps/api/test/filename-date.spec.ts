@@ -79,6 +79,24 @@ describe('parseFilenameDate', () => {
   });
 });
 
+describe('parseFilenameDate time validation', () => {
+  it.each([
+    '2019-08-12 99.99.99.jpg',
+    '2019-08-12_25-00-00.jpg',
+    'PXL_20190812_996699123.jpg',
+    'Screenshot_20190812-246000.png',
+    'signal-2019-08-12-12-60-00-123.jpg',
+    '20190812_236099.jpg',
+  ])('rejects impossible times in %s', (name) => {
+    expect(parse(name)).toBeNull();
+  });
+
+  it('still accepts valid times in these patterns', () => {
+    expect(parse('2019-08-12 23.59.59.jpg')?.value).toEqual(day('2019-08-12'));
+    expect(parse('signal-2019-08-12-12-34-56-123.jpg')?.kind).toBe('messenger');
+  });
+});
+
 describe('PhotoDateResolver with file names', () => {
   const resolver = new PhotoDateResolver();
   it('uses the file name below camera, Drive and Takeout evidence', () => {
