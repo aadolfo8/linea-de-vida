@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import { ContextCursor } from './components/ContextCursor';
+import { skyFontVariables } from './fonts';
 import './globals.css';
 export const metadata: Metadata = {
   title: 'Línea de vida',
@@ -9,7 +10,7 @@ export const metadata: Metadata = {
 export default function Layout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="es">
-      <body>
+      <body className={skyFontVariables}>
         <template
           aria-hidden="true"
           dangerouslySetInnerHTML={{

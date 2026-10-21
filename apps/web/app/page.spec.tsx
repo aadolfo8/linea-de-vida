@@ -38,14 +38,15 @@ describe('Home', () => {
   it('presents a family-memory welcome and explicit Google sign-in without Drive as the entry action', async () => {
     await act(async () => root.render(<Home />));
 
-    expect(container.querySelector('h1')?.textContent).toContain('Tus recuerdos');
+    expect(container.querySelector('h1')?.textContent).toBe('Línea de vida');
     expect(container.querySelector<HTMLButtonElement>('button')?.textContent).toContain(
       'Iniciar sesión con Google',
     );
-    expect(container.textContent).toContain('Tu espacio privado');
-    expect(container.textContent).toContain('Tú eliges las carpetas');
     expect(container.querySelector('button')?.textContent).not.toContain('Google Drive');
-    expect(container.querySelector('figure svg')).not.toBeNull();
+    expect(container.querySelector('img')).toBeNull();
+    expect(
+      [...container.querySelectorAll('.welcome-guarantees li')].map((li) => li.textContent),
+    ).toEqual(['Privado por cuenta', 'Solo carpetas que eliges', 'Drive de solo lectura']);
   });
 
   it('reveals development sign-in only when Google authorization is unavailable', async () => {
@@ -61,6 +62,52 @@ describe('Home', () => {
 
     expect(api.apiCall).toHaveBeenCalledWith('/auth/google/authorize', { method: 'POST' });
     expect(container.textContent).toContain('Entrar en modo de desarrollo');
+    const alert = container.querySelector('[role="alert"]');
+    expect(alert?.textContent).toContain('Google no está configurado.');
+    expect(container.querySelector('button')?.getAttribute('aria-describedby')).toContain(
+      alert?.id,
+    );
+  });
+
+  it('redirects to the Google authorization page when it is available', async () => {
+    const assign = vi.fn();
+    vi.stubGlobal('location', { ...window.location, assign, search: '' });
+    api.apiCall.mockResolvedValue({
+      ok: true,
+      json: async () => ({ available: true, authorizationUrl: 'https://accounts.example/auth' }),
+    });
+    await act(async () => root.render(<Home />));
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('button')?.click();
+    });
+
+    expect(assign).toHaveBeenCalledWith('https://accounts.example/auth');
+    vi.unstubAllGlobals();
+  });
+
+  it('shows a retryable error when the authorization request fails', async () => {
+    api.apiCall.mockRejectedValue(new Error('offline'));
+    await act(async () => root.render(<Home />));
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('button')?.click();
+    });
+
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain(
+      'No se pudo iniciar sesión con Google',
+    );
+    expect(container.querySelector<HTMLButtonElement>('button')?.disabled).toBe(false);
+  });
+
+  it('shows the OAuth cancellation notice as an alert tied to the action', async () => {
+    window.history.replaceState(null, '', '/?oauth=access-denied');
+    await act(async () => root.render(<Home />));
+    window.history.replaceState(null, '', '/');
+
+    const alert = container.querySelector('[role="alert"]');
+    expect(alert?.textContent).toContain('Has cancelado el acceso');
+    expect(container.querySelector('button')?.getAttribute('aria-describedby')).toContain(
+      alert?.id,
+    );
   });
 
   it('redirects an existing session to the timeline', async () => {
