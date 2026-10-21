@@ -3,10 +3,11 @@ import { describe, expect, it } from 'vitest';
 import { PhotoDateResolver } from '../src/date-resolver';
 import { DriveAdapter } from '../src/drive';
 import { SyncService } from '../src/sync.service';
+import { MemoryPrisma } from './support/memory-prisma';
 
 describe('Takeout sync integration', () => {
   it('indexes matched and unmatched photos, preserving validated metadata and invalid-JSON issues', async () => {
-    const created: any[] = [];
+    const memory = new MemoryPrisma();
     const issues: any[] = [];
     class TakeoutDrive extends DriveAdapter {
       async listChildren() {
@@ -86,21 +87,20 @@ describe('Takeout sync integration', () => {
             if (issue.resolvedAt === where.resolvedAt) Object.assign(issue, data);
         },
       },
-      photoExclusion: { findUnique: async () => null },
+      photoExclusion: memory.photoExclusion,
+      photoFile: memory.photoFile,
+      manualDateOverride: memory.manualDateOverride,
       indexedFolder: {
         findUnique: async () => null,
         upsert: async () => ({ id: 'indexed-root' }),
         updateMany: async () => ({ count: 0 }),
       },
-      photo: {
-        findUnique: async () => null,
-        create: async ({ data }: any) => created.push(data),
-        updateMany: async () => ({ count: 0 }),
-      },
+      photo: memory.photo,
       $transaction: async (operation: any) =>
         Array.isArray(operation) ? Promise.all(operation) : operation(prisma),
     };
     await new SyncService(prisma, new TakeoutDrive(), new PhotoDateResolver()).execute('run');
+    const created = memory.rows('photo');
     expect(created).toHaveLength(2);
     expect(created.find((photo) => photo.driveFileId === 'photo')).toMatchObject({
       detectedSource: 'TAKEOUT',

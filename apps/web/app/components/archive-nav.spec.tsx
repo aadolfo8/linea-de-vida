@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ArchiveNav } from './ArchiveNav';
 import { apiJson } from '../../lib/api';
 
-const route = vi.hoisted(() => ({ pathname: '/organizar' }));
+const route = vi.hoisted(() => ({ pathname: '/ordenar' }));
 const navigation = vi.hoisted(() => ({ replace: vi.fn(), refresh: vi.fn() }));
 
 vi.mock('next/navigation', () => ({
@@ -38,14 +38,14 @@ describe('ArchiveNav', () => {
     vi.clearAllMocks();
   });
 
-  it('separates the timeline, organization, and settings destinations', async () => {
+  it('separates the timeline, ordering and settings destinations', async () => {
     await act(async () => root.render(<ArchiveNav name="Ana" />));
 
     const links = [...container.querySelectorAll('nav[aria-label="Navegación principal"] a')];
     expect(links.map((link) => [link.textContent, link.getAttribute('href')])).toEqual([
       ['Cronología', '/timeline'],
-      ['Organizar', '/organizar'],
-      ['Ajustes', '/settings'],
+      ['Ordenar', '/ordenar'],
+      ['Ajustes', '/ajustes'],
     ]);
     expect(links.map((link) => link.getAttribute('aria-current'))).toEqual([null, 'page', null]);
   });

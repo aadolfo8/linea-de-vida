@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { PhotoDateResolver } from '../src/date-resolver';
 import { DriveAdapter, DriveItem, DriveRequestError } from '../src/drive';
 import { SyncService } from '../src/sync.service';
+import { MemoryPrisma } from './support/memory-prisma';
 
 const image = (id: string, name = `${id}.jpg`): DriveItem => ({
   id,
@@ -29,11 +30,67 @@ function fixture(pages: Record<string, { items: DriveItem[]; nextCursor?: string
     removedCount: 0,
     checkpoint: null,
   };
-  const photos = new Map<string, any>();
+  const memory = new MemoryPrisma();
+  const photoRow = (driveFileId: string) =>
+    memory.rows('photo').find((photo) => photo.driveFileId === driveFileId);
+  /** Keyed by the photo's primary Drive file id, backed by the Photo/PhotoFile tables. */
+  const photos = {
+    get: (driveFileId: string): any => {
+      const row = photoRow(driveFileId);
+      if (!row) return undefined;
+      const override = memory.rows('manualDateOverride').find((entry) => entry.photoId === row.id);
+      return { ...row, override: override ?? null };
+    },
+    has: (driveFileId: string) => !!photoRow(driveFileId),
+    set: (driveFileId: string, seed: any) => {
+      const { override, ...rest } = seed;
+      const id = seed.id ?? driveFileId;
+      memory.rows('photo').push({
+        userId: 'owner',
+        contentKey: `drive:${driveFileId}`,
+        folderId: null,
+        detectedSource: 'NONE',
+        ...rest,
+        id,
+        driveFileId,
+      });
+      memory.rows('photoFile').push({
+        id: `file-${driveFileId}`,
+        photoId: id,
+        userId: 'owner',
+        sourceId: seed.sourceId,
+        driveFileId,
+        status: seed.status === 'ACTIVE' ? 'ACTIVE' : 'MISSING',
+        lastSeenSyncRunId: seed.lastSeenSyncRunId,
+        createdAt: new Date(0),
+      });
+      if (override) memory.rows('manualDateOverride').push({ ...override, photoId: id });
+    },
+    get size() {
+      return memory.rows('photo').length;
+    },
+    get length() {
+      return memory.rows('photo').length;
+    },
+  };
   const issues: any[] = [];
   const folders = new Map<string, any>();
-  const exclusions = new Set<string>();
-  const restoredExclusions = new Map<string, any>();
+  const exclusions = {
+    add: (driveFileId: string) =>
+      memory.rows('photoExclusion').push({
+        id: `exclusion-${driveFileId}`,
+        userId: 'owner',
+        driveFileId,
+        restoredAt: null,
+        createdAt: new Date('2026-01-01T00:00:00.000Z'),
+      }),
+  };
+  const restoredExclusions = {
+    set: (driveFileId: string, row: any) =>
+      memory.rows('photoExclusion').push({ userId: 'owner', driveFileId, ...row }),
+    has: (driveFileId: string) =>
+      memory.rows('photoExclusion').some((entry) => entry.driveFileId === driveFileId),
+  };
   const prisma: any = {
     syncRun: {
       findUnique: async () => run,
@@ -72,18 +129,10 @@ function fixture(pages: Record<string, { items: DriveItem[]; nextCursor?: string
             Object.assign(issue, data);
       },
     },
-    photoExclusion: {
-      findUnique: async ({ where }: any) => {
-        const driveFileId = where.userId_driveFileId.driveFileId;
-        return (
-          restoredExclusions.get(driveFileId) ??
-          (exclusions.has(driveFileId) ? { id: 'excluded', restoredAt: null } : null)
-        );
-      },
-      deleteMany: async ({ where }: any) => ({
-        count: restoredExclusions.delete(where.id.replace('exclusion-', '')) ? 1 : 0,
-      }),
-    },
+    photoExclusion: memory.photoExclusion,
+    photoFile: memory.photoFile,
+    photo: memory.photo,
+    manualDateOverride: memory.manualDateOverride,
     indexedFolder: {
       findFirst: async ({ where }: any) =>
         [...folders.values()].find(
@@ -108,37 +157,6 @@ function fixture(pages: Record<string, { items: DriveItem[]; nextCursor?: string
             folder.lastSeenSyncRunId !== where.lastSeenSyncRunId.not
           )
             Object.assign(folder, data);
-      },
-    },
-    photo: {
-      findUnique: async ({ where }: any) =>
-        photos.get(where.userId_driveFileId.driveFileId) ?? null,
-      create: async ({ data }: any) => {
-        const photo = { ...data, id: data.driveFileId, override: null };
-        photos.set(data.driveFileId, photo);
-        return photo;
-      },
-      update: async ({ where, data }: any) => Object.assign(photos.get(where.id), data),
-      updateMany: async ({ where, data }: any) => {
-        let count = 0;
-        for (const photo of photos.values())
-          if (
-            photo.sourceId === where.sourceId &&
-            (!where.status || photo.status === where.status) &&
-            photo.lastSeenSyncRunId !== where.lastSeenSyncRunId.not
-          ) {
-            Object.assign(photo, data);
-            count++;
-          }
-        return { count };
-      },
-    },
-    manualDateOverride: {
-      upsert: async ({ where, create, update }: any) => {
-        const photo = photos.get(where.photoId);
-        const value = photo.override ? Object.assign(photo.override, update) : create;
-        photo.override = value;
-        return value;
       },
     },
     $transaction: async (operation: any) =>
@@ -742,13 +760,18 @@ describe('robust sync', () => {
     });
   });
 
-  it('keeps a user exclusion when the same Drive folder is re-added as a new source', async () => {
+  it('keeps a user removal hidden when the same Drive folder is re-added as a new source', async () => {
     const f = fixture({ 'root:': { items: [image('removed')] } });
     f.exclusions.add('removed');
     f.run.source.id = 're-added-source';
     await f.service.execute('run');
-    expect(f.photos.has('removed')).toBe(false);
+    // The legacy tombstone becomes a soft-hidden photo (still out of the timeline) and is spent.
+    expect(f.photos.get('removed')).toMatchObject({
+      hiddenAt: new Date('2026-01-01T00:00:00.000Z'),
+      status: 'ACTIVE',
+    });
     expect(f.run.status).toBe('SUCCEEDED');
+    expect(f.restoredExclusions.has('removed')).toBe(false);
   });
 
   it('restores an excluded photo into a re-added source with its saved manual date', async () => {
@@ -791,5 +814,32 @@ describe('robust sync', () => {
       detectedPrecision: 'YEAR',
       detectedDate: new Date('1998-01-01T00:00:00.000Z'),
     });
+  });
+
+  it('dates a photo from its file name above the folder name and below camera metadata', async () => {
+    const f = fixture({
+      'root:': {
+        items: [
+          image('whatsapp', 'IMG-20190812-WA0001.jpg'),
+          { ...image('camera', 'IMG-20190812-WA0002.jpg'), imageTime: '2001-02-03T10:00:00Z' },
+          image('plain', 'IMG_1234.jpg'),
+        ],
+      },
+    });
+    f.drive.getFolder = async () => ({
+      id: 'root',
+      name: '1998',
+      mimeType: 'application/vnd.google-apps.folder',
+      parents: [],
+    });
+    await f.service.execute('run');
+    expect(f.photos.get('whatsapp')).toMatchObject({
+      detectedSource: 'FILENAME',
+      detectedPrecision: 'DAY',
+      detectedDate: new Date('2019-08-12T00:00:00.000Z'),
+      effectiveDateSource: 'FILENAME',
+    });
+    expect(f.photos.get('camera')).toMatchObject({ detectedSource: 'DRIVE_IMAGE_METADATA' });
+    expect(f.photos.get('plain')).toMatchObject({ detectedSource: 'FOLDER' });
   });
 });

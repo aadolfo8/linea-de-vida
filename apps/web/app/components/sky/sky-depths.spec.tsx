@@ -215,7 +215,7 @@ describe('sky depths', () => {
       );
     });
 
-    it('explains an archive without dated photos and points to Organizar', async () => {
+    it('explains an archive without dated photos and points to Ordenar', async () => {
       cache.loadTimelineYears.mockResolvedValue({ ...years, items: [] });
       await mount(depth);
 
@@ -223,7 +223,7 @@ describe('sky depths', () => {
       const hrefs = [...container.querySelectorAll('.sky-state a')].map((a) =>
         a.getAttribute('href'),
       );
-      expect(hrefs).toEqual(['/organizar', '/organizar?filter=undated#photos-workspace']);
+      expect(hrefs).toEqual(['/ordenar', '/ordenar?pile=undated']);
     });
 
     it('reports a failure as an alert and retries', async () => {
