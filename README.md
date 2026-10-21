@@ -11,12 +11,12 @@ Una vertical slice local para explorar fotografías seleccionadas de Google Driv
 
 ## Arquitectura y contrato
 
-| Proceso            | Responsabilidad                                                                 |
-| ------------------ | ------------------------------------------------------------------------------- |
-| `apps/web`         | Next.js App Router; onboarding, fuente, años y galería demostrativa accesible.  |
-| `apps/api`         | Sesión, autorización por `userId`, recursos REST, OAuth y proxy de medios.      |
-| `apps/api` worker  | Consume `photo-sync`; explora exclusivamente la carpeta fuente y descendientes. |
-| PostgreSQL / Redis | Estado persistente / cola BullMQ.                                               |
+| Proceso            | Responsabilidad                                                                        |
+| ------------------ | -------------------------------------------------------------------------------------- |
+| `apps/web`         | Next.js App Router; onboarding, fuente, organización y la cronología «Cielo nocturno». |
+| `apps/api`         | Sesión, autorización por `userId`, recursos REST, OAuth y proxy de medios.             |
+| `apps/api` worker  | Consume `photo-sync`; explora exclusivamente la carpeta fuente y descendientes.        |
+| PostgreSQL / Redis | Estado persistente / cola BullMQ.                                                      |
 
 La API nunca entrega tokens Google ni URLs de Drive al navegador. Las rutas de thumbnail y contenido comprueban primero que la foto sea del usuario de sesión.
 
@@ -80,6 +80,7 @@ Para backup PostgreSQL, ejecuta desde un host autorizado `pg_dump --format=custo
 | `GET /v1/sync-runs/:id/issues?cursor=&limit=`                    | Incidencias paginadas del propietario.                                  |
 | `GET /v1/timeline/years`                                         | Años disponibles desde PostgreSQL.                                      |
 | `GET /v1/timeline/years/:year/months`                            | Meses y grupo `Fecha sin concretar`.                                    |
+| `GET /v1/timeline/years/:year/month-previews`                    | Hasta 6 vistas previas repartidas por mes y por `Fecha sin concretar`.  |
 | `GET /v1/timeline/years/:year/months/:month/days`                | Días y grupo `Día sin concretar`.                                       |
 | `GET /v1/timeline/undated`                                       | Conteo de fotos sin año.                                                |
 | `GET /v1/photos?...&cursor=&limit=`                              | Galería cursor-paginada por granularidad.                               |
@@ -100,6 +101,10 @@ En Organizar, la selección en vivo de Drive está separada del archivo indexado
 La retirada por lotes recibe `{ "photoIds": ["id"] }` y devuelve `results` con `REMOVED`, `ABSENT` o `FAILED` por ID único. `ABSENT` significa que la foto no está en el archivo del usuario: no distingue entre un ID inexistente y uno ajeno. Cada retirada conserva la transacción de exclusión y borrado local; el tombstone conserva nombre, carpeta y una posible corrección manual para identificar y recuperar la foto. Restaurarla la deja pendiente de la siguiente revisión manual; recupera esa corrección, no cambia Drive ni inicia la revisión por sí sola.
 
 Ajustes envía bloques de hasta 50, mantiene pendientes los fallos o resultados no confirmados y permite reintentar tras perder una respuesta. Después de retirar fotos se descarta el cursor anterior y se actualiza la primera página conservando las pendientes.
+
+## Cronología «Cielo nocturno»
+
+La cronología (`/timeline`) es un cielo oscuro que se recorre en tres profundidades, cada una con su ruta canónica: **años** (`/timeline`), **meses de un año** (`/timeline/[año]`) y **fotos de un mes** (`/timeline/[año]/[mes]` o `/sin-mes`). Cada periodo es una constelación con sus propias fotografías; entrar es un zoom hacia el grupo y subir (migas de pan, botón de volver, `Esc` o pinch-out) vuelve al grupo de origen. El recorrido es vertical u horizontal (se recuerda por navegador) y una barra lateral permite saltar entre años, meses o días. El visor permite zoom con rueda, pellizco o doble clic, arrastrar, pasar con flechas o gesto, y una tira de miniaturas. Las fechas conservan su precisión (`Sin mes`, `Día sin concretar`) y los medios solo pasan por el proxy autenticado de la API. Organizar y Ajustes mantienen su tema de papel cartográfico. Consulta [`DESIGN.md`](DESIGN.md) para tokens, componentes, movimiento y accesibilidad.
 
 ## Medios y compatibilidad
 
@@ -146,3 +151,4 @@ pnpm build
 - Sin conversión HEIC ni procesamiento/copia permanente de imágenes; HEIC/HEIF se conservan indexados y descargables, con fallback de navegador.
 - La verificación OAuth real sigue pendiente: las pruebas automatizadas no pueden demostrar la configuración de Google Cloud, consentimiento, refresh, streaming ni revocación remota. El rate limit usa Redis entre réplicas y un fallback local acotado durante indisponibilidad; todavía requiere una prueba operativa de caída y recuperación con Redis real.
 - La interfaz usa solo contratos de la API: no mezcla contenido demostrativo con datos indexados.
+- El restyling de Organizar y Ajustes al estilo «Cielo nocturno» queda como siguiente fase; hoy conservan el tema de papel.
