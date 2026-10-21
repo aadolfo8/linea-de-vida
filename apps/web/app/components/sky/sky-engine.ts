@@ -13,6 +13,8 @@ export type SkyItem = {
   /** Offset and size along the travel axis. */
   o: number;
   s: number;
+  /** False until the first layout measurement, so consumers do not act on zeroed offsets. */
+  measured: boolean;
 };
 
 export type SkyFrame = {
@@ -174,7 +176,7 @@ export class SkyEngine {
   }
 
   register(el: HTMLElement, key: string | null = null) {
-    const item: SkyItem = { key, el, x: 0, y: 0, o: 0, s: 0 };
+    const item: SkyItem = { key, el, x: 0, y: 0, o: 0, s: 0, measured: false };
     this.items.add(item);
     this.scheduleMeasure();
     return {
@@ -213,6 +215,7 @@ export class SkyEngine {
         y += el.offsetTop;
         el = el.offsetParent as HTMLElement | null;
       }
+      item.measured = true;
       item.x = x;
       item.y = y;
       item.o = this.horizontal ? x : y;

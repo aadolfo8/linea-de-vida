@@ -1,0 +1,61 @@
+import { describe, expect, it } from 'vitest';
+import {
+  YEAR_CONSTELLATION,
+  constellationGeometry,
+  periodHeaderGeometry,
+} from './constellation-layout';
+
+const desktop = { width: 1440, height: 900 };
+const phone = { width: 390, height: 800 };
+
+describe('constellation geometry', () => {
+  it('sizes the cluster by the viewport width when travelling vertically', () => {
+    const geometry = constellationGeometry(YEAR_CONSTELLATION, desktop, 'vertical', 1, 3);
+    expect(geometry.clusterWidth).toBeCloseTo(Math.min(1440 * 0.62, 780));
+    expect(geometry.clusterWidth / geometry.clusterHeight).toBeCloseTo(1.45);
+    expect(geometry.sectionSize).toBeCloseTo(geometry.clusterHeight + Math.min(900 * 0.16, 150));
+  });
+
+  it('zigzags desktop constellations and centres them on small screens', () => {
+    const even = constellationGeometry(YEAR_CONSTELLATION, desktop, 'vertical', 0, 3);
+    const odd = constellationGeometry(YEAR_CONSTELLATION, desktop, 'vertical', 1, 3);
+    const centred = (1440 - even.clusterWidth) / 2;
+    expect(even.clusterX).toBeLessThan(centred);
+    expect(odd.clusterX).toBeGreaterThan(centred);
+
+    const small = constellationGeometry(YEAR_CONSTELLATION, phone, 'vertical', 0, 3);
+    expect(small.clusterX).toBeCloseTo((390 - small.clusterWidth) / 2);
+    expect(small.tileGap).toBe(5);
+  });
+
+  it('leads with more room for the first constellation and settles after the last', () => {
+    const first = constellationGeometry(YEAR_CONSTELLATION, desktop, 'vertical', 0, 3);
+    const middle = constellationGeometry(YEAR_CONSTELLATION, desktop, 'vertical', 1, 3);
+    const last = constellationGeometry(YEAR_CONSTELLATION, desktop, 'vertical', 2, 3);
+    expect(first.marginLead).toBeGreaterThan(middle.marginLead);
+    expect(first.marginTail).toBe(0);
+    expect(last.marginTail).toBeGreaterThan(0);
+    const afterHeader = constellationGeometry(YEAR_CONSTELLATION, desktop, 'vertical', 0, 3, {
+      afterHeader: true,
+    });
+    expect(afterHeader.marginLead).toBeLessThan(first.marginLead);
+  });
+
+  it('lays constellations out sideways with the cluster inside the stage height', () => {
+    const geometry = constellationGeometry(YEAR_CONSTELLATION, desktop, 'horizontal', 0, 2);
+    expect(geometry.clusterX).toBe(0);
+    expect(geometry.sectionSize).toBe(geometry.clusterWidth);
+    expect(geometry.clusterY).toBeGreaterThanOrEqual(900 * 0.2);
+    expect(geometry.clusterY + geometry.clusterHeight).toBeLessThanOrEqual(900);
+    expect(geometry.nodeY).toBeGreaterThan(geometry.clusterY + geometry.clusterHeight);
+  });
+});
+
+describe('period header geometry', () => {
+  it('is taller than wide when travelling vertically and sideways otherwise', () => {
+    expect(periodHeaderGeometry(desktop, 'vertical').size).toBeLessThanOrEqual(200);
+    expect(periodHeaderGeometry(desktop, 'horizontal').length).toBeGreaterThan(
+      periodHeaderGeometry(desktop, 'horizontal').size,
+    );
+  });
+});

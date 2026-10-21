@@ -97,9 +97,12 @@ input:focus-visible {
   outline: 3px solid var(--map-active);
   outline-offset: 3px;
 }
-body:has(.experience),
-body:has(.timeline-immersive-shell) {
+body:has(.experience) {
   background: var(--map-paper);
+}
+html:has(.timeline-immersive-shell),
+body:has(.timeline-immersive-shell) {
+  background: var(--color-sky-ink);
 }
 .timeline-immersive-shell[data-route-depth='month'] .archive-nav {
   position: relative;
@@ -117,16 +120,6 @@ body:has(.timeline-immersive-shell) {
 .timeline-photo-dialog :is(button, a) {
   min-width: 44px;
   min-height: 44px;
-}
-body:has(.timeline-immersive-shell) .session-status {
-  color: var(--map-muted);
-}
-body:has(.timeline-immersive-shell) .session-status span {
-  background: var(--map-route);
-}
-body:has(.timeline-immersive-shell) button:focus-visible,
-body:has(.timeline-immersive-shell) a:focus-visible {
-  outline-color: var(--map-active);
 }
 @media (max-width: 680px) {
   .session-status {

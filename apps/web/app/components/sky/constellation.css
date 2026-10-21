@@ -1,0 +1,249 @@
+/* Constellations: a year or a month drawn as a cluster of photos around an outline numeral. */
+.sky-grp {
+  position: relative;
+  display: block;
+  flex: none;
+  color: inherit;
+  text-decoration: none;
+}
+.sky-lab {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.sky-num {
+  display: block;
+  color: transparent;
+  font-family: var(--sky-display);
+  font-weight: 400;
+  line-height: 0.82;
+  letter-spacing: -0.03em;
+  white-space: nowrap;
+  -webkit-text-stroke: 1px rgba(207, 224, 255, 0.5);
+  transition:
+    -webkit-text-stroke-color 0.4s,
+    color 0.4s;
+}
+.sky-meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--sky-mute);
+  font-family: var(--sky-mono);
+  font-size: 11px;
+  font-weight: 300;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.sky-meta b {
+  color: var(--sky-fg);
+  font-weight: 400;
+}
+.sky-go {
+  color: var(--sky-accent);
+  opacity: 0;
+  transform: translateX(-6px);
+  transition:
+    opacity 0.35s,
+    transform 0.35s var(--sky-ease);
+}
+.sky-grp:hover .sky-num,
+.sky-grp:focus-visible .sky-num {
+  color: rgba(207, 224, 255, 0.08);
+  -webkit-text-stroke-color: var(--sky-accent);
+}
+.sky-grp:hover .sky-go,
+.sky-grp:focus-visible .sky-go {
+  opacity: 1;
+  transform: none;
+}
+.sky-grp:focus-visible {
+  outline-offset: 8px;
+}
+.sky-grp[data-undated='true'] .sky-num {
+  font-style: italic;
+  -webkit-text-stroke-color: rgba(135, 144, 164, 0.6);
+}
+.sky-cluster {
+  position: absolute;
+  display: block;
+}
+.sky-tile {
+  position: absolute;
+  overflow: hidden;
+  background: var(--sky-tile);
+  transform-origin: 50% 50%;
+  will-change: transform, border-radius;
+}
+.sky-tile img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transition: transform 0.9s var(--sky-ease);
+  will-change: opacity, filter;
+}
+.sky-tile::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(circle, #fff 0 16%, var(--sky-glow) 32%, transparent 70%);
+  opacity: var(--dot, 0);
+  pointer-events: none;
+}
+.sky-tile[data-star='true']::after {
+  animation: sky-pulse 2.4s ease-in-out infinite;
+}
+.sky-grp:hover .sky-tile img {
+  transform: scale(1.04);
+}
+.sky-more {
+  position: absolute;
+  right: 0;
+  bottom: -26px;
+  color: var(--sky-mute);
+  font-family: var(--sky-mono);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+/* The period header that leads a deeper list, e.g. the year above its months. */
+.sky-head {
+  position: relative;
+  flex: none;
+}
+.sky-head h1 {
+  position: absolute;
+  margin: 0;
+  color: transparent;
+  font-family: var(--sky-display);
+  font-weight: 400;
+  line-height: 0.85;
+  letter-spacing: -0.03em;
+  white-space: nowrap;
+  -webkit-text-stroke: 1px rgba(207, 224, 255, 0.45);
+}
+.sky-head p {
+  position: absolute;
+  margin: 0;
+  color: var(--sky-mute);
+  font-family: var(--sky-mono);
+  font-size: 11px;
+  font-weight: 300;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.sky-head p b {
+  color: var(--sky-fg);
+  font-weight: 400;
+}
+
+/* The thread joining the groups, drawn as you travel. */
+.sky-thread {
+  position: absolute;
+  top: 0;
+  left: 0;
+  overflow: visible;
+  pointer-events: none;
+}
+.sky-thread path {
+  fill: none;
+  stroke: rgba(207, 224, 255, 0.28);
+  stroke-width: 1;
+}
+.sky-node {
+  position: absolute;
+  width: 9px;
+  height: 9px;
+  margin: -4.5px 0 0 -4.5px;
+  background: var(--sky-accent);
+  box-shadow: 0 0 14px var(--sky-glow);
+  pointer-events: none;
+  transform: rotate(45deg);
+}
+.sky-node[data-undated='true'] {
+  border: 1px solid var(--sky-mute);
+  background: var(--sky-ink);
+  box-shadow: none;
+}
+
+/* States that live inside the world: loading, empty, error. */
+.sky-state {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  height: 100dvh;
+  display: grid;
+  align-content: center;
+  justify-items: center;
+  gap: 14px;
+  padding: 24px;
+  text-align: center;
+}
+.sky-state h2 {
+  margin: 0;
+  font-family: var(--sky-display);
+  font-size: clamp(2rem, 5vw, 3.75rem);
+  font-weight: 400;
+  line-height: 1;
+  text-wrap: balance;
+}
+.sky-state p {
+  max-width: 44ch;
+  margin: 0;
+  color: var(--sky-mute);
+  line-height: 1.6;
+}
+.sky-state a,
+.sky-state button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 18px;
+  border: 1px solid var(--sky-line);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--sky-ink-2) 80%, transparent);
+  color: var(--sky-fg);
+  text-decoration: none;
+  transition: border-color 0.2s;
+}
+.sky-state a:hover,
+.sky-state button:hover {
+  border-color: var(--sky-accent);
+}
+.sky-state-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 10px;
+}
+.sky-wait {
+  color: var(--sky-mute);
+  font-family: var(--sky-mono);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+@keyframes sky-pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sky-num,
+  .sky-go,
+  .sky-tile img {
+    transition: none;
+  }
+  .sky-tile[data-star='true']::after {
+    animation: none;
+  }
+}

@@ -56,6 +56,17 @@ export type TimelineYearSummary = {
   previews: TimelinePhoto[];
 };
 
+/** One constellation of a year: a month with photos, or the group of photos without a month. */
+export type TimelineMonthPreview = {
+  month: number | null;
+  kind: 'MONTH' | 'YEAR';
+  label: string | null;
+  photoCount: number;
+  previews: TimelinePhoto[];
+};
+
+export type TimelineMonthPreviews = { year: number; items: TimelineMonthPreview[] };
+
 export type TimelinePhotoPage = { items: TimelinePhoto[]; nextCursor: string | null };
 export type TimelineMonth = number | 'sin-mes';
 
@@ -135,6 +146,16 @@ export const monthFormatter = new Intl.DateTimeFormat('es', {
 
 export const monthLabel = (month: number) =>
   monthFormatter.format(new Date(Date.UTC(2024, month - 1)));
+
+export const capitalize = (value: string) => value.charAt(0).toUpperCase() + value.slice(1);
+
+/** "Agosto", the way a month heads its constellation. */
+export const monthTitle = (month: number) => capitalize(monthLabel(month));
+
+export const photoCountLabel = (count: number) =>
+  `${count.toLocaleString('es-ES')} ${count === 1 ? 'foto' : 'fotos'}`;
+
+export const monthCountLabel = (count: number) => `${count} ${count === 1 ? 'mes' : 'meses'}`;
 
 export function isCurrentTimelineRequest(requestId: number, latestRequestId: number) {
   return requestId === latestRequestId;

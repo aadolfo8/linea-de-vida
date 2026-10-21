@@ -1,31 +1,52 @@
 'use client';
 
 import { usePathname, useRouter } from 'next/navigation';
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { ArchiveNav } from './ArchiveNav';
 import { ImmersiveTimelineExperience } from './ImmersiveTimelineExperience';
 import { ProtectedSurface } from './ProtectedSurface';
+import { SkyChrome, type SkyCrumb } from './sky/SkyChrome';
+import { SkyStage } from './sky/SkyStage';
+import { YearDepth } from './sky/YearDepth';
+import { YearsDepth } from './sky/YearsDepth';
+import { readOrientation, writeOrientation, type SkyOrientation } from './sky/orientation';
+import { consumeTravelEntry, travelLocation } from './sky/travel';
+import { useTravel } from './sky/use-travel';
 import { useTimelineFocus } from './TimelineFocus';
 import {
+  monthTitle,
   parseTimelineRoute,
   safeOrganizeReturnHref,
   timelineHref,
   timelineHrefWithReturn,
 } from './timeline-model';
-import { Button } from '../../components/ui/button';
+
+/** Pinch gestures arrive as small ctrl+wheel deltas; a mouse wheel with ctrl is page zoom. */
+const PINCH_MAX_DELTA = 50;
+const PINCH_TRIGGER = 12;
 
 export function TimelineRoute() {
   const pathname = usePathname();
   const router = useRouter();
+  const travel = useTravel();
   const { focused, setFocused } = useTimelineFocus();
   const [organizeReturn, setOrganizeReturn] = useState<{ href: string; label: string } | null>(
     null,
   );
+  const [orientation, setOrientationState] = useState<SkyOrientation>(readOrientation);
   const enterRef = useRef<HTMLButtonElement>(null);
   const exitRef = useRef<HTMLButtonElement>(null);
+  const currentCrumbRef = useRef<HTMLSpanElement>(null);
   const previousFocus = useRef(focused);
   const route = parseTimelineRoute(pathname);
   const routeDepth = route.month || route.unknown ? 'month' : route.year ? 'year' : 'panorama';
+  const returnTo = organizeReturn?.href ?? null;
+  const returnLabel = organizeReturn?.label ?? null;
+
+  const setOrientation = useCallback((value: SkyOrientation) => {
+    setOrientationState(value);
+    writeOrientation(value);
+  }, []);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -37,14 +58,10 @@ export function TimelineRoute() {
   useEffect(() => {
     if (!route.invalid) return;
     router.replace(
-      timelineHrefWithReturn(
-        timelineHref({ year: route.year }),
-        organizeReturn?.href ?? null,
-        organizeReturn?.label,
-      ),
+      timelineHrefWithReturn(timelineHref({ year: route.year }), returnTo, returnLabel),
       { scroll: false },
     );
-  }, [organizeReturn?.href, route.invalid, route.year, router]);
+  }, [returnLabel, returnTo, route.invalid, route.year, router]);
 
   useEffect(() => {
     if (previousFocus.current === focused) return;
@@ -53,95 +70,218 @@ export function TimelineRoute() {
     else enterRef.current?.focus();
   }, [focused]);
 
+  // The month depth still renders without a stage, so it reports its own arrival.
   useEffect(() => {
-    if (!focused) return;
+    if (routeDepth === 'month' && !route.invalid) consumeTravelEntry(travelLocation(pathname));
+  }, [pathname, route.invalid, routeDepth]);
+
+  const withReturn = (href: string) => timelineHrefWithReturn(href, returnTo, returnLabel);
+  const goUp = () => {
+    if (!route.year) return;
+    if (route.month || route.unknown)
+      travel(
+        withReturn(timelineHref({ year: route.year })),
+        'out',
+        null,
+        route.unknown ? 'sin-mes' : String(route.month),
+      );
+    else travel(withReturn(timelineHref()), 'out', null, String(route.year));
+  };
+  const goUpRef = useRef(goUp);
+  useEffect(() => {
+    goUpRef.current = goUp;
+  });
+
+  // Escape closes what is on top: an open dialog first, then concentration mode, then one depth.
+  useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || event.defaultPrevented) return;
       if (
-        event.key !== 'Escape' ||
-        event.defaultPrevented ||
-        (event.target instanceof Element && event.target.closest('[role="dialog"]'))
+        (event.target instanceof Element && event.target.closest('[role="dialog"]')) ||
+        document.querySelector('[role="dialog"]')
       )
         return;
-      event.preventDefault();
-      setFocused(false);
+      if (focused) {
+        event.preventDefault();
+        setFocused(false);
+      } else if (routeDepth !== 'panorama') {
+        event.preventDefault();
+        goUpRef.current();
+      }
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [focused, setFocused]);
+  }, [focused, routeDepth, setFocused]);
+
+  // Trackpad pinch-out zooms out one depth.
+  useEffect(() => {
+    if (routeDepth === 'panorama') return;
+    let accumulated = 0;
+    let timer = 0;
+    const onWheel = (event: WheelEvent) => {
+      if (!event.ctrlKey || Math.abs(event.deltaY) >= PINCH_MAX_DELTA) return;
+      if (document.querySelector('[role="dialog"]')) return;
+      event.preventDefault();
+      accumulated += event.deltaY;
+      window.clearTimeout(timer);
+      timer = window.setTimeout(() => (accumulated = 0), 200);
+      if (accumulated > PINCH_TRIGGER) {
+        accumulated = 0;
+        goUpRef.current();
+      }
+    };
+    window.addEventListener('wheel', onWheel, { passive: false });
+    return () => {
+      window.clearTimeout(timer);
+      window.removeEventListener('wheel', onWheel);
+    };
+  }, [routeDepth]);
+
+  const crumbs: SkyCrumb[] = [{ label: 'Años' }];
+  if (route.year) {
+    crumbs[0] = {
+      label: 'Años',
+      href: withReturn(timelineHref()),
+      landKey: String(route.year),
+    };
+    const undatedMonth = route.unknown;
+    const monthKey = undatedMonth ? 'sin-mes' : String(route.month);
+    crumbs.push(
+      routeDepth === 'month'
+        ? {
+            label: String(route.year),
+            href: withReturn(timelineHref({ year: route.year })),
+            landKey: monthKey,
+          }
+        : { label: String(route.year) },
+    );
+    if (routeDepth === 'month')
+      crumbs.push({ label: undatedMonth ? 'Sin mes' : monthTitle(route.month!) });
+  }
+
+  const announcement =
+    routeDepth === 'month'
+      ? `${route.unknown ? 'Fotos sin mes' : monthTitle(route.month!)} de ${route.year}`
+      : routeDepth === 'year'
+        ? `Año ${route.year}`
+        : 'Todos los años';
+
+  const renderShell = (name: string | null | undefined) => {
+    const actions: ReactNode = focused ? (
+      <button ref={exitRef} type="button" className="sky-pill" onClick={() => setFocused(false)}>
+        Salir del modo concentración
+      </button>
+    ) : (
+      <>
+        <ArchiveNav variant="sky" name={name} />
+        <nav className="sky-actions-row" aria-label="Vista de la cronología">
+          <button
+            ref={enterRef}
+            type="button"
+            className="sky-pill"
+            onClick={() => setFocused(true)}
+          >
+            Concentrar vista
+          </button>
+        </nav>
+      </>
+    );
+    const onLanded = () => currentCrumbRef.current?.focus({ preventScroll: true });
+    const returnAside = organizeReturn && (
+      <aside
+        className={routeDepth === 'month' ? 'sky-return sky-return-static' : 'sky-return'}
+        aria-label="Continuar organizando"
+      >
+        <p>
+          Este periodo reúne fotografías de tus carpetas. Puedes volver a continuar con{' '}
+          <strong>{organizeReturn.label}</strong>.
+        </p>
+        <a href={organizeReturn.href}>Volver a Organizar</a>
+      </aside>
+    );
+
+    if (route.invalid)
+      return (
+        <main className="sky grid min-h-dvh place-items-center p-6" aria-live="polite">
+          Corrigiendo la ruta temporal…
+        </main>
+      );
+
+    if (routeDepth === 'month')
+      return (
+        <div className="sky" data-orientation={orientation}>
+          <SkyChrome
+            crumbs={crumbs}
+            onTravel={travel}
+            currentRef={currentCrumbRef}
+            actions={actions}
+            placement="static"
+          />
+          {returnAside}
+          <div className="sky-paper">
+            <ImmersiveTimelineExperience
+              organizeReturnTo={returnTo}
+              organizeReturnLabel={returnLabel}
+            />
+          </div>
+        </div>
+      );
+
+    return (
+      <SkyStage
+        orientation={orientation}
+        onOrientationChange={setOrientation}
+        label="Línea de vida"
+        overlay={
+          <>
+            <a className="sky-skip" href="#timeline-main">
+              Saltar a la línea de tiempo
+            </a>
+            <SkyChrome
+              crumbs={crumbs}
+              onTravel={travel}
+              currentRef={currentCrumbRef}
+              orientation={orientation}
+              onOrientationChange={setOrientation}
+              actions={actions}
+            />
+            {returnAside}
+          </>
+        }
+      >
+        {routeDepth === 'year' ? (
+          <YearDepth
+            key={route.year}
+            year={route.year!}
+            returnTo={returnTo}
+            returnLabel={returnLabel}
+            travel={travel}
+            onLanded={onLanded}
+          />
+        ) : (
+          <YearsDepth
+            returnTo={returnTo}
+            returnLabel={returnLabel}
+            travel={travel}
+            onLanded={onLanded}
+          />
+        )}
+      </SkyStage>
+    );
+  };
 
   return (
     <ProtectedSurface>
       {(session) => (
         <div
-          className="timeline-immersive-shell min-h-dvh"
+          className="timeline-immersive-shell sky-scope min-h-dvh"
           data-route-depth={routeDepth}
           data-focus={focused ? 'on' : 'off'}
         >
-          {!focused && (
-            <>
-              <ArchiveNav name={session.user.displayName} />
-              <nav
-                className="relative z-[19] flex min-h-[3.25rem] items-center justify-end gap-3 border-b border-map-line bg-map-paper px-[max(1rem,5vw)] py-2 text-map-muted max-[680px]:justify-between max-[680px]:flex-wrap"
-                aria-label="Vista de la cronología"
-              >
-                <Button
-                  ref={enterRef}
-                  variant="outline"
-                  size="sm"
-                  className="rounded-lg border-current text-inherit hover:bg-map-route-soft/40"
-                  onClick={() => setFocused(true)}
-                >
-                  Concentrar vista
-                </Button>
-              </nav>
-            </>
-          )}
-          {focused && (
-            <div
-              className="sticky top-0 z-[21] flex justify-end bg-map-paper px-[max(1rem,5vw)] py-2 text-map-ink data-[route-depth=month]:relative"
-              data-route-depth={routeDepth}
-            >
-              <Button
-                ref={exitRef}
-                variant="outline"
-                size="sm"
-                className="rounded-lg border-current text-inherit"
-                onClick={() => setFocused(false)}
-              >
-                Salir del modo concentración
-              </Button>
-            </div>
-          )}
-          {organizeReturn && (
-            <aside
-              className="flex flex-wrap items-center justify-between gap-3 border-b border-map-line bg-map-panel px-[max(1rem,5vw)] py-3 text-sm"
-              aria-label="Continuar organizando"
-            >
-              <p className="m-0 max-w-[70ch] text-map-muted">
-                Este periodo reúne fotografías de tus carpetas. Puedes volver a continuar con{' '}
-                <strong className="text-map-ink">{organizeReturn.label}</strong>.
-              </p>
-              <a
-                className="inline-flex min-h-11 items-center font-semibold text-map-ink underline-offset-4 hover:text-map-route hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-map-route"
-                href={organizeReturn.href}
-              >
-                Volver a Organizar
-              </a>
-            </aside>
-          )}
-          {route.invalid ? (
-            <main
-              className="grid min-h-dvh place-items-center bg-map-paper p-6 text-map-ink"
-              aria-live="polite"
-            >
-              Corrigiendo la ruta temporal…
-            </main>
-          ) : (
-            <ImmersiveTimelineExperience
-              organizeReturnTo={organizeReturn?.href ?? null}
-              organizeReturnLabel={organizeReturn?.label ?? null}
-            />
-          )}
+          <p className="sr-only" role="status" aria-live="polite">
+            {route.invalid ? '' : announcement}
+          </p>
+          {renderShell(session.user.displayName)}
         </div>
       )}
     </ProtectedSurface>
