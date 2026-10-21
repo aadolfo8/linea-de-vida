@@ -1,9 +1,9 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { CalendarDays, FolderCog, Settings2 } from 'lucide-react';
+import { CalendarDays, FolderCog, Menu, Settings2 } from 'lucide-react';
 import { Button } from '../../components/ui/button';
 import { apiJson } from '../../lib/api';
 
@@ -27,6 +27,33 @@ export function ArchiveNav({
   const router = useRouter();
   const [signingOut, setSigningOut] = useState(false);
   const [signOutError, setSignOutError] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const toggleRef = useRef<HTMLButtonElement>(null);
+  const skyRef = useRef<HTMLDivElement>(null);
+  const panelId = useId();
+
+  // The sky menu is a disclosure on narrow screens: it closes on navigation and on outside taps.
+  useEffect(() => setMenuOpen(false), [pathname]);
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onPointerDown = (event: PointerEvent) => {
+      if (event.target instanceof Node && !skyRef.current?.contains(event.target))
+        setMenuOpen(false);
+    };
+    // Escape works wherever focus is (Safari does not focus a button on click).
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || event.defaultPrevented) return;
+      event.preventDefault();
+      setMenuOpen(false);
+      toggleRef.current?.focus();
+    };
+    document.addEventListener('pointerdown', onPointerDown);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('pointerdown', onPointerDown);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [menuOpen]);
 
   const signOut = async () => {
     if (signingOut) return;
@@ -49,36 +76,49 @@ export function ArchiveNav({
 
   if (variant === 'sky')
     return (
-      <header className="archive-nav sky-nav">
-        <nav aria-label="Navegación principal">
-          {links.map(({ href, label, icon: Icon }) => (
-            <Link
-              key={href}
-              data-cursor="route"
-              href={href === '/timeline' ? timelinePath : href}
-              aria-current={isCurrent(href) ? 'page' : undefined}
-            >
-              <Icon aria-hidden="true" className="size-4" />
-              <span>{label}</span>
-            </Link>
-          ))}
-        </nav>
-        <p
-          className="session-status sky-nav-user"
-          aria-label={name ? `Sesión de ${name}` : 'Sesión activa'}
+      <div ref={skyRef} className="archive-nav sky-nav" data-open={menuOpen ? 'true' : 'false'}>
+        <button
+          ref={toggleRef}
+          type="button"
+          className="sky-menu-toggle"
+          aria-label="Menú principal"
+          aria-expanded={menuOpen}
+          aria-controls={panelId}
+          onClick={() => setMenuOpen((open) => !open)}
         >
-          <i aria-hidden="true" />
-          {name ?? 'Sesión activa'}
-        </p>
-        <button type="button" onClick={() => void signOut()} disabled={signingOut}>
-          {signingOut ? 'Saliendo…' : 'Cerrar sesión'}
+          <Menu aria-hidden="true" />
         </button>
+        <div id={panelId} className="sky-nav-panel">
+          <nav aria-label="Navegación principal">
+            {links.map(({ href, label, icon: Icon }) => (
+              <Link
+                key={href}
+                data-cursor="route"
+                href={href === '/timeline' ? timelinePath : href}
+                aria-current={isCurrent(href) ? 'page' : undefined}
+              >
+                <Icon aria-hidden="true" className="size-4" />
+                <span>{label}</span>
+              </Link>
+            ))}
+          </nav>
+          <p
+            className="session-status sky-nav-user"
+            aria-label={name ? `Sesión de ${name}` : 'Sesión activa'}
+          >
+            <i aria-hidden="true" />
+            {name ?? 'Sesión activa'}
+          </p>
+          <button type="button" onClick={() => void signOut()} disabled={signingOut}>
+            {signingOut ? 'Saliendo…' : 'Cerrar sesión'}
+          </button>
+        </div>
         {signOutError && (
           <span className="sr-only" role="alert">
             No se pudo cerrar la sesión. Comprueba tu conexión e inténtalo de nuevo.
           </span>
         )}
-      </header>
+      </div>
     );
 
   return (

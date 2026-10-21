@@ -100,7 +100,9 @@ input:focus-visible {
 body:has(.experience) {
   background: var(--map-paper);
 }
+html:has(.sky),
 html:has(.timeline-immersive-shell),
+body:has(.sky),
 body:has(.timeline-immersive-shell) {
   background: var(--color-sky-ink);
 }

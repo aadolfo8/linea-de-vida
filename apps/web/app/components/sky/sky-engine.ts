@@ -272,6 +272,28 @@ export class SkyEngine {
     this.startLoop();
   }
 
+  /**
+   * Brings an element on screen without animating, e.g. while a dialog covers the sky and the
+   * photo it shows changes: closing then shrinks back onto a tile that is really there.
+   */
+  follow(el: HTMLElement) {
+    const parts = this.parts;
+    if (!parts) return;
+    let offset = 0;
+    let node: HTMLElement | null = el;
+    while (node && node !== parts.track) {
+      offset += this.horizontal ? node.offsetLeft : node.offsetTop;
+      node = node.offsetParent as HTMLElement | null;
+    }
+    const size = this.horizontal ? el.offsetWidth : el.offsetHeight;
+    const start = offset - this.current;
+    if (start >= 0 && start + size <= this.viewportLength) return;
+    this.jumpTo(offset + size / 2 - this.viewportLength / 2);
+    this.current = this.target;
+    this.dirty = true;
+    this.startLoop();
+  }
+
   /** Sync the track to wherever native scroll is now, e.g. after a restored position. */
   syncToScroll() {
     this.target = clamp(window.scrollY, 0, this.maxScroll);

@@ -1,5 +1,7 @@
 /** @vitest-environment jsdom */
 
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -213,5 +215,46 @@ describe('sky chrome', () => {
     expect(horizontal!.getAttribute('aria-pressed')).toBe('false');
     await act(async () => horizontal!.click());
     expect(onOrientationChange).toHaveBeenCalledWith('horizontal');
+  });
+
+  it('puts the brand, breadcrumb and one control cluster in a single bar', async () => {
+    await act(async () =>
+      root.render(
+        <SkyChrome
+          crumbs={crumbs}
+          onTravel={vi.fn()}
+          orientation="vertical"
+          onOrientationChange={vi.fn()}
+          actions={<button type="button">Concentrar vista</button>}
+          menu={<button type="button">Menú principal</button>}
+        />,
+      ),
+    );
+
+    const bar = container.querySelector('header.sky-bar')!;
+    expect(bar.children).toHaveLength(2);
+    expect(bar.querySelector('.sky-where a.sky-brand')?.getAttribute('aria-label')).toContain(
+      'Línea de vida',
+    );
+    const controls = bar.querySelector('.sky-controls')!;
+    expect([...controls.querySelectorAll('button')].map((b) => b.textContent)).toEqual([
+      'Menú principal',
+      'Concentrar vista',
+      'Vertical',
+      'Horizontal',
+    ]);
+    // Icon-only on narrow screens: the orientation buttons keep their accessible names.
+    expect(
+      [...controls.querySelectorAll('.sky-seg button')].map((b) => b.getAttribute('title')),
+    ).toEqual(['Vertical', 'Horizontal']);
+  });
+
+  it('reserves the bar height so depths start below it', () => {
+    const css = readFileSync(resolve(__dirname, 'sky.css'), 'utf8');
+    expect(css).toMatch(/--sky-bar-h:\s*calc\(env\(safe-area-inset-top, 0px\) \+ \d+px\)/);
+    expect(css).toMatch(/\.sky-bar \{[^}]*height: var\(--sky-bar-h\)/);
+    expect(css).toMatch(
+      /\.sky\[data-orientation='vertical'\] \.sky-track \{[^}]*padding-top: var\(--sky-bar-h\)/,
+    );
   });
 });

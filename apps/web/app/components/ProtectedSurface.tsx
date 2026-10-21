@@ -22,13 +22,29 @@ export function useSession() {
 
 export function ProtectedSurface({
   children,
+  tone = 'paper',
 }: {
   children: (session: Session) => React.ReactNode;
+  /** `sky` renders the waiting and error states in the night-sky palette (the timeline). */
+  tone?: 'paper' | 'sky';
 }) {
   const { session, state, retry } = useSession();
   useEffect(() => {
     if (state === 'signed-out') window.location.replace('/');
   }, [state]);
+  if (tone === 'sky' && (state !== 'ready' || !session))
+    return state === 'error' ? (
+      <main className="sky sky-gate" aria-live="polite">
+        <p>No se pudo comprobar la sesión. Tu archivo sigue intacto.</p>
+        <button type="button" onClick={retry}>
+          Reintentar
+        </button>
+      </main>
+    ) : (
+      <main className="sky sky-gate" aria-live="polite">
+        <p className="sky-wait">Comprobando tu sesión privada…</p>
+      </main>
+    );
   if (state === 'error')
     return (
       <main

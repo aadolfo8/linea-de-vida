@@ -6,6 +6,7 @@ import {
   clampView,
   doubleTapScale,
   fitSize,
+  stageBox,
   flipTransform,
   isRectVisible,
   isZoomed,
@@ -21,7 +22,7 @@ describe('fitSize', () => {
     const size = fitSize({ width: 3000, height: 2000 }, stage);
     expect(size.width / size.height).toBeCloseTo(1.5);
     expect(size.width).toBeLessThanOrEqual(1000 - 96);
-    expect(size.height).toBeLessThanOrEqual(800 - 150);
+    expect(size.height).toBeLessThanOrEqual(800 - 24);
   });
 
   it('uses the full width on a phone and a neutral box while the size is unknown', () => {
@@ -29,6 +30,33 @@ describe('fitSize', () => {
     const unknown = fitSize(null, stage);
     expect(unknown.width).toBeGreaterThan(0);
     expect(fitSize({ width: 0, height: 0 }, stage)).toEqual(unknown);
+  });
+});
+
+describe('stageBox', () => {
+  const viewport = { width: 1280, height: 800 };
+
+  it('takes the band between the top meta and the filmstrip', () => {
+    expect(stageBox(viewport, 96, 704)).toEqual({ width: 1280, height: 608, top: 96 });
+  });
+
+  it('keeps a fitted photo clear of both blocks', () => {
+    const box = stageBox(viewport, 96, 704);
+    const size = fitSize({ width: 1500, height: 3000 }, box);
+    const top = box.top + (box.height - size.height) / 2;
+    expect(top).toBeGreaterThanOrEqual(96);
+    expect(top + size.height).toBeLessThanOrEqual(704);
+  });
+
+  it('falls back to the whole window when nothing was measured', () => {
+    expect(stageBox(viewport, 0, 0)).toEqual({ width: 1280, height: 800, top: 0 });
+    expect(stageBox(viewport, 300, 340)).toEqual({ width: 1280, height: 800, top: 0 });
+  });
+
+  it('keeps the pan maths of a band that does not start at the top', () => {
+    const tile = { left: 100, top: 400, width: 300, height: 200, right: 400, bottom: 600 };
+    const flip = flipTransform(tile, { width: 900, height: 600 }, { width: 1280, height: 608 }, 96);
+    expect(flip.y).toBe(500 - (96 + 304));
   });
 });
 

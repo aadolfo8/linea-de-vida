@@ -163,6 +163,36 @@ describe('TimelinePhotoViewer effects', () => {
     return match;
   }
 
+  it('reports the photo on display when it changes, but not the one it opened on', async () => {
+    const onPhotoChange = vi.fn();
+    await render({ onPhotoChange });
+    expect(onPhotoChange).not.toHaveBeenCalled();
+
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('button[aria-label="Foto siguiente"]')!.click();
+    });
+    expect(onPhotoChange).toHaveBeenCalledExactlyOnceWith('photo-2');
+  });
+
+  it('keeps the stage band between the meta block and the filmstrip when they are measured', async () => {
+    const rect = (top: number, bottom: number) =>
+      ({ top, bottom, left: 0, right: 1024, width: 1024, height: bottom - top }) as DOMRect;
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
+      function (this: HTMLElement) {
+        if (this.classList.contains('pv-meta')) return rect(18, 96);
+        if (this.classList.contains('pv-tools')) return rect(18, 62);
+        if (this.classList.contains('pv-strip')) return rect(660, 768);
+        return rect(0, 0);
+      },
+    );
+    await render();
+
+    const style = stage().style;
+    expect(Number.parseFloat(style.top)).toBe(104);
+    // The strip starts at 660 with no padding in jsdom; the band ends 10px above it.
+    expect(Number.parseFloat(style.height)).toBe(660 - 10 - 104);
+    vi.restoreAllMocks();
+  });
   it('contains focus and restores background, body, and prior focus on close', async () => {
     await render();
 

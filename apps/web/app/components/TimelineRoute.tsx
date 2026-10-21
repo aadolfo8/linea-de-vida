@@ -1,5 +1,6 @@
 'use client';
 
+import { Focus, X } from 'lucide-react';
 import { usePathname, useRouter } from 'next/navigation';
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { ArchiveNav } from './ArchiveNav';
@@ -163,23 +164,16 @@ export function TimelineRoute() {
   const renderShell = (name: string | null | undefined) => {
     const actions: ReactNode = focused ? (
       <button ref={exitRef} type="button" className="sky-pill" onClick={() => setFocused(false)}>
-        Salir del modo concentración
+        <X aria-hidden="true" />
+        <span className="sky-long">Salir del modo concentración</span>
       </button>
     ) : (
-      <>
-        <ArchiveNav variant="sky" name={name} />
-        <nav className="sky-actions-row" aria-label="Vista de la cronología">
-          <button
-            ref={enterRef}
-            type="button"
-            className="sky-pill"
-            onClick={() => setFocused(true)}
-          >
-            Concentrar vista
-          </button>
-        </nav>
-      </>
+      <button ref={enterRef} type="button" className="sky-pill" onClick={() => setFocused(true)}>
+        <Focus aria-hidden="true" />
+        <span className="sky-long">Concentrar vista</span>
+      </button>
     );
+    const menu = focused ? null : <ArchiveNav variant="sky" name={name} />;
     const onLanded = () => currentCrumbRef.current?.focus({ preventScroll: true });
     const returnAside = organizeReturn && (
       <aside className="sky-return" aria-label="Continuar organizando">
@@ -215,6 +209,7 @@ export function TimelineRoute() {
               orientation={orientation}
               onOrientationChange={setOrientation}
               actions={actions}
+              menu={menu}
             />
             {returnAside}
           </>
@@ -251,7 +246,7 @@ export function TimelineRoute() {
   };
 
   return (
-    <ProtectedSurface>
+    <ProtectedSurface tone="sky">
       {(session) => (
         <div
           className="timeline-immersive-shell sky-scope min-h-dvh"

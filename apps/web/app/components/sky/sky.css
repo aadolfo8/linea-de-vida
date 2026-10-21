@@ -12,6 +12,7 @@
   --sky-accent: var(--color-sky-accent, #cfe0ff);
   --sky-glow: rgba(190, 210, 255, 0.55);
   --sky-tile: #0e1424;
+  --sky-bar-h: calc(env(safe-area-inset-top, 0px) + 60px);
   --sky-ease: cubic-bezier(0.22, 1, 0.36, 1);
   --sky-ui: var(--font-sky-ui, 'Figtree'), system-ui, -apple-system, 'Segoe UI', sans-serif;
   --sky-mono:
@@ -73,7 +74,10 @@
   height: 100%;
 }
 .sky[data-orientation='vertical'] .sky-track {
+  box-sizing: border-box;
   width: 100%;
+  /* Headers and the first group start below the fixed bar. */
+  padding-top: var(--sky-bar-h);
 }
 
 /* Every control keeps a 44px hit area, even where the visual is smaller. */
@@ -87,14 +91,22 @@
 .sky-bar {
   position: fixed;
   z-index: 30;
-  top: calc(env(safe-area-inset-top, 0px) + 14px);
-  right: max(16px, env(safe-area-inset-right, 0px));
-  left: max(16px, env(safe-area-inset-left, 0px));
+  top: 0;
+  right: 0;
+  left: 0;
+  box-sizing: border-box;
   display: flex;
-  flex-wrap: wrap;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
-  gap: 10px 16px;
+  gap: 12px;
+  height: var(--sky-bar-h);
+  padding: env(safe-area-inset-top, 0px) max(16px, env(safe-area-inset-right, 0px)) 0
+    max(16px, env(safe-area-inset-left, 0px));
+  background: linear-gradient(
+    to bottom,
+    color-mix(in srgb, var(--sky-ink) 88%, transparent),
+    transparent
+  );
   pointer-events: none;
 }
 .sky-bar > * {
@@ -102,22 +114,33 @@
 }
 .sky-where {
   display: flex;
-  flex-direction: column;
-  gap: 8px;
+  flex: 0 1 auto;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
 }
 .sky-brand {
   display: inline-flex;
-  align-items: baseline;
-  gap: 12px;
+  flex: none;
+  align-items: center;
+  gap: 10px;
   color: var(--sky-fg);
   font-family: var(--sky-display);
-  font-size: 22px;
+  font-size: 20px;
   letter-spacing: 0.01em;
   text-decoration: none;
+}
+.sky-brand-mark {
+  width: 7px;
+  height: 7px;
+  background: var(--sky-accent);
+  box-shadow: 0 0 10px var(--sky-glow);
+  transform: rotate(45deg);
 }
 .sky-crumbs {
   display: flex;
   align-items: center;
+  min-width: 0;
   gap: 4px;
   font-family: var(--sky-mono);
   font-size: 11px;
@@ -127,6 +150,7 @@
 .sky-crumbs ol {
   display: flex;
   align-items: center;
+  min-width: 0;
   gap: 4px;
   margin: 0;
   padding: 0;
@@ -135,6 +159,7 @@
 .sky-crumbs li {
   display: inline-flex;
   align-items: center;
+  min-width: 0;
   gap: 4px;
 }
 .sky-crumbs a {
@@ -151,8 +176,12 @@
 .sky-crumbs [aria-current='location'] {
   display: inline-flex;
   align-items: center;
+  min-width: 0;
   padding: 6px 4px;
+  overflow: hidden;
   color: var(--sky-accent);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .sky-crumbs .sky-sep {
   color: var(--sky-line);
@@ -178,18 +207,21 @@
   width: 16px;
   height: 16px;
 }
-.sky-actions {
+.sky-controls {
+  position: relative;
   display: flex;
-  flex-direction: column;
-  align-items: flex-end;
+  flex: none;
+  align-items: center;
   gap: 8px;
 }
-.sky-actions-row {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 8px;
+/* Visually hidden, still announced: labels of controls that collapse to an icon. */
+.sky-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
 }
 .sky-seg {
   display: inline-flex;
@@ -232,24 +264,62 @@
 .sky-pill {
   border: 1px solid var(--sky-line);
   background: color-mix(in srgb, var(--sky-ink-2) 78%, transparent);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+.sky-pill svg {
+  width: 16px;
+  height: 16px;
+}
+/* The label shows only where the bar has room for it; the icon keeps the accessible name. */
+.sky-pill .sky-long {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
 }
 
-/* The compact archive navigation that sits quietly in the top-right corner. */
+/*
+ * Archive navigation. Wide: links, session and sign-out sit inline in the control cluster.
+ * Narrow: they collapse behind one menu button (a disclosure) that opens a panel below the bar.
+ */
 .sky-nav {
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
-  justify-content: flex-end;
-  gap: 4px 12px;
   color: var(--sky-mute);
   font-size: 13px;
+}
+.sky-menu-toggle {
+  display: none;
+  place-items: center;
+  border: 1px solid var(--sky-line);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--sky-ink-2) 78%, transparent);
+  color: var(--sky-fg);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+.sky-menu-toggle[aria-expanded='true'],
+.sky-menu-toggle:hover {
+  border-color: var(--sky-accent);
+}
+.sky-menu-toggle svg {
+  width: 18px;
+  height: 18px;
+}
+.sky-nav-panel {
+  display: flex;
+  align-items: center;
+  gap: 4px 12px;
 }
 .sky-nav nav {
   display: flex;
   gap: 2px;
 }
 .sky-nav a,
-.sky-nav button {
+.sky-nav-panel > button {
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -262,7 +332,7 @@
   transition: color 0.2s;
 }
 .sky-nav a:hover,
-.sky-nav button:hover:not(:disabled) {
+.sky-nav-panel > button:hover:not(:disabled) {
   color: var(--sky-fg);
 }
 .sky-nav a[aria-current='page'] {
@@ -385,20 +455,79 @@
   transform: rotate(45deg) scale(1.5);
 }
 
+@media (min-width: 1360px) {
+  .sky-pill .sky-long {
+    position: static;
+    width: auto;
+    height: auto;
+    overflow: visible;
+    clip-path: none;
+  }
+}
+@media (max-width: 1359px) {
+  .sky-menu-toggle {
+    display: inline-grid;
+  }
+  .sky-nav-panel {
+    position: fixed;
+    z-index: 31;
+    top: calc(var(--sky-bar-h) - 4px);
+    right: max(16px, env(safe-area-inset-right, 0px));
+    display: none;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 4px;
+    width: min(280px, calc(100vw - 32px));
+    padding: 8px;
+    border: 1px solid var(--sky-line);
+    border-radius: 18px;
+    background: color-mix(in srgb, var(--sky-ink-2) 95%, transparent);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+    box-shadow: 0 18px 40px rgba(0, 0, 0, 0.45);
+  }
+  .sky-nav[data-open='true'] .sky-nav-panel {
+    display: flex;
+  }
+  .sky-nav nav {
+    flex-direction: column;
+  }
+  .sky-nav a,
+  .sky-nav-panel > button {
+    justify-content: flex-start;
+    border-radius: 12px;
+  }
+  .sky-nav .sky-nav-user {
+    padding: 6px 10px;
+    border-top: 1px solid var(--sky-line);
+    font-size: 12px;
+  }
+}
 @media (max-width: 640px) {
-  .sky-brand span,
-  .sky-seg .sky-long {
+  .sky-bar {
+    gap: 8px;
+  }
+  .sky-where {
+    gap: 4px;
+  }
+  .sky-controls {
+    gap: 6px;
+  }
+  .sky-seg {
+    padding: 2px;
+  }
+  .sky-seg button,
+  .sky-pill {
+    padding: 0;
+  }
+  /* Past the first level the back button and the current period are enough. */
+  .sky-crumbs li:not(:last-child),
+  .sky-crumbs .sky-sep {
     display: none;
   }
-  .sky-bar {
-    flex-direction: column;
-    align-items: flex-start;
-  }
-  .sky-actions {
-    align-items: flex-start;
-  }
+  /* A slim edge rail: the depths keep a matching gutter, so it never covers a photo. */
   .sky[data-orientation='vertical'] .sky-rail {
-    right: max(4px, env(safe-area-inset-right, 0px));
+    right: max(0px, env(safe-area-inset-right, 0px));
   }
   .sky[data-orientation='vertical'] .sky-rail button span {
     display: none;
@@ -406,6 +535,11 @@
   .sky-hint {
     width: calc(100% - 32px);
     white-space: normal;
+  }
+}
+@media (max-width: 480px) {
+  .sky-brand {
+    display: none;
   }
 }
 
@@ -464,4 +598,37 @@
   color: var(--sky-accent);
   font-weight: 600;
   text-underline-offset: 4px;
+}
+
+/* The session check before the sky exists: same palette, so there is no light flash. */
+.sky-gate {
+  display: grid;
+  align-content: center;
+  justify-items: center;
+  gap: 14px;
+  min-height: 100vh;
+  min-height: 100dvh;
+  padding: 24px;
+  text-align: center;
+}
+.sky-gate p {
+  margin: 0;
+  color: var(--sky-mute);
+  line-height: 1.6;
+}
+.sky-gate .sky-wait {
+  font-family: var(--sky-mono);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.sky-gate button {
+  padding: 8px 18px;
+  border: 1px solid var(--sky-line);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--sky-ink-2) 80%, transparent);
+  color: var(--sky-fg);
+}
+.sky-gate button:hover {
+  border-color: var(--sky-accent);
 }

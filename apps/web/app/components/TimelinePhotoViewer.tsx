@@ -33,9 +33,11 @@ import {
   flipTransform,
   isRectVisible,
   isZoomed,
+  stageBox,
   wheelScale,
   zoomAround,
   type Size,
+  type StageBox,
   type View,
 } from './viewer-zoom';
 
@@ -94,6 +96,7 @@ export function TimelinePhotoViewer({
   total,
   loadMore,
   source,
+  onPhotoChange,
   onClose,
 }: {
   photos: TimelinePhoto[];
@@ -102,6 +105,8 @@ export function TimelinePhotoViewer({
   total?: number | null;
   loadMore?: () => Promise<TimelinePhotoPage | null>;
   source?: ViewerSource;
+  /** The photo on display changed (not called for the one it opened on). */
+  onPhotoChange?: (photoId: string) => void;
   onClose: () => void;
 }) {
   const reduceMotion = useReducedMotion() ?? false;
@@ -111,7 +116,7 @@ export function TimelinePhotoViewer({
   const [loadMoreError, setLoadMoreError] = useState(false);
   const [index, setIndex] = useState(initialIndex);
   const [pendingAdvance, setPendingAdvance] = useState<number | null>(null);
-  const [stage, setStage] = useState(readStage);
+  const [stage, setStage] = useState<StageBox>(() => ({ ...readStage(), top: 0 }));
   const [measured, setMeasured] = useState<{ id: string; width: number; height: number } | null>(
     null,
   );
@@ -125,11 +130,14 @@ export function TimelinePhotoViewer({
   const stageEl = useRef<HTMLDivElement>(null);
   const frame = useRef<HTMLDivElement>(null);
   const strip = useRef<HTMLElement>(null);
+  const metaEl = useRef<HTMLDivElement>(null);
+  const toolsEl = useRef<HTMLDivElement>(null);
   const closeButton = useRef<HTMLButtonElement>(null);
   const loadingMoreRef = useRef(false);
   const viewRef = useRef<View>(IDENTITY);
-  const stageRef = useRef(stage);
+  const stageRef = useRef<StageBox>(stage);
   const fitRef = useRef<Size>({ width: 1, height: 1 });
+  const naturalRef = useRef<Size | null>(null);
   const direction = useRef<-1 | 0 | 1>(0);
   const pointers = useRef(new Map<number, { x: number; y: number }>());
   const gesture = useRef<Gesture | null>(null);
@@ -143,9 +151,11 @@ export function TimelinePhotoViewer({
   const currentId = useRef<string | undefined>(undefined);
   const sourceRef = useRef(source);
   const onCloseRef = useRef(onClose);
+  const onPhotoChangeRef = useRef(onPhotoChange);
   useLayoutEffect(() => {
     sourceRef.current = source;
     onCloseRef.current = onClose;
+    onPhotoChangeRef.current = onPhotoChange;
   });
 
   const selected = loadedPhotos[index];
@@ -164,8 +174,14 @@ export function TimelinePhotoViewer({
   useLayoutEffect(() => {
     stageRef.current = stage;
     fitRef.current = fit;
+    naturalRef.current = natural;
     currentId.current = selected?.id;
   });
+
+  const openedOn = useRef(selected?.id);
+  useEffect(() => {
+    if (selected && selected.id !== openedOn.current) onPhotoChangeRef.current?.(selected.id);
+  }, [selected]);
 
   const writeView = useCallback(
     (next: View, animate = false) => {
@@ -186,11 +202,39 @@ export function TimelinePhotoViewer({
     writeView(viewRef.current);
   }, [fit.width, fit.height, stage.width, stage.height, writeView]);
 
-  useEffect(() => {
-    const onResize = () => setStage(readStage());
-    window.addEventListener('resize', onResize);
-    return () => window.removeEventListener('resize', onResize);
+  // The photo is fitted into the band between the top meta block and the filmstrip, measured
+  // from the real layout so it never overlaps either (they wrap differently per screen).
+  const measureStage = useCallback(() => {
+    const viewport = readStage();
+    const strips = strip.current?.getBoundingClientRect();
+    const metaBottom = metaEl.current?.getBoundingClientRect().bottom ?? 0;
+    const toolsBottom = toolsEl.current?.getBoundingClientRect().bottom ?? 0;
+    let next: StageBox = { ...viewport, top: 0 };
+    if (strips && strips.height > 0 && Math.max(metaBottom, toolsBottom) > 0) {
+      const padding = parseFloat(window.getComputedStyle(strip.current!).paddingTop) || 0;
+      next = stageBox(viewport, Math.max(metaBottom, toolsBottom) + 8, strips.top + padding - 10);
+    }
+    // The grow-from-tile effect runs in this same commit, before the re-render: give it the band.
+    stageRef.current = next;
+    fitRef.current = fitSize(naturalRef.current, next);
+    setStage((current) =>
+      current.width === next.width && current.height === next.height && current.top === next.top
+        ? current
+        : next,
+    );
   }, []);
+  useLayoutEffect(() => {
+    measureStage();
+    window.addEventListener('resize', measureStage);
+    const observer =
+      typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measureStage);
+    for (const element of [metaEl.current, toolsEl.current, strip.current])
+      if (element) observer?.observe(element);
+    return () => {
+      window.removeEventListener('resize', measureStage);
+      observer?.disconnect();
+    };
+  }, [measureStage]);
 
   // Idle chrome: it fades after a still moment, but never from under a keyboard user.
   const poke = useCallback((keyboard = false) => {
@@ -275,8 +319,8 @@ export function TimelinePhotoViewer({
     const photoId = currentId.current;
     const rect = photoId ? sourceRef.current?.rectOf(photoId) : null;
     if (!element || !rect || reduceMotion || typeof element.animate !== 'function') return;
-    if (!isRectVisible(rect, stageRef.current)) return;
-    const from = flipTransform(rect, fitRef.current, stageRef.current);
+    if (!isRectVisible(rect, readStage())) return;
+    const from = flipTransform(rect, fitRef.current, stageRef.current, stageRef.current.top);
     element.animate(
       [
         { transform: `translate3d(${from.x}px,${from.y}px,0) scale(${from.scale})` },
@@ -410,13 +454,13 @@ export function TimelinePhotoViewer({
       reduceMotion ||
       isZoomed(viewRef.current) ||
       typeof element.animate !== 'function' ||
-      !isRectVisible(rect, stageRef.current)
+      !isRectVisible(rect, readStage())
     ) {
       finish();
       return;
     }
     setClosing(true);
-    const to = flipTransform(rect, fitRef.current, stageRef.current);
+    const to = flipTransform(rect, fitRef.current, stageRef.current, stageRef.current.top);
     const from = viewRef.current;
     const animation = element.animate(
       [
@@ -430,7 +474,7 @@ export function TimelinePhotoViewer({
 
   const pointOf = (clientX: number, clientY: number) => ({
     x: clientX - stageRef.current.width / 2,
-    y: clientY - stageRef.current.height / 2,
+    y: clientY - (stageRef.current.top + stageRef.current.height / 2),
   });
 
   const zoomTo = useCallback(
@@ -704,6 +748,7 @@ export function TimelinePhotoViewer({
         <div
           ref={stageEl}
           className="pv-stage"
+          style={{ top: stage.top, height: stage.height }}
           data-zoomed={zoomed}
           data-dragging={dragging}
           onPointerDown={onPointerDown}
@@ -730,14 +775,14 @@ export function TimelinePhotoViewer({
         </div>
 
         <header className="pv-top pv-ui" {...keepVisible}>
-          <div className="pv-meta">
+          <div ref={metaEl} className="pv-meta">
             <p className="pv-date">{photoDateLabel(selected)}</p>
             <p className="pv-folder">
               <span className="pv-file">{selected.fileName}</span>
               {precision && <em className="pv-chip">{precision}</em>}
             </p>
           </div>
-          <div className="pv-tools">
+          <div ref={toolsEl} className="pv-tools">
             <span className="pv-count" aria-live="polite">
               {(index + 1).toLocaleString('es-ES')} / {count.toLocaleString('es-ES')}
             </span>
