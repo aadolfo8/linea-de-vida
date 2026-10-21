@@ -13,6 +13,7 @@ import { SyncService } from '../src/sync.service';
 import { ManualDateService, validateManualDate } from '../src/manual-date.service';
 import { MediaProxyService } from '../src/media-proxy.service';
 import { FolderDateRuleService } from '../src/folder-date-rule.service';
+import { PhotoVisibilityService } from '../src/photo-visibility.service';
 
 describe('Phase 1 HTTP contracts', () => {
   let app: INestApplication;
@@ -207,6 +208,7 @@ describe('Phase 1 HTTP contracts', () => {
             useValue: { set: async () => ({}), remove: async () => ({}) },
           },
           MediaProxyService,
+          { provide: PhotoVisibilityService, useValue: new PhotoVisibilityService(prisma) },
           {
             provide: DriveAdapter,
             useValue: new MemoryDriveProvider({

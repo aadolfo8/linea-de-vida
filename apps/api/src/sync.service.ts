@@ -309,15 +309,9 @@ export class SyncService {
       const exclusions = await this.prisma.photoExclusion.findMany({
         where: { userId, OR: [{ driveFileId: item.id }, { contentKey: key }] },
       });
+      // A legacy tombstone (a photo removed before soft hide existed) comes back as a hidden photo
+      // carrying its saved manual date; a restored one comes back visible. Either way it is spent.
       const excluded = exclusions.find((entry) => !entry.restoredAt) ?? exclusions[0];
-      if (excluded && !excluded.restoredAt) {
-        if (!excluded.contentKey && !isProvisionalContentKey(key))
-          await this.prisma.photoExclusion.updateMany({
-            where: { id: excluded.id, userId },
-            data: { contentKey: key },
-          });
-        return false;
-      }
       const restoredOverride =
         excluded?.manualDateValue && excluded.manualDatePrecision
           ? {
@@ -458,6 +452,10 @@ export class SyncService {
             effectiveDatePrecision: effective.precision as DatePrecision,
             effectiveDateSource: effective.origin as DateSource,
           };
+          const hide =
+            excluded && !excluded.restoredAt && !existing?.hiddenAt
+              ? { hiddenAt: excluded.createdAt ?? new Date() }
+              : {};
           const mirror = {
             driveFileId: item.id,
             sourceId: copy.sourceId,
@@ -469,12 +467,12 @@ export class SyncService {
           if (existing) {
             await tx.photo.update({
               where: { id: existing.id },
-              data: { ...data, ...(mirrorsThisFile ? mirror : {}) },
+              data: { ...data, ...(mirrorsThisFile ? mirror : {}), ...hide },
             });
             photoId = existing.id;
           } else {
             const created = await tx.photo.create({
-              data: { userId, contentKey: key, ...mirror, ...data },
+              data: { userId, contentKey: key, ...mirror, ...data, ...hide },
             });
             photoId = created.id;
           }
@@ -496,8 +494,7 @@ export class SyncService {
               create: { photoId, ...restoredOverride },
               update: restoredOverride,
             });
-          if (excluded?.restoredAt)
-            await tx.photoExclusion.deleteMany({ where: { id: excluded.id, userId } });
+          if (excluded) await tx.photoExclusion.deleteMany({ where: { id: excluded.id, userId } });
         });
       for (let attempt = 0; ; attempt++) {
         try {

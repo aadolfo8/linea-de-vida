@@ -209,6 +209,8 @@ model Photo {
   takeoutMatchReason String?
   gpsLatitude Float?
   gpsLongitude Float?
+ /// Soft hide: a hidden photo keeps its row, dates and copies but leaves the timeline, counts and search.
+ hiddenAt DateTime?
  detectedDate DateTime? @db.Date
  detectedPrecision DatePrecision @default(UNKNOWN)
  detectedSource DateSource @default(NONE)
@@ -225,6 +227,7 @@ model Photo {
  @@unique([userId,contentKey])
  @@index([userId,driveFileId])
  @@index([userId,status])
+ @@index([userId,status,hiddenAt])
   @@index([sourceId,status])
   @@index([sourceId,lastSeenSyncRunId])
   @@index([folderId,status])

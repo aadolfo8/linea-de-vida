@@ -278,37 +278,77 @@ describe('photo content identity', () => {
     expect(a.photos()[0]).toMatchObject({ status: 'ACTIVE', driveFileId: 'a9' });
   });
 
-  it('keeps a removed photo excluded when a new copy of its content appears', async () => {
+  it('turns a legacy removal into a hidden photo, also when found through a new copy', async () => {
     const a = archive();
     a.memory.rows('photoExclusion').push({
       id: 'tombstone',
       userId: 'owner',
       driveFileId: 'gone',
       contentKey: 'md5:ggg:1000',
+      manualDateValue: new Date('2003-01-01'),
+      manualDatePrecision: 'YEAR',
+      manualDateReason: 'Family note',
       restoredAt: null,
+      createdAt: new Date('2026-01-02'),
     });
 
     const run = await a.sync('source', 'root', { root: [image('new-copy', 'ggg')] });
 
     expect(run.status).toBe('SUCCEEDED');
-    expect(a.photos()).toHaveLength(0);
+    expect(a.photos()).toHaveLength(1);
+    expect(a.photos()[0]).toMatchObject({
+      hiddenAt: new Date('2026-01-02'),
+      effectiveDateSource: 'MANUAL',
+      effectiveDatePrecision: 'YEAR',
+    });
+    expect(a.memory.rows('photoExclusion')).toHaveLength(0);
   });
 
-  it('learns the content key of an excluded file the first time its checksum is seen', async () => {
+  it('brings a restored legacy removal back visible', async () => {
     const a = archive();
     a.memory.rows('photoExclusion').push({
       id: 'tombstone',
       userId: 'owner',
-      driveFileId: 'gone',
+      driveFileId: 'back',
       contentKey: null,
-      restoredAt: null,
+      restoredAt: new Date('2026-02-01'),
+      createdAt: new Date('2026-01-02'),
+    });
+    await a.sync('source', 'root', { root: [image('back', 'bbb')] });
+    expect(a.photos()).toHaveLength(1);
+    expect(a.photos()[0].hiddenAt ?? null).toBeNull();
+    expect(a.memory.rows('photoExclusion')).toHaveLength(0);
+  });
+
+  it('keeps a hidden photo hidden when a new copy of its content appears', async () => {
+    const a = archive();
+    await a.sync('source', 'root', { root: [image('a1', 'aaa')] });
+    a.photos()[0].hiddenAt = new Date('2026-03-01');
+
+    await a.sync('source', 'root', {
+      root: [folder('again', 'Takeout 2'), image('a1', 'aaa')],
+      again: [image('a2', 'aaa')],
     });
 
-    await a.sync('source', 'root', { root: [image('gone', 'ggg')] });
-    expect(a.memory.rows('photoExclusion')[0].contentKey).toBe('md5:ggg:1000');
+    expect(a.photos()).toHaveLength(1);
+    expect(a.files()).toHaveLength(2);
+    expect(a.photos()[0].hiddenAt).toEqual(new Date('2026-03-01'));
+  });
 
-    await a.sync('source', 'root', { root: [image('another-id', 'ggg')] });
-    expect(a.photos()).toHaveLength(0);
+  it('hides an existing visible photo when a legacy removal matches its content', async () => {
+    const a = archive();
+    await a.sync('source', 'root', { root: [image('a1', 'aaa')] });
+    a.memory.rows('photoExclusion').push({
+      id: 'tombstone',
+      userId: 'owner',
+      driveFileId: 'old-id',
+      contentKey: 'md5:aaa:1000',
+      restoredAt: null,
+      createdAt: new Date('2026-01-02'),
+    });
+    await a.sync('source', 'root', { root: [image('a1', 'aaa')] });
+    expect(a.photos()).toHaveLength(1);
+    expect(a.photos()[0].hiddenAt).toEqual(new Date('2026-01-02'));
   });
 
   it('upgrades backfilled provisional keys and merges photos that turn out to be one', async () => {
@@ -450,6 +490,7 @@ describe('photo content identity', () => {
       a.memory.rows('photoSource').push({ id, userId: 'owner' });
     const controller = new AppController(
       a.memory as any,
+      {} as any,
       {} as any,
       {} as any,
       {} as any,

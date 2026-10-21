@@ -58,39 +58,41 @@ Para backup PostgreSQL, ejecuta desde un host autorizado `pg_dump --format=custo
 
 ## REST de la slice
 
-| Ruta                                                             | Descripción                                                             |
-| ---------------------------------------------------------------- | ----------------------------------------------------------------------- |
-| `GET /v1/health`                                                 | Health check.                                                           |
-| `GET /v1/me`                                                     | Sesión y configuración Drive, sin secretos.                             |
-| `POST /v1/auth/google/authorize`                                 | Inicia login y consentimiento Drive combinado, sin tokens en respuesta. |
-| `GET /v1/auth/google/callback`                                   | Valida identidad/Drive, crea sesión y conexión, sin token en respuesta. |
-| `POST /v1/oauth/google/drive/authorize`                          | Ruta alternativa futura; no se muestra en el onboarding.                |
-| `GET /v1/oauth/google/drive/callback`                            | Callback de la ruta alternativa futura, sin token en respuesta.         |
-| `GET /v1/oauth-connections/:id/drive/folders/:folderId/children` | Lista solo las hijas de una carpeta solicitada.                         |
-| `GET/POST /v1/photo-sources`                                     | Lista/registra una carpeta concreta del usuario.                        |
-| `POST /v1/photo-sources/:id/sync-runs`                           | Devuelve `202` y encola el escaneo.                                     |
-| `GET /v1/photo-sources/:id/sync-runs`                            | Historial paginado de escaneos de la fuente propia.                     |
-| `GET /v1/photo-sources/:id/indexed-folders`                      | Jerarquía indexada paginada de la fuente propia.                        |
-| `GET /v1/photo-sources/:id/photos?q=&folderId=&classification=`  | Búsqueda paginada por nombre, carpeta y clasificación.                  |
-| `GET /v1/indexed-folders/:id/photos`                             | Fotos activas paginadas de una carpeta propia.                          |
-| `GET /v1/photo-exclusions?cursor=&limit=`                        | Papelera paginada de exclusiones de la cuenta.                          |
-| `DELETE /v1/photo-exclusions/:id`                                | Restaura una foto quitando su exclusión local.                          |
-| `PUT /v1/indexed-folders/:id/date-override`                      | Aplica año o año/mes a la carpeta propia y sus descendientes.           |
-| `GET /v1/sync-runs/:id`                                          | Progreso del propietario.                                               |
-| `GET /v1/sync-runs/:id/issues?cursor=&limit=`                    | Incidencias paginadas del propietario.                                  |
-| `GET /v1/timeline/years`                                         | Años disponibles desde PostgreSQL.                                      |
-| `GET /v1/timeline/years/:year/months`                            | Meses y grupo `Fecha sin concretar`.                                    |
-| `GET /v1/timeline/years/:year/month-previews`                    | Hasta 6 vistas previas repartidas por mes y por `Fecha sin concretar`.  |
-| `GET /v1/timeline/years/:year/months/:month/days`                | Días y grupo `Día sin concretar`.                                       |
-| `GET /v1/timeline/undated`                                       | Conteo de fotos sin año.                                                |
-| `GET /v1/photos?...&cursor=&limit=`                              | Galería cursor-paginada por granularidad.                               |
-| `PUT /v1/photos/:id/manual-date`                                 | Crea o reemplaza la fecha manual de una foto propia.                    |
-| `DELETE /v1/photos/:id/manual-date`                              | Elimina el override y restaura la detección.                            |
-| `PUT /v1/photos/manual-date-overrides`                           | Aplica una fecha a un lote propio de hasta 50 fotos.                    |
-| `DELETE /v1/photos/:id`                                          | Retira una foto del archivo local y crea su exclusión de sync.          |
-| `POST /v1/photo-removals`                                        | Retira hasta 50 fotos por lote y devuelve un resultado por ID.          |
-| `GET /v1/photos/:id/thumbnail`                                   | Proxy privado de JPEG/PNG/WebP; HEIC/HEIF devuelve fallback `415`.      |
-| `GET /v1/photos/:id/content`                                     | Proxy streaming privado del original soportado; HEIC/HEIF se descarga.  |
+| Ruta                                                             | Descripción                                                                                                                                |
+| ---------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `GET /v1/health`                                                 | Health check.                                                                                                                              |
+| `GET /v1/me`                                                     | Sesión y configuración Drive, sin secretos.                                                                                                |
+| `POST /v1/auth/google/authorize`                                 | Inicia login y consentimiento Drive combinado, sin tokens en respuesta.                                                                    |
+| `GET /v1/auth/google/callback`                                   | Valida identidad/Drive, crea sesión y conexión, sin token en respuesta.                                                                    |
+| `POST /v1/oauth/google/drive/authorize`                          | Ruta alternativa futura; no se muestra en el onboarding.                                                                                   |
+| `GET /v1/oauth/google/drive/callback`                            | Callback de la ruta alternativa futura, sin token en respuesta.                                                                            |
+| `GET /v1/oauth-connections/:id/drive/folders/:folderId/children` | Lista solo las hijas de una carpeta solicitada.                                                                                            |
+| `GET/POST /v1/photo-sources`                                     | Lista/registra una carpeta concreta del usuario.                                                                                           |
+| `POST /v1/photo-sources/:id/sync-runs`                           | Devuelve `202` y encola el escaneo.                                                                                                        |
+| `GET /v1/photo-sources/:id/sync-runs`                            | Historial paginado de escaneos de la fuente propia.                                                                                        |
+| `GET /v1/photo-sources/:id/indexed-folders`                      | Jerarquía indexada paginada de la fuente propia.                                                                                           |
+| `GET /v1/photo-sources/:id/photos?q=&folderId=&classification=`  | Búsqueda paginada por nombre, carpeta y clasificación.                                                                                     |
+| `GET /v1/indexed-folders/:id/photos`                             | Fotos activas paginadas de una carpeta propia.                                                                                             |
+| `GET /v1/photo-exclusions?cursor=&limit=`                        | Exclusiones heredadas aún sin convertir (el sync las pasa a fotos ocultas).                                                                |
+| `DELETE /v1/photo-exclusions/:id`                                | Restaura una exclusión heredada; reaparece en el siguiente sync.                                                                           |
+| `PUT /v1/indexed-folders/:id/date-override`                      | Aplica año o año/mes a la carpeta propia y sus descendientes.                                                                              |
+| `GET /v1/sync-runs/:id`                                          | Progreso del propietario.                                                                                                                  |
+| `GET /v1/sync-runs/:id/issues?cursor=&limit=`                    | Incidencias paginadas del propietario.                                                                                                     |
+| `GET /v1/timeline/years`                                         | Años disponibles desde PostgreSQL.                                                                                                         |
+| `GET /v1/timeline/years/:year/months`                            | Meses y grupo `Fecha sin concretar`.                                                                                                       |
+| `GET /v1/timeline/years/:year/month-previews`                    | Hasta 6 vistas previas repartidas por mes y por `Fecha sin concretar`.                                                                     |
+| `GET /v1/timeline/years/:year/months/:month/days`                | Días y grupo `Día sin concretar`.                                                                                                          |
+| `GET /v1/timeline/undated`                                       | Conteo de fotos sin año.                                                                                                                   |
+| `GET /v1/photos?...&cursor=&limit=`                              | Galería cursor-paginada por granularidad.                                                                                                  |
+| `PUT /v1/photos/:id/manual-date`                                 | Crea o reemplaza la fecha manual de una foto propia.                                                                                       |
+| `DELETE /v1/photos/:id/manual-date`                              | Elimina el override y restaura la detección.                                                                                               |
+| `PUT /v1/photos/manual-date-overrides`                           | Aplica una fecha a un lote propio de hasta 50 fotos.                                                                                       |
+| `POST /v1/photos/hide`                                           | Oculta hasta 2000 fotos propias (`{photoIds}`); `{results:[{id,status}],changedCount}` con `HIDDEN`/`ALREADY_HIDDEN`/`NOT_FOUND`/`FAILED`. |
+| `POST /v1/photos/unhide`                                         | «Volver a mostrar» inmediato, mismo cuerpo; `VISIBLE`/`ALREADY_VISIBLE`/`NOT_FOUND`/`FAILED`.                                              |
+| `DELETE /v1/photos/:id`                                          | Obsoleta: oculta la foto (ya no la borra ni crea exclusión). Usar `POST /v1/photos/hide`.                                                  |
+| `POST /v1/photo-removals`                                        | Obsoleta: oculta hasta 50 fotos y devuelve `REMOVED`/`ABSENT`/`FAILED`. Usar `POST /v1/photos/hide`.                                       |
+| `GET /v1/photos/:id/thumbnail`                                   | Proxy privado de JPEG/PNG/WebP; HEIC/HEIF devuelve fallback `415`.                                                                         |
+| `GET /v1/photos/:id/content`                                     | Proxy streaming privado del original soportado; HEIC/HEIF se descarga.                                                                     |
 
 Todas las rutas salvo health/callback requieren sesión firmada en cookie `httpOnly`; las mutaciones validan `Origin`. Los proxies resuelven y autorizan foto, fuente y conexión activa para el `userId` antes de llamar a Drive; una foto `MISSING` devuelve `410`, una fuente desconectada `503`, y nunca se entrega una URL ni un token de Drive. Los cursores de timeline y galería son opacos y están ligados a su granularidad; no se renderizan colecciones completas. Los agregados se calculan en PostgreSQL sobre el índice efectivo, sin descargar fotografías. La desvinculación marca las fuentes desconectadas y revoca el token; si Google falla, conserva el secreto cifrado solo para reintentar la revocación y bloquea todo nuevo acceso.
 
@@ -118,7 +120,7 @@ JPEG, PNG y WebP se muestran por el proxy de thumbnail. HEIC/HEIF continúan ind
 
 `Photo` conserva detección y `ManualDateOverride` por separado. La fecha efectiva indexada es una proyección transaccional de override o detección; `YEAR` y `MONTH` usan un ancla técnica únicamente con su precisión, por lo que la interfaz no muestra falsamente el 1 de enero. Al eliminar un override se restaura exactamente `detectedDate` y `detectedPrecision`. Las respuestas de galería incluyen la fecha detectada, la fecha efectiva, fuente y precisión; `MANUAL` es el origen efectivo, no una fuente de detección. `FolderDateParser` acepta solo segmentos deterministas ES/EN o numéricos. El orden de detección es EXIF > metadatos de imagen de Drive > `photoTakenTime` de Takeout > fecha en el nombre de archivo (`FILENAME`, precisión día, solo patrones completos y plausibles: WhatsApp, cámaras, Pixel, capturas, Signal) > carpeta. `createdTime` y `modifiedTime` de Drive no se usan como fecha histórica.
 
-Cada escaneo persiste la jerarquía real en `IndexedFolder` y relaciona cada foto con su carpeta cuando existe evidencia de ruta. Las fotos heredadas conservan `folderId` nulo hasta una resincronización correcta: la migración no inventa rutas. Quitar una foto del archivo crea una exclusión local por `(userId, driveFileId)` y por contenido (`contentKey`) para impedir que escaneos posteriores la recreen, también a través de una copia nueva; Google Drive permanece de solo lectura.
+Cada escaneo persiste la jerarquía real en `IndexedFolder` y relaciona cada foto con su carpeta cuando existe evidencia de ruta. Las fotos heredadas conservan `folderId` nulo hasta una resincronización correcta: la migración no inventa rutas. Ocultar una foto es un estado reversible (`Photo.hiddenAt`): la fila, sus fechas y sus copias se conservan, sale de la cronología, los conteos y la búsqueda, y solo aparece en el montón «Ocultas»; «Volver a mostrar» es inmediato y, como la foto sigue existiendo, una copia nueva del mismo contenido también queda oculta. Las exclusiones creadas antes de existir este estado (`PhotoExclusion`) se convierten en el siguiente sync en fotos ocultas con su fecha manual guardada; hasta entonces siguen restaurables con `DELETE /v1/photo-exclusions/:id`. Google Drive permanece de solo lectura.
 
 Una fuente se crea como `GENERIC` o `GOOGLE_TAKEOUT`. Solo la segunda lee JSON adyacentes de la carpeta exportada: usa `photoTakenTime` después de EXIF/metadata de Drive y antes de carpeta, conserva GPS validado y registra el resultado de match. JSON ausente no es un error y JSON inválido crea una incidencia sin detener el sync. Consulta [la guía Takeout](docs/google-takeout.md) antes de preparar la carpeta.
 
