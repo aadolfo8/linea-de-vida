@@ -2,7 +2,7 @@
 
 import useEmblaCarousel from 'embla-carousel-react';
 import { useReducedMotion } from 'motion/react';
-import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
+import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { api } from '../../lib/api';
 import { mediaUrl, thumbnailVariantUrl } from '../../lib/media';
 import { Button } from '../../components/ui/button';
@@ -57,9 +57,11 @@ export function TimelinePhotoViewer({
   const [loadingMore, setLoadingMore] = useState(false);
   const [loadMoreError, setLoadMoreError] = useState(false);
   const [index, setIndex] = useState(initialIndex);
+  const [pendingAdvance, setPendingAdvance] = useState<number | null>(null);
   const [thumbnailFallbackPhotoId, setThumbnailFallbackPhotoId] = useState<string | null>(null);
   const dialog = useRef<HTMLElement>(null);
   const backdrop = useRef<HTMLDivElement>(null);
+  const loadingMoreRef = useRef(false);
 
   useEffect(() => {
     if (!embla) return;
@@ -133,8 +135,9 @@ export function TimelinePhotoViewer({
   const isDownloadOnly = /^image\/(heic|heif)$/i.test(selected.mimeType);
   const eagerIndexes = galleryEagerIndexes(index, loadedPhotos.length);
 
-  const fetchNextPage = async () => {
-    if (!loadMore || !hasMore || loadingMore) return;
+  const fetchNextPage = useCallback(async () => {
+    if (!loadMore || !hasMore || loadingMoreRef.current) return;
+    loadingMoreRef.current = true;
     setLoadingMore(true);
     setLoadMoreError(false);
     try {
@@ -151,9 +154,28 @@ export function TimelinePhotoViewer({
     } catch {
       setLoadMoreError(true);
     } finally {
+      loadingMoreRef.current = false;
       setLoadingMore(false);
     }
-  };
+  }, [hasMore, loadMore]);
+
+  useEffect(() => {
+    setLoadedPhotos((current) => {
+      if (photos.length <= current.length) return current;
+      const currentIds = new Set(current.map((photo) => photo.id));
+      return [...current, ...photos.filter((photo) => !currentIds.has(photo.id))];
+    });
+  }, [photos]);
+
+  useEffect(() => {
+    if (!loadMoreError && hasMore && loadedPhotos.length - index <= 5) void fetchNextPage();
+  }, [fetchNextPage, hasMore, index, loadMoreError, loadedPhotos.length]);
+
+  useEffect(() => {
+    if (pendingAdvance === null || pendingAdvance >= loadedPhotos.length) return;
+    embla?.scrollTo(pendingAdvance, jump);
+    setPendingAdvance(null);
+  }, [embla, jump, loadedPhotos.length, pendingAdvance]);
 
   const keyDown = (event: KeyboardEvent<HTMLElement>) => {
     if (event.key === 'Tab') {
@@ -184,7 +206,10 @@ export function TimelinePhotoViewer({
     if (event.key === 'ArrowRight') {
       event.preventDefault();
       if (index < loadedPhotos.length - 1) embla?.scrollNext(jump);
-      else if (hasMore) void fetchNextPage();
+      else if (hasMore) {
+        setPendingAdvance(loadedPhotos.length);
+        void fetchNextPage();
+      }
     }
   };
 
@@ -282,15 +307,14 @@ export function TimelinePhotoViewer({
               variant="outline"
               size="icon"
               className="min-h-11 rounded-xl border-[#66705f] bg-transparent text-[#151a16] hover:bg-[#151a16] hover:text-[#f3f0e8] focus-visible:outline-[#b7d43b] disabled:bg-transparent disabled:text-[#151a16]"
-              aria-label={
-                index === loadedPhotos.length - 1 && hasMore
-                  ? 'Cargar siguientes fotografías'
-                  : 'Foto siguiente'
-              }
+              aria-label="Foto siguiente"
               disabled={index === loadedPhotos.length - 1 && !hasMore}
               onClick={() => {
                 if (index < loadedPhotos.length - 1) embla?.scrollNext(jump);
-                else void fetchNextPage();
+                else if (hasMore) {
+                  setPendingAdvance(loadedPhotos.length);
+                  void fetchNextPage();
+                }
               }}
             >
               <ArrowIcon direction="right" />

@@ -241,7 +241,7 @@ describe('TimelinePhotoViewer effects', () => {
     expect(embla.api.scrollNext).not.toHaveBeenCalled();
   });
 
-  it('loads the next gallery page at the end and then advances without wrapping', async () => {
+  it('anticipates the next gallery page near the end and then advances without wrapping', async () => {
     const nextPhoto = { ...photos[0], id: 'photo-3', fileName: 'Third photo.jpg' };
     const loadMore = vi.fn().mockResolvedValue({ items: [nextPhoto], nextCursor: null });
     await act(async () =>
@@ -255,7 +255,6 @@ describe('TimelinePhotoViewer effects', () => {
       ),
     );
 
-    await act(async () => button('Cargar siguientes fotografías').click());
     expect(loadMore).toHaveBeenCalledTimes(1);
     expect(container.querySelector('[aria-live="polite"]')?.textContent).toContain('2 de 3');
 
