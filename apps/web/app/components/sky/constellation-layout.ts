@@ -134,3 +134,35 @@ export function periodHeaderGeometry(
     metaTop: size + 18,
   };
 }
+
+/**
+ * Header of a single period such as "Agosto 2004": smaller than the year numeral because the
+ * title is longer and may wrap, ported from the prototype's month depth.
+ */
+export function compactHeaderGeometry(
+  viewport: { width: number; height: number },
+  orientation: SkyOrientation,
+) {
+  const { width: vw, height: vh } = viewport;
+  if (orientation === 'horizontal') {
+    const size = Math.min(vh * 0.2, 170);
+    return {
+      size,
+      length: Math.min(vw * 0.5, size * 3.4),
+      margin: vw * 0.06,
+      titleWidth: Math.min(vw * 0.46, size * 3.2),
+      titleTop: vh * 0.32,
+      metaTop: vh * 0.32 - 30,
+    };
+  }
+  const size = Math.min(vw * 0.13, 150);
+  const small = vw < 640;
+  return {
+    size,
+    length: size * (small ? 2 : 1) + 90,
+    margin: vh * 0.17,
+    titleWidth: vw * 0.8,
+    titleTop: 30,
+    metaTop: 0,
+  };
+}

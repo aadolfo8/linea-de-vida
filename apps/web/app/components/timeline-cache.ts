@@ -111,9 +111,14 @@ export function getCachedGallery(year: number, month: TimelineMonth) {
   return { photos: entry.photos, nextCursor: entry.nextCursor };
 }
 
-export function loadGalleryPage(year: number, month: TimelineMonth, cursor: string | null) {
+export function loadGalleryPage(
+  year: number,
+  month: TimelineMonth,
+  cursor: string | null,
+  limit = 30,
+) {
   const galleryKey = `${year}:${month}`;
-  const requestKey = `gallery:${archiveRevision}:${galleryKey}:${cursor ?? 'first'}`;
+  const requestKey = `gallery:${archiveRevision}:${galleryKey}:${limit}:${cursor ?? 'first'}`;
   let pending = inFlight.get(requestKey) as Promise<TimelinePhotoPage> | undefined;
   if (!pending) {
     const revision = archiveRevision;
@@ -122,7 +127,7 @@ export function loadGalleryPage(year: number, month: TimelineMonth, cursor: stri
         ? `/timeline/years/${year}/unknown-month/photos`
         : `/timeline/years/${year}/months/${month}/photos`;
     pending = apiJson<TimelinePhotoPage>(
-      `${path}?limit=30${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`,
+      `${path}?limit=${limit}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`,
     )
       .then((page) => {
         if (revision === archiveRevision) {

@@ -14,6 +14,8 @@ export type MasonryPlacement<T extends MosaicItem> = {
  * Shortest-lane placement. When travelling vertically the lanes are columns of width
  * `laneSize` and photos grow downward; when travelling horizontally the lanes are rows of
  * height `laneSize` and photos grow sideways. `length` is the extent along the travel axis.
+ * `initial` continues from the extents of an earlier call, so appending items never moves
+ * the ones that are already placed.
  */
 export function masonryLanes<T extends MosaicItem>(
   items: readonly T[],
@@ -21,9 +23,10 @@ export function masonryLanes<T extends MosaicItem>(
   lanes: number,
   laneSize: number,
   gap: number,
+  initial?: readonly number[],
 ) {
   const count = Math.max(1, Math.floor(lanes));
-  const extents = Array<number>(count).fill(0);
+  const extents = Array.from({ length: count }, (_, lane) => initial?.[lane] ?? 0);
   const placements: MasonryPlacement<T>[] = items.map((item) => {
     const lane = extents.indexOf(Math.min(...extents));
     const along = extents[lane]!;
@@ -36,6 +39,7 @@ export function masonryLanes<T extends MosaicItem>(
     extents[lane] = along + (axis === 'vertical' ? placement.h : placement.w) + gap;
     return { item, lane, ...placement };
   });
-  const length = items.length ? Math.max(...extents) - gap : 0;
-  return { placements, length, crossSize: count * laneSize + (count - 1) * gap };
+  const longest = Math.max(...extents);
+  const length = longest > 0 ? longest - gap : 0;
+  return { placements, length, extents, crossSize: count * laneSize + (count - 1) * gap };
 }

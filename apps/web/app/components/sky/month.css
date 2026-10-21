@@ -1,0 +1,112 @@
+/* The month depth: day sections, masonry tiles and the end-of-list status. */
+.sky-day {
+  position: relative;
+  flex: none;
+}
+.sky-day h2 {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+  color: var(--sky-accent);
+  font-family: var(--sky-mono);
+  font-size: 11px;
+  font-weight: 400;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.sky-day h2::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  background: var(--sky-accent);
+  transform: rotate(45deg);
+}
+.sky-day h2 small {
+  color: var(--sky-mute);
+  font-size: 10px;
+}
+.sky-day[data-undated='true'] h2 {
+  color: var(--sky-mute);
+}
+.sky-day[data-undated='true'] h2::before {
+  border: 1px solid var(--sky-mute);
+  background: none;
+}
+
+.sky-ph {
+  position: absolute;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  background: var(--sky-tile);
+  cursor: zoom-in;
+  opacity: 0;
+  transform: scale(0.94);
+  transition:
+    opacity 0.7s var(--sky-ease),
+    transform 0.9s var(--sky-ease);
+}
+.sky-ph[data-in] {
+  opacity: 1;
+  transform: none;
+}
+.sky-ph img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transition:
+    filter 0.3s,
+    transform 0.6s var(--sky-ease);
+}
+.sky-ph:hover img,
+.sky-ph:focus-visible img {
+  filter: brightness(1.12);
+  transform: scale(1.03);
+}
+
+.sky-tail {
+  position: relative;
+  flex: none;
+  display: grid;
+  align-content: start;
+  justify-items: center;
+  padding-top: 24px;
+}
+.sky-tail p {
+  margin: 0;
+  color: var(--sky-mute);
+}
+.sky-tail [role='alert'] {
+  display: grid;
+  justify-items: center;
+  gap: 10px;
+  text-align: center;
+}
+.sky-tail button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 18px;
+  border: 1px solid var(--sky-line);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--sky-ink-2) 80%, transparent);
+  color: var(--sky-fg);
+}
+.sky-tail button:hover {
+  border-color: var(--sky-accent);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sky-ph,
+  .sky-ph img {
+    transition: none;
+  }
+  .sky-ph {
+    opacity: 1;
+    transform: none;
+  }
+}

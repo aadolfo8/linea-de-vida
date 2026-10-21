@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useLayoutEffect, useRef, useState } from 'react';
-import { periodHeaderGeometry } from './constellation-layout';
+import { compactHeaderGeometry, periodHeaderGeometry } from './constellation-layout';
 import { clamp } from './rng';
 import { useSky, useSkyFrame, useSkyMeasure } from './SkyStage';
 
@@ -118,13 +118,45 @@ export function PeriodHeader({
   itemKey,
   title,
   meta,
+  compact = false,
 }: {
   itemKey: string;
   title: string;
   meta: React.ReactNode;
+  /** A longer title (a month and its year) that may wrap, e.g. at the month depth. */
+  compact?: boolean;
 }) {
   const { viewport, orientation } = useSky();
   const horizontal = orientation === 'horizontal';
+  if (compact) {
+    const compactHeader = compactHeaderGeometry(viewport, orientation);
+    return (
+      <div
+        className="sky-head"
+        data-key={itemKey}
+        style={
+          horizontal
+            ? { width: compactHeader.length, height: '100%', marginLeft: compactHeader.margin }
+            : { height: compactHeader.length, marginTop: compactHeader.margin }
+        }
+      >
+        <h1
+          style={{
+            fontSize: compactHeader.size,
+            top: compactHeader.titleTop,
+            width: compactHeader.titleWidth,
+            whiteSpace: 'normal',
+            left: horizontal ? 0 : 'max(16px, 6vw)',
+          }}
+        >
+          {title}
+        </h1>
+        <p style={{ top: compactHeader.metaTop, left: horizontal ? 4 : 'max(18px, 6vw)' }}>
+          {meta}
+        </p>
+      </div>
+    );
+  }
   const header = periodHeaderGeometry(viewport, orientation);
   return (
     <div

@@ -3,14 +3,13 @@
 import { usePathname, useRouter } from 'next/navigation';
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { ArchiveNav } from './ArchiveNav';
-import { ImmersiveTimelineExperience } from './ImmersiveTimelineExperience';
 import { ProtectedSurface } from './ProtectedSurface';
 import { SkyChrome, type SkyCrumb } from './sky/SkyChrome';
 import { SkyStage } from './sky/SkyStage';
+import { MonthDepth } from './sky/MonthDepth';
 import { YearDepth } from './sky/YearDepth';
 import { YearsDepth } from './sky/YearsDepth';
 import { readOrientation, writeOrientation, type SkyOrientation } from './sky/orientation';
-import { consumeTravelEntry, travelLocation } from './sky/travel';
 import { useTravel } from './sky/use-travel';
 import { useTimelineFocus } from './TimelineFocus';
 import {
@@ -69,11 +68,6 @@ export function TimelineRoute() {
     if (focused) exitRef.current?.focus();
     else enterRef.current?.focus();
   }, [focused]);
-
-  // The month depth still renders without a stage, so it reports its own arrival.
-  useEffect(() => {
-    if (routeDepth === 'month' && !route.invalid) consumeTravelEntry(travelLocation(pathname));
-  }, [pathname, route.invalid, routeDepth]);
 
   const withReturn = (href: string) => timelineHrefWithReturn(href, returnTo, returnLabel);
   const goUp = () => {
@@ -188,10 +182,7 @@ export function TimelineRoute() {
     );
     const onLanded = () => currentCrumbRef.current?.focus({ preventScroll: true });
     const returnAside = organizeReturn && (
-      <aside
-        className={routeDepth === 'month' ? 'sky-return sky-return-static' : 'sky-return'}
-        aria-label="Continuar organizando"
-      >
+      <aside className="sky-return" aria-label="Continuar organizando">
         <p>
           Este periodo reúne fotografías de tus carpetas. Puedes volver a continuar con{' '}
           <strong>{organizeReturn.label}</strong>.
@@ -205,26 +196,6 @@ export function TimelineRoute() {
         <main className="sky grid min-h-dvh place-items-center p-6" aria-live="polite">
           Corrigiendo la ruta temporal…
         </main>
-      );
-
-    if (routeDepth === 'month')
-      return (
-        <div className="sky" data-orientation={orientation}>
-          <SkyChrome
-            crumbs={crumbs}
-            onTravel={travel}
-            currentRef={currentCrumbRef}
-            actions={actions}
-            placement="static"
-          />
-          {returnAside}
-          <div className="sky-paper">
-            <ImmersiveTimelineExperience
-              organizeReturnTo={returnTo}
-              organizeReturnLabel={returnLabel}
-            />
-          </div>
-        </div>
       );
 
     return (
@@ -249,7 +220,16 @@ export function TimelineRoute() {
           </>
         }
       >
-        {routeDepth === 'year' ? (
+        {routeDepth === 'month' ? (
+          <MonthDepth
+            key={`${route.year}/${route.unknown ? 'sin-mes' : route.month}`}
+            year={route.year!}
+            month={route.unknown ? 'sin-mes' : route.month!}
+            returnTo={returnTo}
+            returnLabel={returnLabel}
+            onLanded={onLanded}
+          />
+        ) : routeDepth === 'year' ? (
           <YearDepth
             key={route.year}
             year={route.year!}
