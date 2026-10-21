@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { OrderingService, originKind } from '../src/ordering.service';
 import { MemoryPrisma } from './support/memory-prisma';
 
@@ -407,6 +407,29 @@ describe('OrderingService.photos', () => {
     ).rejects.toMatchObject({ status: 400 });
   });
 
+  it('validates the page size as a whole number and clamps it', async () => {
+    const { service } = archive();
+    for (const limit of ['1.5', 'abc', '', '-3', '1e3'])
+      await expect(service.photos('owner', { pile: 'dated', limit })).rejects.toMatchObject({
+        status: 400,
+        response: { code: 'INVALID_LIMIT' },
+      });
+    expect((await service.photos('owner', { pile: 'dated', limit: '0' })).items).toHaveLength(1);
+    await expect(service.photos('owner', { pile: 'dated', limit: '999' })).resolves.toBeDefined();
+  });
+
+  it('rejects a cursor whose date cannot be read', async () => {
+    const { service } = archive();
+    const first = await service.photos('owner', { pile: 'dated', order: 'newest', limit: '1' });
+    const decoded = JSON.parse(Buffer.from(first.nextCursor!, 'base64url').toString('utf8'));
+    const forged = Buffer.from(JSON.stringify({ ...decoded, value: 'not-a-date' })).toString(
+      'base64url',
+    );
+    await expect(
+      service.photos('owner', { pile: 'dated', order: 'newest', limit: '1', cursor: forged }),
+    ).rejects.toMatchObject({ status: 400, response: { code: 'INVALID_CURSOR' } });
+  });
+
   it('never returns photos of another user', async () => {
     const { service } = archive();
     const everything = await Promise.all(
@@ -544,6 +567,14 @@ describe('OrderingService filename suggestions', () => {
       await service.acceptFilenameSuggestions('owner', { photoIds: ['u3', 'u4', 'e1', 'ghost'] }),
     ).toEqual({ appliedCount: 2 });
     expect(memory.rows('photo').find((photo) => photo.id === 'y1')!.detectedSource).toBe('FOLDER');
+  });
+
+  it('pushes explicit photo IDs into the query instead of scanning the whole scope', async () => {
+    const { service, memory } = withNames();
+    const findMany = vi.spyOn(memory.photo, 'findMany');
+    await service.acceptFilenameSuggestions('owner', { photoIds: ['u3'] });
+    const scanned = findMany.mock.calls.map(([args]: any) => args.where.id);
+    expect(scanned[0]).toMatchObject({ in: ['u3'] });
   });
 
   it('validates the input and never touches another user', async () => {

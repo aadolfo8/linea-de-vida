@@ -85,27 +85,29 @@ function controllerFixture() {
           photos.find((photo) => photo.id === where.id && photo.userId === where.userId) ?? null,
       ),
       findMany: vi.fn(async ({ where, include }: any) =>
-        where.id?.in
-          ? photos
-              .filter((photo) => where.id.in.includes(photo.id) && photo.userId === where.userId)
-              .map(({ id, hiddenAt }) => ({ id, hiddenAt }))
-          : include?.folder
-            ? photos.filter(
-                (photo) =>
-                  photo.userId === where.userId &&
-                  photo.sourceId === where.sourceId &&
-                  (!where.folderId || photo.folderId === where.folderId) &&
-                  (!where.fileName ||
-                    photo.fileName.toLowerCase().includes(where.fileName.contains)) &&
-                  (!where.effectiveDateValue || photo.effectiveDateValue === null),
-              )
-            : where.folderId?.in
-              ? photos.filter((photo) => where.folderId.in.includes(photo.folderId))
-              : where.folderId
-                ? photos.filter(
-                    (photo) => photo.userId === where.userId && photo.folderId === where.folderId,
-                  )
-                : [],
+        where.hiddenAt
+          ? photos.filter((photo) => photo.userId === where.userId && photo.hiddenAt)
+          : where.id?.in
+            ? photos
+                .filter((photo) => where.id.in.includes(photo.id) && photo.userId === where.userId)
+                .map(({ id, hiddenAt }) => ({ id, hiddenAt }))
+            : include?.folder
+              ? photos.filter(
+                  (photo) =>
+                    photo.userId === where.userId &&
+                    photo.sourceId === where.sourceId &&
+                    (!where.folderId || photo.folderId === where.folderId) &&
+                    (!where.fileName ||
+                      photo.fileName.toLowerCase().includes(where.fileName.contains)) &&
+                    (!where.effectiveDateValue || photo.effectiveDateValue === null),
+                )
+              : where.folderId?.in
+                ? photos.filter((photo) => where.folderId.in.includes(photo.folderId))
+                : where.folderId
+                  ? photos.filter(
+                      (photo) => photo.userId === where.userId && photo.folderId === where.folderId,
+                    )
+                  : [],
       ),
       update: vi.fn(async ({ where, data }: any) => updates.push({ where, data })),
       updateMany: vi.fn(async ({ where, data }: any) => {
@@ -375,6 +377,18 @@ describe('indexed archive management', () => {
     await expect(f.controller.restorePhotoExclusion('other', 'excluded-1')).rejects.toBeInstanceOf(
       NotFoundException,
     );
+  });
+
+  it('lists photos hidden through soft hide and restores them through the legacy endpoint', async () => {
+    const f = controllerFixture();
+    f.photos[0]!.hiddenAt = new Date('2026-05-01');
+    const page = await f.controller.photoExclusions('owner', undefined, '5');
+    expect(page.items).toMatchObject([{ id: f.photos[0]!.id, restoredAt: null }]);
+    await f.controller.restorePhotoExclusion('owner', f.photos[0]!.id);
+    expect(f.photos[0]!.hiddenAt).toBeNull();
+    await expect(
+      f.controller.restorePhotoExclusion('other', f.photos[0]!.id),
+    ).rejects.toBeInstanceOf(NotFoundException);
   });
 
   it('scopes cursor-paginated sync history to an owned source', async () => {

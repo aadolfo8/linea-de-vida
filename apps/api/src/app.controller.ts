@@ -994,14 +994,23 @@ export class AppController {
   ) {
     const scope = `photo-exclusions:${userId}`;
     const { limit, offset } = this.page(cursor, rawLimit, scope);
-    const records = await this.prisma.photoExclusion.findMany({
-      where: { userId },
-      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-      skip: offset,
-      take: limit + 1,
-    });
-    return {
-      items: records.slice(0, limit).map((item) => ({
+    // Photos hidden through the soft-hide state (including via the deprecated removal endpoints)
+    // are listed next to the unconverted tombstones so the legacy restore path stays coherent.
+    const [tombstones, hidden] = await Promise.all([
+      this.prisma.photoExclusion.findMany({
+        where: { userId },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        take: offset + limit + 1,
+      }),
+      this.prisma.photo.findMany({
+        where: { userId, hiddenAt: { not: null } },
+        orderBy: [{ hiddenAt: 'desc' }, { id: 'desc' }],
+        take: offset + limit + 1,
+        include: { source: { select: { name: true } }, folder: { select: { path: true } } },
+      }),
+    ]);
+    const merged = [
+      ...tombstones.map((item) => ({
         id: item.id,
         sourceId: item.sourceId,
         sourceName: item.sourceName,
@@ -1011,7 +1020,23 @@ export class AppController {
         restoredAt: item.restoredAt,
         createdAt: item.createdAt,
       })),
-      nextCursor: records.length > limit ? this.cursor(scope, offset + limit) : null,
+      ...hidden.map((photo) => ({
+        id: photo.id,
+        sourceId: photo.sourceId as string | null,
+        sourceName: (photo.source?.name ?? null) as string | null,
+        folderPath: photo.folder?.path ?? [],
+        fileName: photo.fileName as string | null,
+        mimeType: photo.mimeType as string | null,
+        restoredAt: null as Date | null,
+        createdAt: photo.hiddenAt!,
+      })),
+    ].sort(
+      (a, b) =>
+        b.createdAt.getTime() - a.createdAt.getTime() || (a.id < b.id ? 1 : a.id > b.id ? -1 : 0),
+    );
+    return {
+      items: merged.slice(offset, offset + limit),
+      nextCursor: merged.length > offset + limit ? this.cursor(scope, offset + limit) : null,
     };
   }
   @UseGuards(SessionGuard, CsrfGuard)
@@ -1019,11 +1044,21 @@ export class AppController {
   @HttpCode(HttpStatus.NO_CONTENT)
   async restorePhotoExclusion(@CurrentUserId() userId: string, @Param('id') id: string) {
     const exclusion = await this.prisma.photoExclusion.findFirst({ where: { id, userId } });
-    if (!exclusion)
+    if (!exclusion) {
+      // The ID may belong to a photo hidden with the soft-hide state: showing it again is the restore.
+      const hidden = await this.prisma.photo.findFirst({
+        where: { id, userId, hiddenAt: { not: null } },
+        select: { id: true },
+      });
+      if (hidden) {
+        await this.visibility.unhide(userId, [id]);
+        return;
+      }
       throw new NotFoundException({
         code: 'PHOTO_EXCLUSION_NOT_FOUND',
         message: 'Excluded photo not found.',
       });
+    }
     if (!exclusion.restoredAt)
       await this.prisma.photoExclusion.updateMany({
         where: { id, userId, restoredAt: null },
