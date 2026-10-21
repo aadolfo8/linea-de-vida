@@ -992,12 +992,3 @@ function ViewerImage({
     </>
   );
 }
-
-export function galleryEagerIndexes(selectedIndex: number, length: number) {
-  if (!Number.isInteger(selectedIndex) || selectedIndex < 0 || selectedIndex >= length)
-    return new Set<number>();
-  const indexes = new Set([selectedIndex]);
-  if (selectedIndex > 0) indexes.add(selectedIndex - 1);
-  if (selectedIndex < length - 1) indexes.add(selectedIndex + 1);
-  return indexes;
-}

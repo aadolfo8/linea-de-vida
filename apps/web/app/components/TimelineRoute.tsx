@@ -249,7 +249,7 @@ export function TimelineRoute() {
     <ProtectedSurface tone="sky">
       {(session) => (
         <div
-          className="timeline-immersive-shell sky-scope min-h-dvh"
+          className="sky-scope min-h-dvh"
           data-route-depth={routeDepth}
           data-focus={focused ? 'on' : 'off'}
         >

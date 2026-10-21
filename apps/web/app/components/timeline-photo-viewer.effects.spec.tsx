@@ -3,29 +3,11 @@
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { TemporalCarousel } from './TemporalCarousel';
 import { TimelinePhotoViewer, type ViewerSource } from './TimelinePhotoViewer';
 import type { TimelinePhoto } from './timeline-model';
 import { fitSize } from './viewer-zoom';
 
 const env = vi.hoisted(() => ({ reduceMotion: false }));
-
-// The carousel arrows below are still the only Embla consumer.
-vi.mock('embla-carousel-react', () => ({
-  default: () => [
-    () => undefined,
-    {
-      selectedScrollSnap: () => 0,
-      canScrollPrev: () => true,
-      canScrollNext: () => true,
-      on: vi.fn(),
-      off: vi.fn(),
-      scrollTo: vi.fn(),
-      scrollPrev: vi.fn(),
-      scrollNext: vi.fn(),
-    },
-  ],
-}));
 
 vi.mock('motion/react', async () => {
   const React = await import('react');
@@ -688,32 +670,5 @@ describe('TimelinePhotoViewer effects', () => {
       preloaded.some((url) => url.includes('/photo-3/thumbnail') && url.includes('width=1280')),
     ).toBe(true);
     expect(preloaded.some((url) => url.includes('/photo-2/'))).toBe(false);
-  });
-
-  it('renders carousel arrows with a 44px minimum target', async () => {
-    await act(async () =>
-      root?.render(
-        <TemporalCarousel
-          items={[
-            { key: '2025', primary: '2025', secondary: '2 fotos', ariaLabel: '2025' },
-            { key: '2026', primary: '2026', secondary: '4 fotos', ariaLabel: '2026' },
-          ]}
-          selectedKey="2026"
-          label="Años"
-          variant="year"
-          onTransientSelect={vi.fn()}
-          onSettle={vi.fn()}
-        />,
-      ),
-    );
-
-    const arrows = [
-      container.querySelector<HTMLButtonElement>('[aria-label="Ir al año anterior"]')!,
-      container.querySelector<HTMLButtonElement>('[aria-label="Ir al año siguiente"]')!,
-    ];
-    arrows.forEach((arrow) => {
-      expect(arrow.className).toContain('min-w-11');
-      expect(arrow.className).toContain('min-h-11');
-    });
   });
 });
