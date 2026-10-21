@@ -32,8 +32,8 @@ TDD mode: not configured (source: no project/session setting) — ordinary funct
 - [x] **CN-1 — Month previews API.** `GET /v1/timeline/years/:year/month-previews` returning, per month with photos and for the unknown-month group, `{ month | null, kind, label, photoCount, previews }` with up to 6 previews spread across the period, owner-scoped. Tests in `apps/api/test`. Route: delegated writer (API controller + service + tests).
 - [x] **CN-2 — Sky foundation.** Night-sky tokens and fonts scoped to the timeline, sky stage engine (starfield canvas, inertial sticky track, orientation toggle), treemap mosaic and masonry lane utilities with unit tests, breadcrumb/back/rail chrome, zoom travel transition helper. Route: delegated writer.
 - [x] **CN-3 — Years and year depths.** Years and months constellations on real data (lazy year summaries, month previews), thread, rail, travel between depths through the real routes. Route: delegated writer.
-- [ ] **CN-4 — Month depth.** All photos of a month or "sin mes", keyset paging while travelling, day groups, masonry in both orientations, day rail. Route: delegated writer.
-- [ ] **CN-5 — Viewer.** Zoom/pan/pinch/double-click, swipe, filmstrip, ambient backdrop, grow-from-tile, keeping the existing viewer contract (focus trap, HEIC, original fallback, no wrap, loadMore). Route: delegated writer.
+- [x] **CN-4 — Month depth.** All photos of a month or "sin mes", keyset paging while travelling, day groups, masonry in both orientations, day rail. Route: delegated writer.
+- [x] **CN-5 — Viewer.** Zoom/pan/pinch/double-click, swipe, filmstrip, ambient backdrop, grow-from-tile, keeping the existing viewer contract (focus trap, HEIC, original fallback, no wrap, loadMore). Route: delegated writer.
 - [ ] **CN-6 — Cleanup and finish.** Remove obsolete timeline components and styles, update specs, document the design (DESIGN.md), run all checks. Route: delegated writer.
 
 ## Delivery
@@ -50,6 +50,9 @@ Forecast: about 3,000 authored changed lines across six work-unit commits, above
 - CN-2 done in `3da79c1` (`feat(timeline): add night sky stage and layout primitives`; +2147/-1) and CN-3 in `d4d767a` (`feat(timeline): travel years and months as constellations`; +2297/-153), one delegated writer. Writer checks at `d4d767a`: web test 25 files/150 passed, typecheck, lint, build, format clean; parent re-ran web test: 150 passed. Parent visual QA with a local mock API and headless Edge (1440×900): years and year depths render as approved (mosaic, counts, "+N más", rail, breadcrumb, thread). Follow-ups noted for CN-6: three stacked controls at top-right (nav, "Concentrar vista", orientation) feel crowded; `ProtectedSurface` loading is still light (flash); no direct tests for `useTravel`/`useTravelEntry`/`SkyThread`.
 - Design choices: years read oldest → newest; `TimelineRoute` now lives in `timeline/layout.tsx` so the stage persists across depths; pending travel kept in a module store.
 
+- CN-4 done in `292919b` (`feat(timeline): travel every photo of a month`; +1566/-84) and CN-5 in `10c5e91` (`feat(timeline): zoom and travel photos in the viewer`; +1882/-368), one delegated writer. Writer checks at `10c5e91`: web test 28 files/215 passed, typecheck, lint, build, format clean. A third review STATUS/START on the whole branch was refused with `stale_target_identity` because CN-4 landed while consent was being answered; no authority created.
+- Parent visual QA (CDP-driven headless Edge + mock API): month depth paged to 120 tiles, viewer opened from a tile, wheel zoom reached 294%, Escape reset zoom then closed; horizontal years and month render well. Defects found: (1) at 390px the top chrome (ArchiveNav, "Concentrar vista", orientation) overlaps headers and content and the rail covers photos; (2) the viewer image overlaps the date/precision meta; (3) desktop top-right controls stacked in three rows.
+
 ## Next step
 
-CN-4 and CN-5 (same writer, two commits).
+CN-6: fix the QA defects, clean up dead timeline code, close test gaps, DESIGN.md.
