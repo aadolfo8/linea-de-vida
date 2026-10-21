@@ -61,6 +61,9 @@ describe('timeline route state', () => {
     expect(safeOrganizeReturnHref('https://attacker.test/organizar', 'https://example.test')).toBe(
       null,
     );
+    expect(safeOrganizeReturnHref('/ordenar?folder=f2', 'https://example.test')).toBe(
+      '/ordenar?folder=f2',
+    );
     expect(safeOrganizeReturnHref('/settings', 'https://example.test')).toBe(null);
   });
 

@@ -9,8 +9,8 @@ import { apiJson } from '../../lib/api';
 
 const links = [
   { href: '/timeline', label: 'Cronología', icon: CalendarDays },
-  { href: '/organizar', label: 'Organizar', icon: FolderCog },
-  { href: '/settings', label: 'Ajustes', icon: Settings2 },
+  { href: '/ordenar', label: 'Ordenar', icon: FolderCog },
+  { href: '/ajustes', label: 'Ajustes', icon: Settings2 },
 ] as const;
 
 export function ArchiveNav({
@@ -148,17 +148,17 @@ export function ArchiveNav({
         <Link
           className="inline-flex min-h-11 items-center gap-2 px-3 text-sm text-map-muted no-underline transition-colors hover:text-map-route aria-[current=page]:bg-map-route-soft aria-[current=page]:text-map-ink max-[680px]:shrink-0 max-[680px]:px-2 max-[680px]:whitespace-nowrap"
           data-cursor="route"
-          href="/organizar"
-          aria-current={pathname === '/organizar' ? 'page' : undefined}
+          href="/ordenar"
+          aria-current={pathname === '/ordenar' ? 'page' : undefined}
         >
           <FolderCog aria-hidden="true" className="size-4" />
-          <span>Organizar</span>
+          <span>Ordenar</span>
         </Link>
         <Link
           className="inline-flex min-h-11 items-center gap-2 px-3 text-sm text-map-muted no-underline transition-colors hover:text-map-route aria-[current=page]:bg-map-route-soft aria-[current=page]:text-map-ink max-[680px]:shrink-0 max-[680px]:px-2 max-[680px]:whitespace-nowrap"
           data-cursor="route"
-          href="/settings"
-          aria-current={pathname === '/settings' ? 'page' : undefined}
+          href="/ajustes"
+          aria-current={pathname === '/ajustes' ? 'page' : undefined}
         >
           <Settings2 aria-hidden="true" className="size-4" />
           <span>Ajustes</span>
