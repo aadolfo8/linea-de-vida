@@ -1250,6 +1250,62 @@ export class AppController {
       nextCursor: rows.length > limit ? this.cursor(`months:${parsedYear}`, offset + limit) : null,
     };
   }
+  @UseGuards(SessionGuard) @Get('timeline/years/:year/month-previews') async monthPreviews(
+    @CurrentUserId() userId: string,
+    @Param('year') year: string,
+  ) {
+    const parsedYear = this.year(year);
+    const start = new Date(Date.UTC(parsedYear, 0, 1));
+    const end = new Date(Date.UTC(parsedYear + 1, 0, 1));
+    // One pass for the whole year: count per group and one photo per NTILE bucket (up to 6).
+    const rows = await this.prisma.$queryRawUnsafe<
+      { month: number | null; photoCount: bigint; id: string }[]
+    >(
+      `WITH scoped AS (
+         SELECT id, "effectiveDateValue",
+                CASE WHEN "effectiveDatePrecision" = 'YEAR' THEN NULL
+                     ELSE EXTRACT(MONTH FROM "effectiveDateValue")::int END AS month
+         FROM "Photo" WHERE "userId" = $1 AND status = 'ACTIVE'
+           AND "effectiveDateValue" >= $2 AND "effectiveDateValue" < $3
+           AND "effectiveDatePrecision" IN ('YEAR', 'MONTH', 'DAY')
+       ), bucketed AS (
+         SELECT id, month, "effectiveDateValue",
+                COUNT(*) OVER (PARTITION BY month) AS "photoCount",
+                NTILE(6) OVER (PARTITION BY month ORDER BY "effectiveDateValue" DESC, id DESC) AS bucket
+         FROM scoped
+       ) SELECT DISTINCT ON (month, bucket) month, "photoCount", id FROM bucketed
+       ORDER BY month NULLS LAST, bucket, "effectiveDateValue" DESC, id DESC`,
+      userId,
+      start,
+      end,
+    );
+    const records = rows.length
+      ? await this.prisma.photo.findMany({
+          where: { userId, id: { in: rows.map((row) => row.id) } },
+          include: { override: true },
+        })
+      : [];
+    const byId = new Map(records.map((photo) => [photo.id, photo]));
+    const groups = new Map<
+      number | null,
+      { photoCount: number; previews: ReturnType<AppController['compactPhoto']>[] }
+    >();
+    for (const row of rows) {
+      const photo = byId.get(row.id);
+      const group = groups.get(row.month) ?? { photoCount: Number(row.photoCount), previews: [] };
+      if (photo) group.previews.push(this.compactPhoto(photo));
+      groups.set(row.month, group);
+    }
+    return {
+      year: parsedYear,
+      items: [...groups].map(([month, group]) => ({
+        month,
+        kind: month === null ? 'YEAR' : 'MONTH',
+        label: month === null ? 'Fecha sin concretar' : null,
+        ...group,
+      })),
+    };
+  }
   @UseGuards(SessionGuard) @Get('timeline/years/:year/months/:month/days') async days(
     @CurrentUserId() userId: string,
     @Param('year') year: string,

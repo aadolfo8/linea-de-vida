@@ -80,6 +80,7 @@ Para backup PostgreSQL, ejecuta desde un host autorizado `pg_dump --format=custo
 | `GET /v1/sync-runs/:id/issues?cursor=&limit=`                    | Incidencias paginadas del propietario.                                  |
 | `GET /v1/timeline/years`                                         | Años disponibles desde PostgreSQL.                                      |
 | `GET /v1/timeline/years/:year/months`                            | Meses y grupo `Fecha sin concretar`.                                    |
+| `GET /v1/timeline/years/:year/month-previews`                    | Hasta 6 vistas previas repartidas por mes y por `Fecha sin concretar`.  |
 | `GET /v1/timeline/years/:year/months/:month/days`                | Días y grupo `Día sin concretar`.                                       |
 | `GET /v1/timeline/undated`                                       | Conteo de fotos sin año.                                                |
 | `GET /v1/photos?...&cursor=&limit=`                              | Galería cursor-paginada por granularidad.                               |
