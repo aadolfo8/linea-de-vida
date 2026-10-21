@@ -55,14 +55,16 @@ function archive() {
     manualDateOverride: memory.manualDateOverride,
     indexedFolder: {
       findUnique: async ({ where }: any) =>
-        folders.get(where.userId_driveFolderId.driveFolderId) ?? null,
+        where.id
+          ? ([...folders.values()].find((entry) => entry.id === where.id) ?? null)
+          : (folders.get(where.userId_driveFolderId.driveFolderId) ?? null),
       findFirst: async () => null,
       upsert: async ({ where, create, update }: any) => {
         const id = where.userId_driveFolderId.driveFolderId;
         const value = folders.get(id) ?? { id: `folder-${id}` };
         Object.assign(value, folders.has(id) ? update : create);
         folders.set(id, value);
-        return { ...value, dateRule: null };
+        return { ...value, dateRule: value.dateRule ?? null };
       },
       updateMany: async ({ where, data }: any) => {
         for (const entry of folders.values())
@@ -124,7 +126,7 @@ function archive() {
     photos().find(
       (photo) => photo.id === files().find((f) => f.driveFileId === driveFileId)?.photoId,
     );
-  return { memory, sync, photos, files, photoOf, issues, prisma };
+  return { memory, sync, photos, files, photoOf, issues, prisma, folders };
 }
 
 describe('photo content identity', () => {
@@ -278,13 +280,12 @@ describe('photo content identity', () => {
     expect(a.photos()[0]).toMatchObject({ status: 'ACTIVE', driveFileId: 'a9' });
   });
 
-  it('turns a legacy removal into a hidden photo, also when found through a new copy', async () => {
+  it('turns a legacy removal into a hidden photo carrying its saved manual date', async () => {
     const a = archive();
     a.memory.rows('photoExclusion').push({
       id: 'tombstone',
       userId: 'owner',
       driveFileId: 'gone',
-      contentKey: 'md5:ggg:1000',
       manualDateValue: new Date('2003-01-01'),
       manualDatePrecision: 'YEAR',
       manualDateReason: 'Family note',
@@ -292,7 +293,7 @@ describe('photo content identity', () => {
       createdAt: new Date('2026-01-02'),
     });
 
-    const run = await a.sync('source', 'root', { root: [image('new-copy', 'ggg')] });
+    const run = await a.sync('source', 'root', { root: [image('gone', 'ggg')] });
 
     expect(run.status).toBe('SUCCEEDED');
     expect(a.photos()).toHaveLength(1);
@@ -310,7 +311,6 @@ describe('photo content identity', () => {
       id: 'tombstone',
       userId: 'owner',
       driveFileId: 'back',
-      contentKey: null,
       restoredAt: new Date('2026-02-01'),
       createdAt: new Date('2026-01-02'),
     });
@@ -335,14 +335,13 @@ describe('photo content identity', () => {
     expect(a.photos()[0].hiddenAt).toEqual(new Date('2026-03-01'));
   });
 
-  it('hides an existing visible photo when a legacy removal matches its content', async () => {
+  it('hides an existing visible photo when a legacy removal matches its Drive file', async () => {
     const a = archive();
     await a.sync('source', 'root', { root: [image('a1', 'aaa')] });
     a.memory.rows('photoExclusion').push({
       id: 'tombstone',
       userId: 'owner',
-      driveFileId: 'old-id',
-      contentKey: 'md5:aaa:1000',
+      driveFileId: 'a1',
       restoredAt: null,
       createdAt: new Date('2026-01-02'),
     });
@@ -423,6 +422,118 @@ describe('photo content identity', () => {
     expect(a.photos()).toHaveLength(1);
     expect(a.photos()[0]).toMatchObject({ id: 'photo-a1', contentKey: 'md5:aaa:7' });
     expect(a.files()[0]).toMatchObject({ md5Checksum: 'aaa', sizeBytes: 7n });
+  });
+
+  it('derives the date from the primary copy folder rule, not from a secondary copy folder', async () => {
+    const a = archive();
+    const name = 'IMG-20190812-WA0001.jpg';
+    await a.sync('source', 'root', {
+      root: [folder('primary', 'Primary'), folder('other', 'Other')],
+      primary: [image('a1', 'aaa', name)],
+    });
+    a.folders.get('other').dateRule = {
+      dateValue: new Date('2001-01-01'),
+      precision: 'YEAR',
+      scope: 'DIRECT_OVERRIDE',
+    };
+
+    await a.sync('source', 'root', {
+      root: [folder('primary', 'Primary'), folder('other', 'Other')],
+      primary: [image('a1', 'aaa', name)],
+      other: [image('a2', 'aaa', name)],
+    });
+    expect(a.photos()).toHaveLength(1);
+    expect(a.photos()[0]).toMatchObject({
+      driveFileId: 'a1',
+      effectiveDateSource: 'FILENAME',
+      lastSeenSyncRunId: 'run-2',
+    });
+
+    // The rule of the primary folder wins on every later sync, whichever copy is visited.
+    a.folders.get('primary').dateRule = {
+      dateValue: new Date('1999-01-01'),
+      precision: 'YEAR',
+      scope: 'DIRECT_OVERRIDE',
+    };
+    await a.sync('source', 'root', {
+      root: [folder('primary', 'Primary'), folder('other', 'Other')],
+      primary: [image('a1', 'aaa', name)],
+      other: [image('a2', 'aaa', name)],
+    });
+    expect(a.photos()[0]).toMatchObject({
+      effectiveDateSource: 'FOLDER_RULE',
+      effectiveDateValue: new Date('1999-01-01'),
+    });
+  });
+
+  it('does not mirror run bookkeeping from a secondary copy', async () => {
+    const a = archive();
+    await a.sync('source', 'root', {
+      root: [folder('primary', 'Primary'), folder('other', 'Other')],
+      primary: [image('a1', 'aaa')],
+    });
+    await a.sync('source', 'root', {
+      root: [folder('primary', 'Primary'), folder('other', 'Other')],
+      primary: [image('a1', 'aaa')],
+      other: [image('a2', 'aaa')],
+    });
+    expect(a.photos()[0]).toMatchObject({ driveFileId: 'a1', status: 'ACTIVE' });
+    expect(a.photoOf('a2')!.id).toBe(a.photos()[0].id);
+  });
+
+  describe('when a tracked file changes content', () => {
+    it('detaches the changed copy and keeps the photo with its other copies', async () => {
+      const a = archive();
+      await a.sync('source', 'root', { root: [image('a1', 'aaa'), image('a2', 'aaa')] });
+      const original = a.photoOf('a1')!.id;
+
+      await a.sync('source', 'root', { root: [image('a1', 'bbb'), image('a2', 'aaa')] });
+
+      expect(a.photos()).toHaveLength(2);
+      expect(a.photoOf('a1')!.contentKey).toBe('md5:bbb:1000');
+      expect(a.photoOf('a2')).toMatchObject({
+        id: original,
+        contentKey: 'md5:aaa:1000',
+        driveFileId: 'a2',
+        status: 'ACTIVE',
+      });
+    });
+
+    it('folds a single-copy photo into the one that owns the new content', async () => {
+      const a = archive();
+      await a.sync('source', 'root', { root: [image('a1', 'aaa'), image('b1', 'bbb')] });
+      const survivor = a.photoOf('b1')!;
+      const loser = a.photoOf('a1')!;
+      loser.hiddenAt = new Date('2026-03-01');
+      a.memory.rows('manualDateOverride').push({
+        id: 'override',
+        photoId: loser.id,
+        dateValue: new Date('2010-01-01'),
+        precision: 'YEAR',
+      });
+
+      await a.sync('source', 'root', { root: [image('a1', 'bbb'), image('b1', 'bbb')] });
+
+      expect(a.photos()).toHaveLength(1);
+      expect(a.photos()[0]).toMatchObject({ id: survivor.id, contentKey: 'md5:bbb:1000' });
+      expect(a.photos()[0].hiddenAt).toEqual(new Date('2026-03-01'));
+      expect(a.files().map((file) => file.photoId)).toEqual([survivor.id, survivor.id]);
+      expect(a.memory.rows('manualDateOverride')).toMatchObject([{ photoId: survivor.id }]);
+    });
+
+    it('re-keys a single-copy photo in place so the old bytes no longer attach to it', async () => {
+      const a = archive();
+      await a.sync('source', 'root', { root: [image('a1', 'aaa')] });
+      const id = a.photos()[0].id;
+
+      await a.sync('source', 'root', { root: [image('a1', 'ccc')] });
+      expect(a.photos()).toHaveLength(1);
+      expect(a.photos()[0]).toMatchObject({ id, contentKey: 'md5:ccc:1000' });
+
+      await a.sync('source', 'root', { root: [image('a1', 'ccc'), image('z', 'aaa')] });
+      expect(a.photos()).toHaveLength(2);
+      expect(a.photoOf('z')!.id).not.toBe(id);
+    });
   });
 
   it('files without a checksum are identified by their own Drive id only', async () => {

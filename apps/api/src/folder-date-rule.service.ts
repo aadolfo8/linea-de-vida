@@ -3,9 +3,9 @@ import { DatePrecision, DateSource, FolderDateRuleScope } from '@prisma/client';
 import { effectiveDate } from './manual-date.service';
 import { PrismaService } from './prisma.service';
 import {
+  applicableRule,
   FolderRuleFlags,
   flagsFromScope,
-  inheritsToSubfolders,
   scopeFromFlags,
 } from './folder-rule-scope';
 import { chunk } from './photo-ids';
@@ -156,29 +156,24 @@ export class FolderDateRuleService {
         include: { override: true },
       }),
     ]);
-    const byId = new Map(folders.map((folder) => [folder.id, folder]));
-    const ruleFor = (folderId: string | null) => {
-      let currentId = folderId;
-      let direct = true;
-      while (currentId) {
-        const folder = byId.get(currentId);
-        if (!folder) return null;
-        const rule =
-          folder.id === replacementFolderId ? (replacementRule ?? null) : folder.dateRule;
-        if (rule && (direct || inheritsToSubfolders(rule.scope)))
-          return { rule, folderId: folder.id };
-        direct = false;
-        currentId = folder.parentId;
-      }
-      return null;
-    };
+    // Overlay the previewed rule on the folder tree; the shared walk is cycle-safe.
+    const tree = new Map(
+      folders.map((folder) => [
+        folder.id,
+        {
+          id: folder.id,
+          parentId: folder.parentId,
+          dateRule: folder.id === replacementFolderId ? (replacementRule ?? null) : folder.dateRule,
+        },
+      ]),
+    );
     return photos.map((photo) => {
-      const selectedRule = ruleFor(photo.folderId);
+      const rule = applicableRule(tree, photo.folderId);
       const result = effectiveDate({
         detectedDate: photo.detectedDate,
         detectedPrecision: photo.detectedPrecision,
         detectedSource: photo.detectedSource,
-        folderRule: selectedRule?.rule,
+        folderRule: rule,
         override: photo.override,
       });
       const current = {
@@ -186,7 +181,7 @@ export class FolderDateRuleService {
         precision: photo.effectiveDatePrecision,
         origin: photo.effectiveDateSource,
       };
-      const inPreviewScope = selectedRule?.folderId === replacementFolderId;
+      const inPreviewScope = !!replacementRule && rule === replacementRule;
       return {
         photo,
         value: result.value,

@@ -2,6 +2,7 @@ import { Inject, Injectable, NotFoundException, ServiceUnavailableException } fr
 import {
   DatePrecision,
   DateSource,
+  FolderDateRule,
   FolderDateRuleScope,
   PhotoStatus,
   Prisma,
@@ -20,7 +21,7 @@ import { TakeoutMatcher, TakeoutMetadata, TakeoutMetadataParser } from './takeou
 import { effectiveDate } from './manual-date.service';
 import { photoDimensions } from './photo-dimensions';
 import { contentKeyFor, isProvisionalContentKey, parseSizeBytes } from './photo-identity';
-import { inheritsToSubfolders } from './folder-rule-scope';
+import { applicableRule, inheritsToSubfolders } from './folder-rule-scope';
 import { isUniqueViolation, mergePhotos, refreshPhotos } from './photo-catalog';
 
 const jobOptions: JobsOptions = {
@@ -56,6 +57,25 @@ const evidenceRank: Record<string, number> = {
   NONE: 5,
 };
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/** The date rule that applies to photos in `folderId`, walking the stored folder tree. */
+async function folderRuleFor(
+  db: Pick<Prisma.TransactionClient, 'indexedFolder'>,
+  folderId: string | null,
+) {
+  const tree = new Map<string, { parentId: string | null; dateRule: FolderDateRule | null }>();
+  let currentId = folderId;
+  while (currentId && !tree.has(currentId)) {
+    const folder = await db.indexedFolder.findUnique({
+      where: { id: currentId },
+      include: { dateRule: true },
+    });
+    if (!folder) break;
+    tree.set(currentId, { parentId: folder.parentId, dateRule: folder.dateRule });
+    currentId = folder.parentId;
+  }
+  return applicableRule(tree, folderId);
+}
 
 @Injectable()
 export class SyncService {
@@ -308,7 +328,7 @@ export class SyncService {
       const userId = run.source.userId;
       const key = contentKeyFor(item);
       const exclusions = await this.prisma.photoExclusion.findMany({
-        where: { userId, OR: [{ driveFileId: item.id }, { contentKey: key }] },
+        where: { userId, driveFileId: item.id },
       });
       // A legacy tombstone (a photo removed before soft hide existed) comes back as a hidden photo
       // carrying its saved manual date; a restored one comes back visible. Either way it is spent.
@@ -365,15 +385,21 @@ export class SyncService {
                 include: { override: true },
               })
             : byKey;
-          if (
-            existing &&
-            file &&
-            existing.contentKey !== key &&
-            isProvisionalContentKey(existing.contentKey)
-          ) {
-            // The checksum is known now: the provisional key becomes the real identity, folding
-            // this photo into the one that already owns that content.
-            if (byKey && byKey.id !== existing.id) {
+          let detachedFrom: string | null = null;
+          if (existing && file && existing.contentKey !== key) {
+            const siblings = isProvisionalContentKey(existing.contentKey)
+              ? 0
+              : await tx.photoFile.count({
+                  where: { photoId: existing.id, driveFileId: { not: item.id } },
+                });
+            if (siblings > 0) {
+              // The bytes of this copy changed (edited or replaced in Drive): it no longer belongs
+              // to the photo that keeps its other copies and follows its new content instead.
+              detachedFrom = existing.id;
+              existing = byKey;
+            } else if (byKey && byKey.id !== existing.id) {
+              // Only copy of its photo, and the new content already has a photo (the provisional
+              // key of a file whose checksum is known now follows the same rule).
               await mergePhotos(tx, byKey, existing);
               existing = await tx.photo.findUnique({
                 where: { id: byKey.id },
@@ -400,6 +426,11 @@ export class SyncService {
               : null;
           const mirrorsThisFile =
             !existing || existing.driveFileId === item.id || primary?.status !== 'ACTIVE';
+          // Dates always follow the primary copy's folder, never the folder of whichever copy this
+          // is, so they do not flip between syncs.
+          const primaryFolderRule = mirrorsThisFile
+            ? folderRule
+            : await folderRuleFor(tx, existing!.folderId);
           // With several copies the strongest evidence wins and a secondary copy must beat, not
           // merely equal, what the photo already has.
           const detectionApplies =
@@ -426,19 +457,11 @@ export class SyncService {
                 };
           const effective = effectiveDate({
             ...evidence,
-            ...(existing && otherCopies > 0
-              ? {
-                  effectiveDateValue: existing.effectiveDateValue,
-                  effectiveDatePrecision: existing.effectiveDatePrecision,
-                  effectiveDateSource: existing.effectiveDateSource,
-                }
-              : {}),
-            folderRule,
+            folderRule: primaryFolderRule,
             override: existing?.override ?? restoredOverride,
           });
           const data = {
             status: PhotoStatus.ACTIVE,
-            lastSeenSyncRunId: run.id,
             imageMetadata: dimensions ?? existing?.imageMetadata ?? undefined,
             ...evidence,
             ...(takeoutApplies
@@ -463,6 +486,7 @@ export class SyncService {
             folderId: copy.folderId,
             fileName: copy.fileName,
             mimeType: copy.mimeType,
+            lastSeenSyncRunId: run.id,
           };
           let photoId: string;
           if (existing) {
@@ -489,6 +513,7 @@ export class SyncService {
             },
             update: { photoId, ...copy, status: 'ACTIVE', lastSeenSyncRunId: run.id },
           });
+          if (detachedFrom) await refreshPhotos(tx, [detachedFrom]);
           if (restoredOverride && !existing?.override)
             await tx.manualDateOverride.upsert({
               where: { photoId },
