@@ -107,6 +107,10 @@ function controllerFixture() {
       }),
       deleteMany: vi.fn(async () => ({ count: photos.length })),
     },
+    photoFile: {
+      findMany: vi.fn(async () => []),
+      deleteMany: vi.fn(async () => ({ count: 0 })),
+    },
     photoExclusion: {
       upsert: vi.fn(async (args: any) => exclusions.push(args)),
       findMany: vi.fn(async ({ where }: any) =>
@@ -154,8 +158,11 @@ describe('indexed archive management', () => {
       },
     });
     await expect(fixture.controller.removeSource('owner', 'source')).resolves.toBeUndefined();
-    expect(fixture.prisma.photo.deleteMany).toHaveBeenCalledWith({
+    expect(fixture.prisma.photoFile.deleteMany).toHaveBeenCalledWith({
       where: { userId: 'owner', sourceId: 'source' },
+    });
+    expect(fixture.prisma.photo.deleteMany).toHaveBeenCalledWith({
+      where: { userId: 'owner', sourceId: 'source', files: { none: {} } },
     });
     expect(fixture.prisma.indexedFolder.deleteMany).toHaveBeenCalledWith({
       where: { userId: 'owner', sourceId: 'source' },

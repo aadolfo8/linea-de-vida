@@ -2,19 +2,20 @@
 
 ## Decisión
 
-PostgreSQL contendrá un modelo normalizado. La identidad de una foto es **`(userId, driveFileId)`**, no el nombre, ruta ni hash. Un mismo archivo de Drive puede tener nombres o ubicaciones cambiantes; el identificador de Drive es estable para la integración y se aísla por usuario.
+PostgreSQL contendrá un modelo normalizado. La identidad de una foto es su **contenido por usuario**: `Photo.contentKey` = `md5:<md5Checksum>:<size>` de Drive (o `drive:<fileId>` cuando Drive no da checksum). Cada archivo de Drive que contiene esos bytes es una copia (`PhotoFile`, única por `(userId, driveFileId)`); el identificador de Drive sigue siendo estable para la integración y se aísla por usuario, pero ya no identifica la foto. `Photo.driveFileId/sourceId/folderId/fileName/mimeType` reflejan la copia principal (preferentemente `ACTIVE`).
 
 ## Entidades
 
-| Entidad              | Campos esenciales                                                                                              | Propósito                                          |
-| -------------------- | -------------------------------------------------------------------------------------------------------------- | -------------------------------------------------- |
-| `User`               | `id`, `googleSubject` único, `email`, `displayName`, timestamps                                                | Identidad local y frontera de autorización.        |
-| `OAuthConnection`    | `id`, `userId`, `provider`, `googleAccountId`, `grantedScopes`, `refreshTokenCiphertext`, `status`, timestamps | Credencial Drive aislada y cifrada.                |
-| `PhotoSource`        | `id`, `userId`, `oauthConnectionId`, `driveFolderId`, `name`, `type`, `status`, `lastCursor`, timestamps       | Carpeta raíz autorizada; delimita el escaneo.      |
-| `SyncRun`            | `id`, `photoSourceId`, `status`, `mode`, `cursorStartedAt`, `cursorCompletedAt`, contadores, timestamps        | Ejecución observable e idempotente.                |
-| `SyncIssue`          | `id`, `syncRunId`, `driveFileId?`, `code`, `severity`, `details`, timestamps                                   | Fallo recuperable y auditable sin detener el lote. |
-| `Photo`              | `id`, `userId`, `driveFileId`, `sourceId`, nombre, MIME, estado, metadatos, fecha detectada, match/GPS Takeout | Representación local del archivo indexado.         |
-| `ManualDateOverride` | `id`, `photoId` único, `dateValue`, `precision`, `reason?`, timestamps                                         | Corrección explícita vigente, una por foto.        |
+| Entidad              | Campos esenciales                                                                                                                            | Propósito                                          |
+| -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------- |
+| `User`               | `id`, `googleSubject` único, `email`, `displayName`, timestamps                                                                              | Identidad local y frontera de autorización.        |
+| `OAuthConnection`    | `id`, `userId`, `provider`, `googleAccountId`, `grantedScopes`, `refreshTokenCiphertext`, `status`, timestamps                               | Credencial Drive aislada y cifrada.                |
+| `PhotoSource`        | `id`, `userId`, `oauthConnectionId`, `driveFolderId`, `name`, `type`, `status`, `lastCursor`, timestamps                                     | Carpeta raíz autorizada; delimita el escaneo.      |
+| `SyncRun`            | `id`, `photoSourceId`, `status`, `mode`, `cursorStartedAt`, `cursorCompletedAt`, contadores, timestamps                                      | Ejecución observable e idempotente.                |
+| `SyncIssue`          | `id`, `syncRunId`, `driveFileId?`, `code`, `severity`, `details`, timestamps                                                                 | Fallo recuperable y auditable sin detener el lote. |
+| `Photo`              | `id`, `userId`, `contentKey`, copia principal (`driveFileId`, `sourceId`, …), estado, metadatos, fecha detectada, match/GPS Takeout          | Foto única por contenido.                          |
+| `PhotoFile`          | `id`, `photoId`, `userId`, `sourceId`, `driveFileId`, `folderId?`, nombre, MIME, `md5Checksum?`, `sizeBytes?`, `status`, `lastSeenSyncRunId` | Una copia en Drive de la foto; `ACTIVE`/`MISSING`. |
+| `ManualDateOverride` | `id`, `photoId` único, `dateValue`, `precision`, `reason?`, timestamps                                                                       | Corrección explícita vigente, una por foto.        |
 
 ## Enums
 
@@ -55,7 +56,8 @@ Se conservan detectada y override separadas porque responden a preguntas distint
 | `User`               | `UNIQUE(googleSubject)`                                                         | Una identidad Google por usuario local.    |
 | `OAuthConnection`    | `UNIQUE(userId, provider, googleAccountId)`                                     | Evita conexiones duplicadas.               |
 | `PhotoSource`        | `UNIQUE(userId, driveFolderId)`; índice `(userId, status)`                      | Una raíz por usuario y listado autorizado. |
-| `Photo`              | `UNIQUE(userId, driveFileId)`                                                   | Idempotencia y aislamiento.                |
+| `Photo`              | `UNIQUE(userId, contentKey)`; índice `(userId, driveFileId)`                    | Idempotencia por contenido y aislamiento.  |
+| `PhotoFile`          | `UNIQUE(userId, driveFileId)`; `(photoId, status)`, `(sourceId, status)`        | Copias de una foto y reconciliación.       |
 | `Photo`              | `(userId, status)`, `(sourceId, status)`                                        | Timeline y reconciliación de fuente.       |
 | `Photo`              | índice de fecha efectiva `(userId, effectiveDateValue, effectiveDatePrecision)` | Año/mes/día paginados sin escaneo total.   |
 | `SyncRun`            | `(photoSourceId, createdAt DESC)`, `(status, createdAt)`                        | Progreso e inspección operativa.           |
