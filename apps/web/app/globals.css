@@ -12,6 +12,12 @@
   --color-map-muted: #435d64;
   --color-map-danger: #963f32;
   --font-sans: ui-sans-serif, system-ui, sans-serif;
+  /* Night sky: only used by the timeline (see components/sky/sky.css). */
+  --color-sky-ink: #05070d;
+  --color-sky-ink-2: #0b0f1a;
+  --color-sky-fg: #e8ecf4;
+  --color-sky-mute: #8790a4;
+  --color-sky-accent: #cfe0ff;
 }
 
 :root {
