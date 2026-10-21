@@ -53,7 +53,10 @@ class TreeDrive extends DriveAdapter {
 }
 
 describe.skipIf(!url)('PostgreSQL integration', () => {
-  const prisma = new PrismaClient({ datasources: { db: { url: url! } } });
+  // The describe body is still collected when skipped, so only build a client with a real URL.
+  const prisma = url
+    ? new PrismaClient({ datasources: { db: { url } } })
+    : (undefined as unknown as PrismaClient);
   const drive = new TreeDrive();
   const sync = new SyncService(prisma as any, drive, new PhotoDateResolver());
   const ordering = new OrderingService(prisma as any);
