@@ -30,8 +30,8 @@ TDD mode: not configured (source: no project/session setting) — ordinary funct
 ## Tasks
 
 - [x] **CN-1 — Month previews API.** `GET /v1/timeline/years/:year/month-previews` returning, per month with photos and for the unknown-month group, `{ month | null, kind, label, photoCount, previews }` with up to 6 previews spread across the period, owner-scoped. Tests in `apps/api/test`. Route: delegated writer (API controller + service + tests).
-- [ ] **CN-2 — Sky foundation.** Night-sky tokens and fonts scoped to the timeline, sky stage engine (starfield canvas, inertial sticky track, orientation toggle), treemap mosaic and masonry lane utilities with unit tests, breadcrumb/back/rail chrome, zoom travel transition helper. Route: delegated writer.
-- [ ] **CN-3 — Years and year depths.** Years and months constellations on real data (lazy year summaries, month previews), thread, rail, travel between depths through the real routes. Route: delegated writer.
+- [x] **CN-2 — Sky foundation.** Night-sky tokens and fonts scoped to the timeline, sky stage engine (starfield canvas, inertial sticky track, orientation toggle), treemap mosaic and masonry lane utilities with unit tests, breadcrumb/back/rail chrome, zoom travel transition helper. Route: delegated writer.
+- [x] **CN-3 — Years and year depths.** Years and months constellations on real data (lazy year summaries, month previews), thread, rail, travel between depths through the real routes. Route: delegated writer.
 - [ ] **CN-4 — Month depth.** All photos of a month or "sin mes", keyset paging while travelling, day groups, masonry in both orientations, day rail. Route: delegated writer.
 - [ ] **CN-5 — Viewer.** Zoom/pan/pinch/double-click, swipe, filmstrip, ambient backdrop, grow-from-tile, keeping the existing viewer contract (focus trap, HEIC, original fallback, no wrap, loadMore). Route: delegated writer.
 - [ ] **CN-6 — Cleanup and finish.** Remove obsolete timeline components and styles, update specs, document the design (DESIGN.md), run all checks. Route: delegated writer.
@@ -46,6 +46,10 @@ Forecast: about 3,000 authored changed lines across six work-unit commits, above
 - Engram mirror: `odd/cielo-nocturno/tasks`.
 - CN-1 done in `7bb2e12` (`feat(api): expose month previews for a timeline year`; 256 lines). Single-pass SQL (`NTILE(6)` partitioned by month + `DISTINCT ON`). Checks: api test 196 passed (5 new, mocked Prisma), typecheck/lint/format clean. Parent ran the exact SQL on a throwaway PostgreSQL 14 container: 13 groups × 6 previews, counts summing to all 230 seeded photos, no foreign or MISSING rows. Review assessment: medium, `under_budget` (boundary stays at `4e25514`).
 
+- Review: STATUS preflight on the whole branch (base `fb25802`, 4260 lines) and later on the slice from `4e25514` (4837 lines) both ended in the terminal stop `lens_context_budget_exceeded` after the user granted consent; no review authority was created. Reviewing requires smaller per-commit candidates; deferred to feature close.
+- CN-2 done in `3da79c1` (`feat(timeline): add night sky stage and layout primitives`; +2147/-1) and CN-3 in `d4d767a` (`feat(timeline): travel years and months as constellations`; +2297/-153), one delegated writer. Writer checks at `d4d767a`: web test 25 files/150 passed, typecheck, lint, build, format clean; parent re-ran web test: 150 passed. Parent visual QA with a local mock API and headless Edge (1440×900): years and year depths render as approved (mosaic, counts, "+N más", rail, breadcrumb, thread). Follow-ups noted for CN-6: three stacked controls at top-right (nav, "Concentrar vista", orientation) feel crowded; `ProtectedSurface` loading is still light (flash); no direct tests for `useTravel`/`useTravelEntry`/`SkyThread`.
+- Design choices: years read oldest → newest; `TimelineRoute` now lives in `timeline/layout.tsx` so the stage persists across depths; pending travel kept in a module store.
+
 ## Next step
 
-CN-2.
+CN-4 and CN-5 (same writer, two commits).
