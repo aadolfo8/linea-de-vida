@@ -2,12 +2,21 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { DatePrecision, DateSource, FolderDateRuleScope } from '@prisma/client';
 import { effectiveDate } from './manual-date.service';
 import { PrismaService } from './prisma.service';
+import {
+  FolderRuleFlags,
+  flagsFromScope,
+  inheritsToSubfolders,
+  scopeFromFlags,
+} from './folder-rule-scope';
+import { chunk } from './photo-ids';
 
 type RuleInput = {
   dateValue: Date;
   precision: DatePrecision;
   scope: FolderDateRuleScope;
 };
+
+export type SimpleRuleInput = Omit<RuleInput, 'scope'> & FolderRuleFlags;
 
 type EvaluatedPhoto = {
   photo: {
@@ -19,6 +28,7 @@ type EvaluatedPhoto = {
     detectedDate: Date | null;
     detectedPrecision: DatePrecision;
     detectedSource: DateSource;
+    hiddenAt?: Date | null;
     override: { dateValue: Date; precision: DatePrecision } | null;
   };
   value: Date | null;
@@ -54,7 +64,8 @@ export class FolderDateRuleService {
   async preview(userId: string, folderId: string, input: RuleInput) {
     const folder = await this.ownedFolder(userId, folderId);
     const records = await this.evaluate(userId, folder.sourceId, folderId, input);
-    const scoped = records.filter((record) => record.inPreviewScope);
+    // Hidden photos are updated like any other but never counted: the user does not see them.
+    const scoped = records.filter((record) => record.inPreviewScope && !record.photo.hiddenAt);
     const willChange = scoped.filter((record) => record.changed);
     return {
       scopePhotoCount: scoped.length,
@@ -78,6 +89,24 @@ export class FolderDateRuleService {
     return { affectedCount };
   }
 
+  /** The simplified form used by the Ordenar screen: two yes/no choices instead of a scope. */
+  async setSimple(userId: string, folderId: string, input: SimpleRuleInput) {
+    const { includeSubfolders, overrideCameraDates, ...date } = input;
+    const { rule, affectedCount } = await this.set(userId, folderId, {
+      ...date,
+      scope: scopeFromFlags({ includeSubfolders, overrideCameraDates }),
+    });
+    return { rule: { ...rule, ...flagsFromScope(rule.scope) }, affectedCount };
+  }
+
+  previewSimple(userId: string, folderId: string, input: SimpleRuleInput) {
+    const { includeSubfolders, overrideCameraDates, ...date } = input;
+    return this.preview(userId, folderId, {
+      ...date,
+      scope: scopeFromFlags({ includeSubfolders, overrideCameraDates }),
+    });
+  }
+
   private async ownedFolder(userId: string, folderId: string) {
     const folder = await this.prisma.indexedFolder.findFirst({ where: { id: folderId, userId } });
     if (!folder)
@@ -89,23 +118,26 @@ export class FolderDateRuleService {
   }
 
   private async recalculate(userId: string, sourceId: string) {
-    const records = await this.evaluate(userId, sourceId);
-    for (let offset = 0; offset < records.length; offset += 250) {
-      const batch = records.slice(offset, offset + 250);
-      await this.prisma.$transaction(
-        batch.map(({ photo, value, precision, origin }) =>
-          this.prisma.photo.update({
-            where: { id: photo.id },
-            data: {
-              effectiveDateValue: value,
-              effectiveDatePrecision: precision,
-              effectiveDateSource: origin,
-            },
-          }),
-        ),
-      );
+    const changed = (await this.evaluate(userId, sourceId)).filter((record) => record.changed);
+    // Photos that end up with the same date are written together.
+    const groups = new Map<string, { ids: string[]; record: EvaluatedPhoto }>();
+    for (const record of changed) {
+      const key = `${record.value?.toISOString() ?? ''}|${record.precision}|${record.origin}`;
+      const group = groups.get(key) ?? { ids: [], record };
+      group.ids.push(record.photo.id);
+      groups.set(key, group);
     }
-    return records.filter((record) => record.changed).length;
+    for (const { ids, record } of groups.values())
+      for (const batch of chunk(ids, 500))
+        await this.prisma.photo.updateMany({
+          where: { id: { in: batch }, userId },
+          data: {
+            effectiveDateValue: record.value,
+            effectiveDatePrecision: record.precision,
+            effectiveDateSource: record.origin,
+          },
+        });
+    return changed.filter((record) => !record.photo.hiddenAt).length;
   }
 
   private async evaluate(
@@ -133,7 +165,8 @@ export class FolderDateRuleService {
         if (!folder) return null;
         const rule =
           folder.id === replacementFolderId ? (replacementRule ?? null) : folder.dateRule;
-        if (rule && (direct || rule.scope !== 'DIRECT_ONLY')) return { rule, folderId: folder.id };
+        if (rule && (direct || inheritsToSubfolders(rule.scope)))
+          return { rule, folderId: folder.id };
         direct = false;
         currentId = folder.parentId;
       }

@@ -186,9 +186,8 @@ describe('FolderDateRuleService', () => {
             },
           },
         ]),
-        update: vi.fn(async (args: any) => updates.push(args)),
+        updateMany: vi.fn(async (args: any) => updates.push(args)),
       },
-      $transaction: vi.fn(async (operations: Promise<unknown>[]) => Promise.all(operations)),
     };
 
     const result = await new FolderDateRuleService(prisma).set('owner', 'root', {
@@ -203,5 +202,146 @@ describe('FolderDateRuleService', () => {
       'DRIVE_IMAGE_METADATA',
       'MANUAL',
     ]);
+  });
+
+  const flagsCases = [
+    [true, false, 'FALLBACK_DESCENDANTS'],
+    [true, true, 'ALL_DESCENDANTS'],
+    [false, false, 'DIRECT_ONLY'],
+    [false, true, 'DIRECT_OVERRIDE'],
+  ] as const;
+
+  it.each(flagsCases)(
+    'maps includeSubfolders=%s overrideCameraDates=%s to %s and back',
+    async (includeSubfolders, overrideCameraDates, scope) => {
+      const prisma: any = {
+        indexedFolder: {
+          findFirst: vi.fn(async () => ({ id: 'root', userId: 'owner', sourceId: 'source' })),
+          findMany: vi.fn(async () => [{ id: 'root', parentId: null, dateRule: null }]),
+        },
+        folderDateRule: {
+          upsert: vi.fn(async ({ create }: any) => ({ id: 'rule', ...create })),
+        },
+        photo: { findMany: vi.fn(async () => []), updateMany: vi.fn() },
+      };
+      const result = await new FolderDateRuleService(prisma).setSimple('owner', 'root', {
+        dateValue: new Date('2005-06-07T00:00:00.000Z'),
+        precision: 'DAY',
+        includeSubfolders,
+        overrideCameraDates,
+      });
+      expect(prisma.folderDateRule.upsert.mock.calls[0][0].create).toMatchObject({
+        precision: 'DAY',
+        scope,
+      });
+      expect(result.rule).toMatchObject({
+        precision: 'DAY',
+        includeSubfolders,
+        overrideCameraDates,
+      });
+    },
+  );
+
+  it('applies each flag combination to the right photos and only rewrites changed ones', async () => {
+    const photo = (
+      id: string,
+      folderId: string,
+      detectedSource: string,
+      detected: string | null,
+    ) => ({
+      id,
+      folderId,
+      detectedDate: detected ? new Date(detected) : null,
+      detectedPrecision: detected ? 'DAY' : 'UNKNOWN',
+      detectedSource,
+      effectiveDateValue: detected ? new Date(detected) : null,
+      effectiveDatePrecision: detected ? 'DAY' : 'UNKNOWN',
+      effectiveDateSource: detected ? detectedSource : 'NONE',
+      hiddenAt: null,
+      override: null,
+    });
+    const photos = [
+      photo('direct-undated', 'root', 'NONE', null),
+      photo('direct-camera', 'root', 'EXIF', '2010-05-09T00:00:00.000Z'),
+      photo('child-undated', 'child', 'NONE', null),
+      photo('child-camera', 'child', 'EXIF', '2011-06-10T00:00:00.000Z'),
+    ];
+    const run = async (includeSubfolders: boolean, overrideCameraDates: boolean) => {
+      const updates: any[] = [];
+      const prisma: any = {
+        indexedFolder: {
+          findFirst: vi.fn(async () => ({ id: 'root', userId: 'owner', sourceId: 'source' })),
+          findMany: vi.fn(async () => [
+            { id: 'root', parentId: null, dateRule: null },
+            { id: 'child', parentId: 'root', dateRule: null },
+          ]),
+        },
+        folderDateRule: { upsert: vi.fn(async ({ create }: any) => create) },
+        photo: {
+          findMany: vi.fn(async () => photos),
+          updateMany: vi.fn(async (args: any) => updates.push(args)),
+        },
+      };
+      // The rule stored by the upsert is what the next evaluation sees.
+      prisma.folderDateRule.upsert.mockImplementation(async ({ create }: any) => {
+        prisma.indexedFolder.findMany.mockResolvedValue([
+          { id: 'root', parentId: null, dateRule: create },
+          { id: 'child', parentId: 'root', dateRule: null },
+        ]);
+        return create;
+      });
+      const result = await new FolderDateRuleService(prisma).setSimple('owner', 'root', {
+        dateValue: new Date('2005-06-07T00:00:00.000Z'),
+        precision: 'DAY',
+        includeSubfolders,
+        overrideCameraDates,
+      });
+      return {
+        affected: result.affectedCount,
+        written: updates.flatMap((update) => update.where.id.in).sort(),
+      };
+    };
+    expect(await run(true, false)).toEqual({
+      affected: 2,
+      written: ['child-undated', 'direct-undated'],
+    });
+    expect(await run(true, true)).toEqual({
+      affected: 4,
+      written: ['child-camera', 'child-undated', 'direct-camera', 'direct-undated'],
+    });
+    expect(await run(false, false)).toEqual({ affected: 1, written: ['direct-undated'] });
+    expect(await run(false, true)).toEqual({
+      affected: 2,
+      written: ['direct-camera', 'direct-undated'],
+    });
+  });
+
+  it('does not count hidden photos in the preview or the affected count', async () => {
+    const hidden = {
+      id: 'hidden',
+      folderId: 'root',
+      effectiveDateValue: null,
+      effectiveDatePrecision: 'UNKNOWN',
+      effectiveDateSource: 'NONE',
+      detectedDate: null,
+      detectedPrecision: 'UNKNOWN',
+      detectedSource: 'NONE',
+      hiddenAt: new Date(),
+      override: null,
+    };
+    const prisma: any = {
+      indexedFolder: {
+        findFirst: vi.fn(async () => ({ id: 'root', userId: 'owner', sourceId: 'source' })),
+        findMany: vi.fn(async () => [{ id: 'root', parentId: null, dateRule: null }]),
+      },
+      photo: { findMany: vi.fn(async () => [hidden]), updateMany: vi.fn() },
+    };
+    const preview = await new FolderDateRuleService(prisma).previewSimple('owner', 'root', {
+      dateValue: new Date('2005-01-01T00:00:00.000Z'),
+      precision: 'YEAR',
+      includeSubfolders: true,
+      overrideCameraDates: false,
+    });
+    expect(preview.scopePhotoCount).toBe(0);
   });
 });

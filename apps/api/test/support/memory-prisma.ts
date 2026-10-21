@@ -81,7 +81,9 @@ export class MemoryPrisma {
   private flattenUnique(model: string, where: Row): Row {
     const flat: Row = {};
     for (const [key, value] of Object.entries(where)) {
-      const compound = uniqueKeys[model]?.find((fields) => fields.join('_') === key);
+      const compound = uniqueKeys[model]?.find(
+        (fields) => fields.length > 1 && fields.join('_') === key,
+      );
       if (compound && isObject(value)) Object.assign(flat, value);
       else flat[key] = value;
     }
@@ -302,6 +304,14 @@ export class MemoryPrisma {
         this.assertUnique(name, next, row);
         this.applyData(row, data);
         return { ...row };
+      },
+      createMany: async ({ data }: Row) => {
+        for (const entry of data as Row[]) {
+          const row = { id: this.nextId(name), createdAt: new Date(), ...entry };
+          this.assertUnique(name, row);
+          this.rows(name).push(row);
+        }
+        return { count: (data as Row[]).length };
       },
       updateMany: async ({ where, data }: Row) => {
         const rows = find(where);

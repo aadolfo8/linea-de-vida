@@ -20,6 +20,7 @@ import { TakeoutMatcher, TakeoutMetadata, TakeoutMetadataParser } from './takeou
 import { effectiveDate } from './manual-date.service';
 import { photoDimensions } from './photo-dimensions';
 import { contentKeyFor, isProvisionalContentKey, parseSizeBytes } from './photo-identity';
+import { inheritsToSubfolders } from './folder-rule-scope';
 import { isUniqueViolation, mergePhotos, refreshPhotos } from './photo-catalog';
 
 const jobOptions: JobsOptions = {
@@ -561,7 +562,8 @@ export class SyncService {
             include: { dateRule: true },
           });
           if (!ancestor) break;
-          if (ancestor.dateRule?.scope !== 'DIRECT_ONLY') folderRule = ancestor.dateRule;
+          if (ancestor.dateRule && inheritsToSubfolders(ancestor.dateRule.scope))
+            folderRule = ancestor.dateRule;
           ancestorId = ancestor.parentId;
         }
         // Collect metadata across the entire folder before matching any image page.

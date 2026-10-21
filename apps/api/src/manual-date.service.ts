@@ -1,8 +1,18 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { DatePrecision, DateSource, FolderDateRuleScope } from '@prisma/client';
 import { PrismaService } from './prisma.service';
+import { applicableRule, overridesDetectedDates } from './folder-rule-scope';
+import { chunk, parsePhotoIds } from './photo-ids';
 
 export const MANUAL_DATE_BULK_LIMIT = 50;
+/** Photos handled per database transaction when a large batch is chunked server-side. */
+const BATCH_CHUNK = 250;
+
+export type SetDateResult = { id: string; status: 'UPDATED' | 'NOT_FOUND' | 'FAILED' };
+export type ClearDateResult = {
+  id: string;
+  status: 'CLEARED' | 'NO_MANUAL_DATE' | 'NOT_FOUND' | 'FAILED';
+};
 
 export type ManualDateInput = {
   year: unknown;
@@ -88,7 +98,7 @@ export function effectiveDate(evidence: DateEvidence) {
     };
   if (
     evidence.folderRule &&
-    (evidence.folderRule.scope === 'ALL_DESCENDANTS' ||
+    (overridesDetectedDates(evidence.folderRule.scope) ||
       !evidence.detectedDate ||
       evidence.detectedSource === 'FOLDER')
   )
@@ -220,20 +230,10 @@ export class ManualDateService {
             include: { dateRule: true },
           })
         : [];
-      const byId = new Map(folders.map((folder) => [folder.id, folder]));
-      let currentId = photo.folderId;
-      let direct = true;
-      let folderRule = null;
-      while (currentId) {
-        const folder = byId.get(currentId);
-        if (!folder) break;
-        if (folder.dateRule && (direct || folder.dateRule.scope !== 'DIRECT_ONLY')) {
-          folderRule = folder.dateRule;
-          break;
-        }
-        direct = false;
-        currentId = folder.parentId;
-      }
+      const folderRule = applicableRule(
+        new Map(folders.map((folder) => [folder.id, folder])),
+        photo.folderId,
+      );
       const restored = effectiveDate({ ...photo, folderRule, override: null });
       await tx.manualDateOverride.deleteMany({ where: { photoId: photo.id } });
       return tx.photo.update({
@@ -246,5 +246,142 @@ export class ManualDateService {
         include: { override: true },
       });
     });
+  }
+
+  /**
+   * Sets one manual date on up to PHOTO_BATCH_LIMIT photos. The server chunks the work into small
+   * transactions, so a failure only affects its chunk and every photo gets its own result.
+   */
+  async setMany(userId: string, rawIds: unknown, input: ManualDateInput) {
+    const manual = validateManualDate(input);
+    const ids = parsePhotoIds(rawIds);
+    const results: SetDateResult[] = [];
+    for (const batch of chunk(ids, BATCH_CHUNK)) {
+      try {
+        const owned = await this.prisma.$transaction(async (tx) => {
+          const found = await tx.photo.findMany({
+            where: { id: { in: batch }, userId },
+            select: { id: true },
+          });
+          const ownedIds = found.map((photo) => photo.id);
+          if (ownedIds.length) {
+            await tx.manualDateOverride.deleteMany({ where: { photoId: { in: ownedIds } } });
+            await tx.manualDateOverride.createMany({
+              data: ownedIds.map((photoId) => ({ photoId, ...manual })),
+            });
+            await tx.photo.updateMany({
+              where: { id: { in: ownedIds }, userId },
+              data: {
+                effectiveDateValue: manual.dateValue,
+                effectiveDatePrecision: manual.precision,
+                effectiveDateSource: 'MANUAL',
+              },
+            });
+          }
+          return new Set(ownedIds);
+        });
+        for (const id of batch)
+          results.push({ id, status: owned.has(id) ? 'UPDATED' : 'NOT_FOUND' });
+      } catch {
+        for (const id of batch) results.push({ id, status: 'FAILED' });
+      }
+    }
+    return {
+      results,
+      updatedCount: results.filter((result) => result.status === 'UPDATED').length,
+    };
+  }
+
+  /** Removes manual dates in bulk, restoring each photo to its detection or folder date. */
+  async clearMany(userId: string, rawIds: unknown) {
+    const ids = parsePhotoIds(rawIds);
+    const results: ClearDateResult[] = [];
+    const foldersBySource = new Map<
+      string,
+      Map<
+        string,
+        {
+          parentId: string | null;
+          dateRule: {
+            dateValue: Date;
+            precision: DatePrecision;
+            scope: FolderDateRuleScope;
+          } | null;
+        }
+      >
+    >();
+    for (const batch of chunk(ids, BATCH_CHUNK)) {
+      try {
+        const outcome = await this.prisma.$transaction(async (tx) => {
+          const photos = await tx.photo.findMany({
+            where: { id: { in: batch }, userId },
+            include: { override: true },
+          });
+          const withOverride = photos.filter((photo) => photo.override);
+          for (const sourceId of new Set(withOverride.map((photo) => photo.sourceId)))
+            if (!foldersBySource.has(sourceId))
+              foldersBySource.set(
+                sourceId,
+                new Map(
+                  (
+                    await tx.indexedFolder.findMany({
+                      where: { userId, sourceId },
+                      include: { dateRule: true },
+                    })
+                  ).map((folder) => [folder.id, folder]),
+                ),
+              );
+          // Photos that end up with the same date are updated together.
+          const groups = new Map<
+            string,
+            { ids: string[]; date: ReturnType<typeof effectiveDate> }
+          >();
+          for (const photo of withOverride) {
+            const date = effectiveDate({
+              ...photo,
+              folderRule: applicableRule(foldersBySource.get(photo.sourceId)!, photo.folderId),
+              override: null,
+            });
+            const key = `${date.value?.toISOString() ?? ''}|${date.precision}|${date.origin}`;
+            const group = groups.get(key) ?? { ids: [], date };
+            group.ids.push(photo.id);
+            groups.set(key, group);
+          }
+          if (withOverride.length) {
+            await tx.manualDateOverride.deleteMany({
+              where: { photoId: { in: withOverride.map((photo) => photo.id) } },
+            });
+            for (const { ids: groupIds, date } of groups.values())
+              await tx.photo.updateMany({
+                where: { id: { in: groupIds }, userId },
+                data: {
+                  effectiveDateValue: date.value,
+                  effectiveDatePrecision: date.precision,
+                  effectiveDateSource: date.origin,
+                },
+              });
+          }
+          return {
+            owned: new Set(photos.map((photo) => photo.id)),
+            cleared: new Set(withOverride.map((photo) => photo.id)),
+          };
+        });
+        for (const id of batch)
+          results.push({
+            id,
+            status: outcome.cleared.has(id)
+              ? 'CLEARED'
+              : outcome.owned.has(id)
+                ? 'NO_MANUAL_DATE'
+                : 'NOT_FOUND',
+          });
+      } catch {
+        for (const id of batch) results.push({ id, status: 'FAILED' });
+      }
+    }
+    return {
+      results,
+      clearedCount: results.filter((result) => result.status === 'CLEARED').length,
+    };
   }
 }
