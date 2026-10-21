@@ -13,12 +13,12 @@ export const isUniqueViolation = (error: unknown) =>
 /**
  * Folds `loser` into `survivor` when both turn out to be the same content: every Drive copy moves
  * to the survivor, the survivor's manual date wins, and the loser's is adopted only when the
- * survivor has none.
+ * survivor has none. A hidden photo stays hidden.
  */
 export async function mergePhotos(
   db: CatalogDb,
-  survivor: { id: string; override?: unknown | null },
-  loser: { id: string; override?: unknown | null },
+  survivor: { id: string; override?: unknown | null; hiddenAt?: Date | null },
+  loser: { id: string; override?: unknown | null; hiddenAt?: Date | null },
 ) {
   await db.photoFile.updateMany({ where: { photoId: loser.id }, data: { photoId: survivor.id } });
   if (loser.override && !survivor.override)
@@ -27,6 +27,8 @@ export async function mergePhotos(
       data: { photoId: survivor.id },
     });
   await db.photo.delete({ where: { id: loser.id } });
+  if (loser.hiddenAt && !survivor.hiddenAt)
+    await db.photo.update({ where: { id: survivor.id }, data: { hiddenAt: loser.hiddenAt } });
 }
 
 const chunks = <T>(items: T[], size: number) =>

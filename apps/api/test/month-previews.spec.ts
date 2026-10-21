@@ -12,6 +12,7 @@ import { SyncService } from '../src/sync.service';
 import { ManualDateService } from '../src/manual-date.service';
 import { MediaProxyService } from '../src/media-proxy.service';
 import { FolderDateRuleService } from '../src/folder-date-rule.service';
+import { PhotoVisibilityService } from '../src/photo-visibility.service';
 
 type Row = {
   id: string;
@@ -87,6 +88,7 @@ describe('GET /v1/timeline/years/:year/month-previews', () => {
           { provide: SyncService, useValue: {} },
           { provide: ManualDateService, useValue: {} },
           { provide: FolderDateRuleService, useValue: {} },
+          { provide: PhotoVisibilityService, useValue: {} },
           MediaProxyService,
           { provide: DriveAdapter, useValue: new MemoryDriveProvider({ root: [] }) },
           { provide: GoogleOAuthClient, useValue: {} },

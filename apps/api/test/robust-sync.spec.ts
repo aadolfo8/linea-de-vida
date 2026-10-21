@@ -82,6 +82,7 @@ function fixture(pages: Record<string, { items: DriveItem[]; nextCursor?: string
         userId: 'owner',
         driveFileId,
         restoredAt: null,
+        createdAt: new Date('2026-01-01T00:00:00.000Z'),
       }),
   };
   const restoredExclusions = {
@@ -759,13 +760,18 @@ describe('robust sync', () => {
     });
   });
 
-  it('keeps a user exclusion when the same Drive folder is re-added as a new source', async () => {
+  it('keeps a user removal hidden when the same Drive folder is re-added as a new source', async () => {
     const f = fixture({ 'root:': { items: [image('removed')] } });
     f.exclusions.add('removed');
     f.run.source.id = 're-added-source';
     await f.service.execute('run');
-    expect(f.photos.has('removed')).toBe(false);
+    // The legacy tombstone becomes a soft-hidden photo (still out of the timeline) and is spent.
+    expect(f.photos.get('removed')).toMatchObject({
+      hiddenAt: new Date('2026-01-01T00:00:00.000Z'),
+      status: 'ACTIVE',
+    });
     expect(f.run.status).toBe('SUCCEEDED');
+    expect(f.restoredExclusions.has('removed')).toBe(false);
   });
 
   it('restores an excluded photo into a re-added source with its saved manual date', async () => {

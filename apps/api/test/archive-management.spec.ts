@@ -2,6 +2,7 @@ import { ConflictException, NotFoundException } from '@nestjs/common';
 import { describe, expect, it, vi } from 'vitest';
 import { AppController } from '../src/app.controller';
 import { FolderDateRuleService } from '../src/folder-date-rule.service';
+import { PhotoVisibilityService } from '../src/photo-visibility.service';
 
 function controllerFixture() {
   const photos = [
@@ -16,6 +17,7 @@ function controllerFixture() {
       effectiveDateValue: null,
       effectiveDatePrecision: 'UNKNOWN',
       effectiveDateSource: 'NONE',
+      hiddenAt: null as Date | null,
       source: { name: 'Family archive' },
       folder: { path: ['Root', 'Child'] },
       override: {
@@ -35,6 +37,7 @@ function controllerFixture() {
       effectiveDateValue: new Date('2024-01-01'),
       effectiveDatePrecision: 'YEAR',
       effectiveDateSource: 'EXIF',
+      hiddenAt: null as Date | null,
       source: { name: 'Family archive' },
       folder: { path: ['Root', 'Child', 'Grandchild'] },
       override: null,
@@ -82,25 +85,36 @@ function controllerFixture() {
           photos.find((photo) => photo.id === where.id && photo.userId === where.userId) ?? null,
       ),
       findMany: vi.fn(async ({ where, include }: any) =>
-        include?.folder
-          ? photos.filter(
-              (photo) =>
-                photo.userId === where.userId &&
-                photo.sourceId === where.sourceId &&
-                (!where.folderId || photo.folderId === where.folderId) &&
-                (!where.fileName ||
-                  photo.fileName.toLowerCase().includes(where.fileName.contains)) &&
-                (!where.effectiveDateValue || photo.effectiveDateValue === null),
-            )
-          : where.folderId?.in
-            ? photos.filter((photo) => where.folderId.in.includes(photo.folderId))
-            : where.folderId
-              ? photos.filter(
-                  (photo) => photo.userId === where.userId && photo.folderId === where.folderId,
-                )
-              : [],
+        where.id?.in
+          ? photos
+              .filter((photo) => where.id.in.includes(photo.id) && photo.userId === where.userId)
+              .map(({ id, hiddenAt }) => ({ id, hiddenAt }))
+          : include?.folder
+            ? photos.filter(
+                (photo) =>
+                  photo.userId === where.userId &&
+                  photo.sourceId === where.sourceId &&
+                  (!where.folderId || photo.folderId === where.folderId) &&
+                  (!where.fileName ||
+                    photo.fileName.toLowerCase().includes(where.fileName.contains)) &&
+                  (!where.effectiveDateValue || photo.effectiveDateValue === null),
+              )
+            : where.folderId?.in
+              ? photos.filter((photo) => where.folderId.in.includes(photo.folderId))
+              : where.folderId
+                ? photos.filter(
+                    (photo) => photo.userId === where.userId && photo.folderId === where.folderId,
+                  )
+                : [],
       ),
       update: vi.fn(async ({ where, data }: any) => updates.push({ where, data })),
+      updateMany: vi.fn(async ({ where, data }: any) => {
+        const matching = photos.filter(
+          (photo) => where.id.in.includes(photo.id) && photo.userId === where.userId,
+        );
+        for (const photo of matching) Object.assign(photo, data);
+        return { count: matching.length };
+      }),
       delete: vi.fn(async ({ where }: any) => {
         const index = photos.findIndex((photo) => photo.id === where.id);
         if (index >= 0) photos.splice(index, 1);
@@ -142,6 +156,7 @@ function controllerFixture() {
     {} as any,
     {} as any,
     new FolderDateRuleService(prisma),
+    new PhotoVisibilityService(prisma),
   );
   return { controller, prisma, photos, exclusions, updates };
 }
@@ -195,13 +210,15 @@ describe('indexed archive management', () => {
     expect(fixture.prisma.photoSource.delete).not.toHaveBeenCalled();
   });
 
-  it('removes a batch and makes retries safe without disclosing foreign IDs', async () => {
+  it('hides a batch through the legacy route, safely repeatable and without disclosing foreign IDs', async () => {
     const f = controllerFixture();
     expect(await f.controller.removePhotos('owner', { photoIds: ['photo-1', 'photo-1'] })).toEqual({
       results: [{ id: 'photo-1', status: 'REMOVED' }],
     });
+    expect(f.photos.find((photo) => photo.id === 'photo-1')!.hiddenAt).toBeInstanceOf(Date);
+    // The row stays and a repeat is a no-op.
     expect(await f.controller.removePhotos('owner', { photoIds: ['photo-1'] })).toEqual({
-      results: [{ id: 'photo-1', status: 'ABSENT' }],
+      results: [{ id: 'photo-1', status: 'REMOVED' }],
     });
     expect(await f.controller.removePhotos('other', { photoIds: ['photo-2', 'unknown'] })).toEqual({
       results: [
@@ -209,24 +226,24 @@ describe('indexed archive management', () => {
         { id: 'unknown', status: 'ABSENT' },
       ],
     });
-    expect(f.photos.some((photo) => photo.id === 'photo-2')).toBe(true);
-    expect(f.exclusions).toHaveLength(1);
+    expect(f.photos.find((photo) => photo.id === 'photo-2')!.hiddenAt).toBeNull();
+    expect(f.exclusions).toHaveLength(0);
   });
 
-  it('reports per-item failure and retries only the unfinished item', async () => {
+  it('reports a failed batch per item and succeeds on retry', async () => {
     const f = controllerFixture();
-    f.prisma.photoExclusion.upsert.mockRejectedValueOnce(new Error('temporary database failure'));
+    f.prisma.photo.updateMany.mockRejectedValueOnce(new Error('temporary database failure'));
     expect(await f.controller.removePhotos('owner', { photoIds: ['photo-1', 'photo-2'] })).toEqual({
       results: [
         { id: 'photo-1', status: 'FAILED' },
-        { id: 'photo-2', status: 'REMOVED' },
+        { id: 'photo-2', status: 'FAILED' },
       ],
     });
-    expect(f.photos.map((photo) => photo.id)).toEqual(['photo-1']);
+    expect(f.photos.map((photo) => photo.hiddenAt)).toEqual([null, null]);
     expect(await f.controller.removePhotos('owner', { photoIds: ['photo-1', 'photo-2'] })).toEqual({
       results: [
         { id: 'photo-1', status: 'REMOVED' },
-        { id: 'photo-2', status: 'ABSENT' },
+        { id: 'photo-2', status: 'REMOVED' },
       ],
     });
   });
@@ -238,7 +255,7 @@ describe('indexed archive management', () => {
       await expect(f.controller.removePhotos('owner', { photoIds })).rejects.toMatchObject({
         status: 400,
       });
-      expect(f.prisma.photo.delete).not.toHaveBeenCalled();
+      expect(f.prisma.photo.updateMany).not.toHaveBeenCalled();
     },
   );
 
@@ -275,23 +292,14 @@ describe('indexed archive management', () => {
     );
   });
 
-  it('creates an owned tombstone, removes only local metadata, and hides cross-user deletion', async () => {
+  it('hides an owned photo without deleting it and hides cross-user deletion', async () => {
     const fixture = controllerFixture();
     await fixture.controller.deletePhoto('owner', 'photo-1');
-    expect(fixture.exclusions[0].create).toEqual({
-      userId: 'owner',
-      driveFileId: 'drive-1',
-      sourceId: 'source',
-      sourceName: 'Family archive',
-      folderPath: ['Root', 'Child'],
-      fileName: 'Summer.jpg',
-      mimeType: 'image/jpeg',
-      manualDateValue: new Date('2020-01-01'),
-      manualDatePrecision: 'YEAR',
-      manualDateReason: 'Family note',
-      restoredAt: null,
-    });
-    expect(fixture.photos.some((photo) => photo.id === 'photo-1')).toBe(false);
+    const photo = fixture.photos.find((candidate) => candidate.id === 'photo-1')!;
+    expect(photo.hiddenAt).toBeInstanceOf(Date);
+    expect(photo.override).not.toBeNull();
+    expect(fixture.prisma.photo.delete).not.toHaveBeenCalled();
+    expect(fixture.exclusions).toHaveLength(0);
     await expect(fixture.controller.deletePhoto('other', 'photo-2')).rejects.toBeInstanceOf(
       NotFoundException,
     );
@@ -337,7 +345,18 @@ describe('indexed archive management', () => {
 
   it('lists only the current user’s exclusions and restores by owned tombstone ID', async () => {
     const f = controllerFixture();
-    await f.controller.deletePhoto('owner', 'photo-1');
+    f.exclusions.push({
+      create: {
+        userId: 'owner',
+        driveFileId: 'drive-1',
+        sourceId: 'source',
+        sourceName: 'Family archive',
+        folderPath: ['Root', 'Child'],
+        fileName: 'Summer.jpg',
+        mimeType: 'image/jpeg',
+        restoredAt: null,
+      },
+    });
     const page = await f.controller.photoExclusions('owner', undefined, '1');
     expect(page.items).toMatchObject([
       {
@@ -377,7 +396,7 @@ describe('indexed archive management', () => {
     expect(page.items).toHaveLength(1);
     expect(fixture.prisma.photo.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { userId: 'owner', folderId: 'child', status: 'ACTIVE' },
+        where: { userId: 'owner', folderId: 'child', status: 'ACTIVE', hiddenAt: null },
         take: 2,
       }),
     );
@@ -423,6 +442,7 @@ describe('temporal timeline contracts', () => {
       prisma,
       controller: new AppController(
         prisma,
+        {} as any,
         {} as any,
         {} as any,
         {} as any,
