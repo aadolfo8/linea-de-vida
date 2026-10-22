@@ -1,6 +1,8 @@
 import { Module } from '@nestjs/common';
 import { AppController } from './app.controller';
 import { OrderingController } from './ordering.controller';
+import { CoversController } from './covers.controller';
+import { CoversService } from './covers.service';
 import { PrismaService } from './prisma.service';
 import { DriveAdapter, GoogleDriveProvider, MemoryDriveProvider } from './drive';
 import { PhotoDateResolver } from './date-resolver';
@@ -14,7 +16,7 @@ import { FolderDateRuleService } from './folder-date-rule.service';
 import { OrderingService } from './ordering.service';
 import { PhotoVisibilityService } from './photo-visibility.service';
 @Module({
-  controllers: [AppController, OrderingController],
+  controllers: [AppController, OrderingController, CoversController],
   providers: [
     PrismaService,
     PhotoDateResolver,
@@ -24,6 +26,7 @@ import { PhotoVisibilityService } from './photo-visibility.service';
     FolderDateRuleService,
     PhotoVisibilityService,
     OrderingService,
+    CoversService,
     MediaProxyService,
     RetentionService,
     SyncService,
