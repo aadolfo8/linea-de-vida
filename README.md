@@ -1,169 +1,117 @@
-# Línea de vida — Fase 7
+<div align="center">
 
-Una vertical slice local para explorar fotografías seleccionadas de Google Drive por fecha, sin clasificación de contenido. El repositorio contiene una web editorial, una API NestJS, PostgreSQL, Redis y un worker BullMQ independiente.
+# ✦ Línea de vida
 
-## Inicio rápido
+**Un archivo fotográfico privado que se recorre como un cielo nocturno.**
 
-1. Copia `.env.example` a `.env` y completa `SESSION_SECRET` y `TOKEN_ENCRYPTION_KEY` con valores locales seguros.
-2. PostgreSQL se publica en el puerto host `5433` por defecto (y mantiene `5432` dentro de Docker). Si necesitas otro puerto host, ajusta `POSTGRES_HOST_PORT` y el puerto de `DATABASE_URL` al mismo valor en `.env`; después ejecuta `docker compose up -d` para PostgreSQL y Redis (solo dependencias).
-3. Ejecuta `pnpm install`, `pnpm --filter @linea-de-vida/api prisma:deploy`, `pnpm dev` y, en otra terminal, `pnpm dev:worker`. Los scripts locales cargan exclusivamente el archivo `.env` de la raíz y reemplazan las variables heredadas con el mismo nombre; no exportes `DATABASE_URL` ni otras variables locales manualmente. Así API, worker y Prisma usan la misma base local.
-4. Abre `http://localhost:3000`. Sin credenciales Google, usa **Entrar en desarrollo**: crea una sesión local; nunca finge autorización de Drive.
+Tus fotos de Google Drive, ordenadas por fecha y convertidas en constelaciones: un año, un mes, un día.
 
-## Arquitectura y contrato
+![Next.js](https://img.shields.io/badge/Next.js-15-000000?logo=nextdotjs&logoColor=white)
+![React](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black)
+![NestJS](https://img.shields.io/badge/NestJS-11-E0234E?logo=nestjs&logoColor=white)
+![PostgreSQL](https://img.shields.io/badge/PostgreSQL-Prisma-4169E1?logo=postgresql&logoColor=white)
+![Redis](https://img.shields.io/badge/Redis-BullMQ-DC382D?logo=redis&logoColor=white)
+![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript&logoColor=white)
+![pnpm](https://img.shields.io/badge/pnpm-9-F69220?logo=pnpm&logoColor=white)
 
-| Proceso            | Responsabilidad                                                                        |
-| ------------------ | -------------------------------------------------------------------------------------- |
-| `apps/web`         | Next.js App Router; onboarding, fuente, organización y la cronología «Cielo nocturno». |
-| `apps/api`         | Sesión, autorización por `userId`, recursos REST, OAuth y proxy de medios.             |
-| `apps/api` worker  | Consume `photo-sync`; explora exclusivamente la carpeta fuente y descendientes.        |
-| PostgreSQL / Redis | Estado persistente / cola BullMQ.                                                      |
+</div>
 
-La API nunca entrega tokens Google ni URLs de Drive al navegador. Las rutas de thumbnail y contenido comprueban primero que la foto sea del usuario de sesión.
+---
 
-## Google Cloud y OAuth
+## Qué es
 
-1. En Google Cloud Console, crea un OAuth client de tipo **Web application** y activa **Google Drive API**.
-2. Registra exactamente `GOOGLE_LOGIN_REDIRECT_URI` (por defecto `http://localhost:3001/v1/auth/google/callback`). Una discrepancia causa `redirect_uri_mismatch`. `GOOGLE_DRIVE_REDIRECT_URI` puede mantenerse solo para una futura conexión alternativa; no es parte del onboarding predeterminado.
-3. Define `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_LOGIN_REDIRECT_URI` y una clave de cifrado de 32 bytes base64 en `.env`. Registra la URI de login exacta en Google Cloud.
-4. **Continuar con Google** inicia un único consentimiento combinado para `openid email profile` y exactamente `https://www.googleapis.com/auth/drive.readonly`, con PKCE, `state` persistido de un solo uso, `access_type=offline`, `include_granted_scopes=true` y selección explícita de cuenta. El callback valida identidad y scope, crea/actualiza `User` y su `OAuthConnection` para el mismo subject de Google, cifra el refresh token y crea la sesión. El intercambio, refresh y cifrado ocurren exclusivamente en API; ningún token cruza al cliente.
-5. Mientras la pantalla de consentimiento OAuth esté en **Testing**, añade la cuenta real que probará la aplicación en **Google Auth platform → Audience → Test users**. Esto habilita pruebas privadas; no sustituye la verificación pública de Google requerida antes de publicar para una audiencia amplia o según los scopes aplicables.
+Línea de vida es un archivo de recuerdos pensado para que una familia los revise junta. Conecta **solo las carpetas de Google Drive que tú eliges**, en **modo de solo lectura**, y las ordena en una cronología que equilibra dos cosas: la contemplación tranquila y encontrar un momento concreto en segundos.
 
-Antes de producción, confirma los requisitos actuales de audiencia, pantalla de consentimiento y verificación OAuth de Google. Este repositorio no afirma que una aplicación con este scope ya esté verificada. Sigue pendiente una prueba real y registrada de login, consentimiento `drive.readonly`, refresh, streaming y revocación contra el cliente OAuth de producción.
+Sin IA, sin reconocimiento facial, sin OCR y sin funciones sociales. Solo tus fotos y sus fechas, contadas con honestidad.
 
-## Producción: configuración y despliegue
+## ✨ Lo que hace
 
-La API falla al arrancar en producción si faltan secretos, si son débiles o de ejemplo, si los orígenes/redirect URI no usan HTTPS o si falta la protección de métricas. No expongas PostgreSQL ni Redis a Internet: son dependencias privadas de API/worker.
+|                            |                                                                                                                                                                                                                          |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 🌌 **Cielo nocturno**      | La cronología es un cielo oscuro en tres profundidades — **años → meses → fotos** — donde cada periodo es una constelación. Entrar es hacer zoom; subir te devuelve al grupo de origen. Recorrido vertical u horizontal. |
+| 📅 **Fechas fieles**       | Cada fecha conserva su precisión real (`YEAR`, `MONTH`, `DAY`, `UNKNOWN`). Si solo se sabe el año, la foto vive en «Sin mes», nunca en un falso 1 de enero.                                                              |
+| 🔎 **Detección por capas** | EXIF → metadatos de Drive → `photoTakenTime` de Takeout → nombre del archivo (WhatsApp, Pixel, capturas…) → carpeta. Y siempre puedes corregirla a mano.                                                                 |
+| 🗂️ **Ordenar**             | Un espacio para repasar fotos sin fecha, asignarlas por carpeta o en lote, y ocultar las que no quieres ver (de forma reversible).                                                                                       |
+| 📦 **Google Takeout**      | Importa exportaciones de Google Fotos leyendo sus JSON adyacentes. Re-importar no duplica: la identidad de una foto es su contenido.                                                                                     |
+| 🔒 **Privacidad primero**  | Los tokens y las URLs de Drive nunca llegan al navegador. Las imágenes pasan por un proxy autenticado que comprueba que cada foto es tuya.                                                                               |
 
-1. Define `NODE_ENV=production`, `DATABASE_URL`, `REDIS_URL`, `API_ORIGIN`, `ALLOWED_WEB_ORIGINS`, `SESSION_SECRET` (32+ caracteres aleatorios), `TOKEN_ENCRYPTION_KEY` (base64 de exactamente 32 bytes), los cuatro valores OAuth Google y `METRICS_TOKEN` (32+ caracteres aleatorios).
-2. Registra en Google exactamente las URI HTTPS de callback y el origen web permitido. Conserva los secretos en un gestor de secretos; nunca en la imagen, repositorio o logs.
-3. Ejecuta `pnpm install --frozen-lockfile`, `pnpm --filter @linea-de-vida/api prisma:deploy`, inicia API y worker como procesos separados y publica ambos orígenes detrás de un proxy TLS que preserve `X-Forwarded-Proto`.
-4. Comprueba `GET /v1/health`, `GET /v1/readiness` y `GET /v1/metrics` (este último con `Authorization: Bearer $METRICS_TOKEN` desde red interna). El endpoint de métricas no responde sin token.
+## 🏗️ Arquitectura
 
-`ALLOWED_WEB_ORIGINS` es una lista separada por comas. CORS acepta exclusivamente esos orígenes con credenciales; las mutaciones autenticadas vuelven a comprobar `Origin`. Los callbacks OAuth son GET de redirección y se protegen con cookie `httpOnly` temporal, `state` criptográfico de un solo uso y PKCE; no dependen de `Origin`, que los navegadores no envían de forma fiable durante la redirección.
+```mermaid
+flowchart LR
+    U([Navegador]) --> W[apps/web<br/>Next.js]
+    W -->|REST + sesión| A[apps/api<br/>NestJS]
+    A --> P[(PostgreSQL)]
+    A -->|encola photo-sync| R[(Redis / BullMQ)]
+    R --> K[Worker]
+    K --> P
+    A -->|proxy de medios| G[[Google Drive<br/>solo lectura]]
+    K -->|escaneo| G
+```
 
-El límite de solicitudes usa Redis como contador compartido y separa OAuth de autorización, callbacks OAuth, sesión, timeline, medios, mutaciones y otras respuestas JSON. La identidad es la sesión firmada o, para tráfico anónimo, la IP. Si Redis no está disponible, la API mantiene un límite local acotado por proceso y vuelve a usar Redis automáticamente cuando se recupera; el fallback preserva disponibilidad, pero no coordina contadores entre réplicas durante la incidencia.
+| Pieza              | Responsabilidad                                                                                     |
+| ------------------ | --------------------------------------------------------------------------------------------------- |
+| `apps/web`         | Next.js App Router: bienvenida, cronología, Ordenar y Ajustes.                                      |
+| `apps/api`         | Sesión, OAuth, autorización por usuario, API REST y proxy de medios.                                |
+| Worker             | Consume la cola `photo-sync` y recorre solo la carpeta fuente y sus descendientes, con checkpoints. |
+| PostgreSQL / Redis | Estado persistente / cola de trabajos y límite de peticiones.                                       |
 
-## Retención, logs y backup
+## 🚀 Puesta en marcha
 
-| Dato                                           | Retención                                          | Limpieza                           |
-| ---------------------------------------------- | -------------------------------------------------- | ---------------------------------- |
-| `SyncIssue`                                    | 30 días por defecto                                | `SYNC_ISSUE_RETENTION_DAYS`        |
-| `SyncRun` terminal e incidencias asociadas     | 90 días por defecto                                | `SYNC_RUN_RETENTION_DAYS`          |
-| Fotos, overrides, conexión y archivos de Drive | No los borra esta tarea                            | Fuera del comando de retención     |
-| Logs estructurados de proceso                  | Política del proveedor, mínimo recomendado 30 días | Configurar en el agregador de logs |
-
-La limpieza es manual y requiere confirmación explícita: `RETENTION_PURGE_CONFIRMATION=DELETE_SYNC_METADATA pnpm --filter @linea-de-vida/api retention:purge`. Solo elimina metadatos terminales de sync en PostgreSQL; nunca llama a Drive ni borra fotografías. Agenda el mismo comando como job controlado únicamente después de probar una restauración.
-
-Para backup PostgreSQL, ejecuta desde un host autorizado `pg_dump --format=custom --no-owner "$DATABASE_URL" > linea-de-vida-YYYYMMDD.dump`, cifra el archivo y guárdalo fuera del servidor. Para restaurar en una base vacía/aislada: `pg_restore --clean --if-exists --no-owner --dbname="$DATABASE_URL" linea-de-vida-YYYYMMDD.dump`, luego ejecuta `prisma:deploy` y valida `/v1/readiness`. Prueba restauraciones periódicamente; no uses una restauración de prueba contra producción.
-
-## REST de la slice
-
-| Ruta                                                                                                     | Descripción                                                                                                                                                                                                                                         |
-| -------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `GET /v1/health`                                                                                         | Health check.                                                                                                                                                                                                                                       |
-| `GET /v1/me`                                                                                             | Sesión y configuración Drive, sin secretos.                                                                                                                                                                                                         |
-| `POST /v1/auth/google/authorize`                                                                         | Inicia login y consentimiento Drive combinado, sin tokens en respuesta.                                                                                                                                                                             |
-| `GET /v1/auth/google/callback`                                                                           | Valida identidad/Drive, crea sesión y conexión, sin token en respuesta.                                                                                                                                                                             |
-| `POST /v1/oauth/google/drive/authorize`                                                                  | Ruta alternativa futura; no se muestra en el onboarding.                                                                                                                                                                                            |
-| `GET /v1/oauth/google/drive/callback`                                                                    | Callback de la ruta alternativa futura, sin token en respuesta.                                                                                                                                                                                     |
-| `GET /v1/oauth-connections/:id/drive/folders/:folderId/children`                                         | Lista solo las hijas de una carpeta solicitada.                                                                                                                                                                                                     |
-| `GET/POST /v1/photo-sources`                                                                             | Lista/registra una carpeta concreta del usuario.                                                                                                                                                                                                    |
-| `POST /v1/photo-sources/:id/sync-runs`                                                                   | Devuelve `202` y encola el escaneo.                                                                                                                                                                                                                 |
-| `GET /v1/photo-sources/:id/sync-runs`                                                                    | Historial paginado de escaneos de la fuente propia.                                                                                                                                                                                                 |
-| `GET /v1/photo-sources/:id/indexed-folders`                                                              | Jerarquía indexada paginada de la fuente propia.                                                                                                                                                                                                    |
-| `GET /v1/photo-sources/:id/photos?q=&folderId=&classification=`                                          | Búsqueda paginada por nombre, carpeta y clasificación.                                                                                                                                                                                              |
-| `GET /v1/indexed-folders/:id/photos`                                                                     | Fotos activas paginadas de una carpeta propia.                                                                                                                                                                                                      |
-| `GET /v1/photo-exclusions?cursor=&limit=`                                                                | Obsoleta: exclusiones heredadas aún sin convertir más las fotos ocultas (el sync convierte las primeras).                                                                                                                                           |
-| `DELETE /v1/photo-exclusions/:id`                                                                        | Obsoleta: restaura una exclusión heredada (reaparece en el siguiente sync) o muestra de nuevo una foto oculta si el id es el de la foto.                                                                                                            |
-| `PUT /v1/indexed-folders/:id/date-override`                                                              | Heredada: año o año/mes con `scope` explícito (`DIRECT_OVERRIDE` también vale).                                                                                                                                                                     |
-| `PUT /v1/indexed-folders/:id/date`                                                                       | Fecha de carpeta simple: `{year, month?, day?, precision: YEAR\|MONTH\|DAY, includeSubfolders?=true, overrideCameraDates?=false}`; devuelve `{rule, affectedCount}`.                                                                                |
-| `POST /v1/indexed-folders/:id/date/preview`                                                              | Mismo cuerpo; cuántas fotos cambiarían y cuántas conservan fecha manual o de cámara.                                                                                                                                                                |
-| `DELETE /v1/indexed-folders/:id/date`                                                                    | Quita la fecha de la carpeta (alias de `DELETE …/date-override`); devuelve `{affectedCount}`.                                                                                                                                                       |
-| `GET /v1/sync-runs/:id`                                                                                  | Progreso del propietario.                                                                                                                                                                                                                           |
-| `GET /v1/sync-runs/:id/issues?cursor=&limit=`                                                            | Incidencias paginadas del propietario.                                                                                                                                                                                                              |
-| `GET /v1/timeline/years`                                                                                 | Años disponibles desde PostgreSQL.                                                                                                                                                                                                                  |
-| `GET /v1/timeline/years/:year/months`                                                                    | Meses y grupo `Fecha sin concretar`.                                                                                                                                                                                                                |
-| `GET /v1/timeline/years/:year/month-previews`                                                            | Hasta 6 vistas previas repartidas por mes y por `Fecha sin concretar`.                                                                                                                                                                              |
-| `GET /v1/timeline/years/:year/months/:month/days`                                                        | Días y grupo `Día sin concretar`.                                                                                                                                                                                                                   |
-| `GET /v1/timeline/undated`                                                                               | Conteo de fotos sin año.                                                                                                                                                                                                                            |
-| `GET /v1/photos?...&cursor=&limit=`                                                                      | Galería cursor-paginada por granularidad.                                                                                                                                                                                                           |
-| `PUT /v1/photos/:id/manual-date`                                                                         | Crea o reemplaza la fecha manual de una foto propia.                                                                                                                                                                                                |
-| `DELETE /v1/photos/:id/manual-date`                                                                      | Elimina el override y restaura la detección.                                                                                                                                                                                                        |
-| `PUT /v1/photos/manual-date-overrides`                                                                   | Heredada: fecha para un lote propio de hasta 50 fotos.                                                                                                                                                                                              |
-| `PUT /v1/photos/dates`                                                                                   | Fecha manual (`year`, `month?`, `day?`, `precision`, `reason?`) para hasta 2000 `photoIds`, troceada en transacciones; `{results:[{id,status}],updatedCount}` con `UPDATED`/`NOT_FOUND`/`FAILED`.                                                   |
-| `POST /v1/photos/dates/clear`                                                                            | Quita las fechas manuales de hasta 2000 `photoIds` y restaura detección o carpeta; `CLEARED`/`NO_MANUAL_DATE`/`NOT_FOUND`/`FAILED`.                                                                                                                 |
-| `GET /v1/ordering/piles?sourceId=&folderId=&includeSubfolders=`                                          | Conteos de los montones de Ordenar: `undated` (sin fecha), `yearOnly` (solo año), `dated` (mes o día), `hidden`, y `total` visible; filtrables por fuente y subárbol de carpeta.                                                                    |
-| `GET /v1/ordering/photos?pile=&sourceId=&folderId=&includeSubfolders=&order=newest\|name&cursor=&limit=` | Fotos de un montón, cursor-paginadas (60 por defecto, máx. 200): `id`, `fileName`, `thumbnailUrl`, `dimensions?`, `effectiveDate{value,precision,origin,originKind}` (`camera`/`google`/`filename`/`folder`/`manual`/`none`), `hidden`, `folderId`. |
-| `GET /v1/photo-sources/:id/folder-tree`                                                                  | Árbol anidado de carpetas con `photoCount`/`toDateCount` propios y de subárbol (`subtree…`), `path`, `dateRule` con sus dos opciones y `unfiled`.                                                                                                   |
-| `GET /v1/indexed-folders/:id`                                                                            | Una carpeta con `breadcrumb` (raíz primero), conteos y subcarpetas directas.                                                                                                                                                                        |
-| `GET /v1/ordering/filename-suggestions?sourceId=&folderId=&includeSubfolders=`                           | Fotos aún por fechar cuyo nombre trae fecha, agrupadas por tipo (`whatsapp`, `android-camera`, `pixel`, `screenshot`, `messenger`, `timestamp`) con conteo, rango y ejemplos.                                                                       |
-| `POST /v1/ordering/filename-suggestions/accept`                                                          | Aplica esas fechas como detectadas (`FILENAME`, no manuales); cuerpo opcional `{kinds?, photoIds?, sourceId?, folderId?, includeSubfolders?}`; devuelve `{appliedCount}`.                                                                           |
-| `POST /v1/photos/hide`                                                                                   | Oculta hasta 2000 fotos propias (`{photoIds}`); `{results:[{id,status}],changedCount}` con `HIDDEN`/`ALREADY_HIDDEN`/`NOT_FOUND`/`FAILED`.                                                                                                          |
-| `POST /v1/photos/unhide`                                                                                 | «Volver a mostrar» inmediato, mismo cuerpo; `VISIBLE`/`ALREADY_VISIBLE`/`NOT_FOUND`/`FAILED`.                                                                                                                                                       |
-| `DELETE /v1/photos/:id`                                                                                  | Obsoleta: oculta la foto (ya no la borra ni crea exclusión). Usar `POST /v1/photos/hide`.                                                                                                                                                           |
-| `POST /v1/photo-removals`                                                                                | Obsoleta: oculta hasta 50 fotos y devuelve `REMOVED`/`ABSENT`/`FAILED`. Usar `POST /v1/photos/hide`.                                                                                                                                                |
-| `GET /v1/photos/:id/thumbnail`                                                                           | Proxy privado de JPEG/PNG/WebP; HEIC/HEIF devuelve fallback `415`.                                                                                                                                                                                  |
-| `GET /v1/photos/:id/content`                                                                             | Proxy streaming privado del original soportado; HEIC/HEIF se descarga.                                                                                                                                                                              |
-
-Ordenar (API): el sync aplica por sí mismo las fechas del nombre de archivo, así que las sugerencias solo muestran fotos indexadas antes de existir esa fuente (o cuya fecha mejora con ella) y no exigen esperar a un nuevo escaneo. Una sugerencia nunca pisa una fecha manual ni una carpeta que reemplaza fechas de cámara. El montón `Ocultas` incluye cualquier fecha; los demás montones y todos los conteos excluyen fotos ocultas. Las fotos con copias en varias carpetas se cuentan en la carpeta de su copia principal.
-
-Todas las rutas salvo health/callback requieren sesión firmada en cookie `httpOnly`; las mutaciones validan `Origin`. Los proxies resuelven y autorizan foto, fuente y conexión activa para el `userId` antes de llamar a Drive; una foto `MISSING` devuelve `410`, una fuente desconectada `503`, y nunca se entrega una URL ni un token de Drive. Los cursores de timeline y galería son opacos y están ligados a su granularidad; no se renderizan colecciones completas. Los agregados se calculan en PostgreSQL sobre el índice efectivo, sin descargar fotografías. La desvinculación marca las fuentes desconectadas y revoca el token; si Google falla, conserva el secreto cifrado solo para reintentar la revocación y bloquea todo nuevo acceso.
-
-Las rutas de gestión verifican que fuente, carpeta y foto pertenezcan al usuario de sesión. La edición de carpeta acepta únicamente precisión `YEAR` o `MONTH`, exige `recursive: true` y actualiza la carpeta seleccionada y todos sus descendientes dentro de una transacción. Retirar una foto elimina solo el registro local y crea la exclusión correspondiente; nunca solicita una escritura o eliminación en Drive. Los filtros diarios calculan el límite superior con aritmética UTC de calendario, incluido el cambio de mes y año.
-
-En Organizar, la selección en vivo de Drive está separada del archivo indexado. El navegador muestra fuente, jerarquía, breadcrumb, conteos, estado, historial y fotos paginadas con su precisión; permite buscar por nombre en una fuente, acotar por carpeta o clasificación y seleccionar fotos para corregir su fecha o retirarlas solo del archivo local. La edición de año o año/mes exige una confirmación explícita que identifica la carpeta seleccionada y aplica el cambio según el alcance elegido.
-
-La retirada por lotes recibe `{ "photoIds": ["id"] }` y devuelve `results` con `REMOVED`, `ABSENT` o `FAILED` por ID único. `ABSENT` significa que la foto no está en el archivo del usuario: no distingue entre un ID inexistente y uno ajeno. Cada retirada conserva la transacción de exclusión y borrado local; el tombstone conserva nombre, carpeta y una posible corrección manual para identificar y recuperar la foto. Restaurarla la deja pendiente de la siguiente revisión manual; recupera esa corrección, no cambia Drive ni inicia la revisión por sí sola.
-
-Ajustes envía bloques de hasta 50, mantiene pendientes los fallos o resultados no confirmados y permite reintentar tras perder una respuesta. Después de retirar fotos se descarta el cursor anterior y se actualiza la primera página conservando las pendientes.
-
-## Cronología «Cielo nocturno»
-
-La cronología (`/timeline`) es un cielo oscuro que se recorre en tres profundidades, cada una con su ruta canónica: **años** (`/timeline`), **meses de un año** (`/timeline/[año]`) y **fotos de un mes** (`/timeline/[año]/[mes]` o `/sin-mes`). Cada periodo es una constelación con sus propias fotografías; entrar es un zoom hacia el grupo y subir (migas de pan, botón de volver, `Esc` o pinch-out) vuelve al grupo de origen. El recorrido es vertical u horizontal (se recuerda por navegador) y una barra lateral permite saltar entre años, meses o días. El visor permite zoom con rueda, pellizco o doble clic, arrastrar, pasar con flechas o gesto, y una tira de miniaturas. Las fechas conservan su precisión (`Sin mes`, `Día sin concretar`) y los medios solo pasan por el proxy autenticado de la API. Organizar y Ajustes mantienen su tema de papel cartográfico. Consulta [`DESIGN.md`](DESIGN.md) para tokens, componentes, movimiento y accesibilidad.
-
-## Medios y compatibilidad
-
-Las miniaturas se obtienen mediante `thumbnailLink` de Drive y se descargan autenticadas exclusivamente desde el backend; el navegador nunca recibe ese enlace temporal. Solo se aceptan destinos HTTPS bajo `googleusercontent.com`, sin credenciales en la URL ni puertos alternativos, y no se siguen redirecciones. El proxy valida el MIME de la miniatura recibida (que puede diferir del original). Si Drive no ofrece una miniatura o devuelve un contenido incompatible, la petición falla sin descargar el original como alternativa; el visor conserva su acceso independiente a `content`.
-
-Los originales se transmiten por streaming, con cancelación al abortar el cliente y timeout acotado por `MEDIA_PROXY_TIMEOUT_MS`; no se almacenan ni se cargan completos en memoria. Los thumbnails pueden usar únicamente una caché **en memoria**, privada, temporal y deshabilitada por defecto en desarrollo (`MEDIA_THUMBNAIL_CACHE_ENABLED=false`). Sus claves son hashes, su TTL y límites de entradas/tamaño se configuran en `.env`; no guarda originales, tokens, URLs de Drive ni metadatos privados. Si la caché falla o excede límites, se omite sin bloquear la respuesta.
-
-JPEG, PNG y WebP se muestran por el proxy de thumbnail. HEIC/HEIF continúan indexados y se pueden descargar desde `content`, pero no se convierten: la UI informa el límite de navegador. No hay CDN pública ni caché persistente.
-
-## Fechas, sync y modelo
-
-`Photo` conserva detección y `ManualDateOverride` por separado. La fecha efectiva indexada es una proyección transaccional de override o detección; `YEAR` y `MONTH` usan un ancla técnica únicamente con su precisión, por lo que la interfaz no muestra falsamente el 1 de enero. Al eliminar un override se restaura exactamente `detectedDate` y `detectedPrecision`. Las respuestas de galería incluyen la fecha detectada, la fecha efectiva, fuente y precisión; `MANUAL` es el origen efectivo, no una fuente de detección. `FolderDateParser` acepta solo segmentos deterministas ES/EN o numéricos. El orden de detección es EXIF > metadatos de imagen de Drive > `photoTakenTime` de Takeout > fecha en el nombre de archivo (`FILENAME`, precisión día, solo patrones completos y plausibles: WhatsApp, cámaras, Pixel, capturas, Signal) > carpeta. `createdTime` y `modifiedTime` de Drive no se usan como fecha histórica.
-
-Cada escaneo persiste la jerarquía real en `IndexedFolder` y relaciona cada foto con su carpeta cuando existe evidencia de ruta. Las fotos heredadas conservan `folderId` nulo hasta una resincronización correcta: la migración no inventa rutas. Ocultar una foto es un estado reversible (`Photo.hiddenAt`): la fila, sus fechas y sus copias se conservan, sale de la cronología, los conteos y la búsqueda, y solo aparece en el montón «Ocultas»; «Volver a mostrar» es inmediato y, como la foto sigue existiendo, una copia nueva del mismo contenido también queda oculta. Las exclusiones creadas antes de existir este estado (`PhotoExclusion`) se convierten en el siguiente sync en fotos ocultas con su fecha manual guardada; hasta entonces siguen restaurables con `DELETE /v1/photo-exclusions/:id`. Google Drive permanece de solo lectura.
-
-Una fuente se crea como `GENERIC` o `GOOGLE_TAKEOUT`. Solo la segunda lee JSON adyacentes de la carpeta exportada: usa `photoTakenTime` después de EXIF/metadata de Drive y antes de carpeta, conserva GPS validado y registra el resultado de match. JSON ausente no es un error y JSON inválido crea una incidencia sin detener el sync. Consulta [la guía Takeout](docs/google-takeout.md) antes de preparar la carpeta.
-
-Takeout recorre primero todas las páginas de metadatos de cada carpeta y después procesa sus fotos, por lo que foto y JSON pueden estar en páginas distintas. Los candidatos nunca se comparten entre carpetas. El checkpoint conserva los candidatos y el cursor de metadatos para reanudar sin volver a descargar páginas completadas; las advertencias previas mantienen el resultado parcial. Se limita cada JSON a 1 MiB y los candidatos de una carpeta a 10.000 entradas / 8 MiB serializados. Alcanzar ese límite detiene la ejecución como `PARTIAL`, sin emparejar con un conjunto incompleto ni marcar ausencias. Esta estrategia añade una segunda enumeración de cada carpeta Takeout; las fuentes genéricas conservan una sola pasada.
-
-El productor de sincronización crea una única cola y conexión Redis por instancia de servicio, de forma diferida al primer encolado, y las libera al cerrar Nest. Usa `maxRetriesPerRequest: 1` para no reintentar comandos HTTP indefinidamente; el consumidor conserva `null` para recuperarse de cortes de Redis. Ante `SIGINT` o `SIGTERM`, el worker deja de aceptar trabajos y espera a los activos y a sus escrituras finales de estado antes de cerrar Redis y el contexto de Nest. El cierre es idempotente y también libera recursos si falla el arranque. El plazo de terminación del supervisor debe permitir completar los trabajos; un cierre forzado no garantiza que la última página se haya guardado.
-
-El editor acepta año, mes opcional y día opcional. La API valida años 1900–2100, precisión consistente, mes/día y calendario real; no acepta una hora ni fabrica partes de la fecha. Las mutaciones individuales y masivas verifican cada `photoId` contra el `userId` de sesión dentro de una transacción. El lote es idempotente, atómico y está limitado a 50 fotos por petición.
-
-El worker no limita artificialmente una ejecución a 100 imágenes: guarda checkpoint de carpeta/cursor tras cada página, procesa lotes pequeños con concurrencia configurable de 5–10 y usa `jobId` por fuente para evitar syncs activas conflictivas. El estado expone fase `SCANNING`/`PROCESSING`, encontrados, procesados, indexados e incidencias; no publica un porcentaje cuando Drive no ofrece un total fiable. Un `SUCCEEDED` completo marca como `MISSING` solo los archivos y carpetas antes indexados que no se vieron; fallos, permisos denegados, avisos y ejecuciones parciales nunca reconcilian. La identidad de una foto es su contenido: Drive entrega `md5Checksum` y `size`, y la clave `contentKey` (`md5:<hash>:<tamaño>`, o `drive:<id>` si Drive no da checksum) es única por usuario. Cada archivo de Drive es una copia (`PhotoFile`, única por `(userId, driveFileId)`): re-extraer una exportación Takeout en la misma fuente, o encontrar la misma foto en otra fuente, añade una copia a la foto existente sin duplicarla, sin tocar su fecha manual ni sus metadatos Takeout, y la evidencia de fecha más fuerte entre copias prevalece. Una foto pasa a `MISSING` solo cuando todas sus copias, en todas las fuentes, dejaron de verse en un escaneo completo; borrar la exportación antigua tras importar la nueva conserva todas las fotos. Las miniaturas y el contenido se sirven desde una copia `ACTIVE`. El sync respeta exclusiones y preserva override y metadatos Takeout válidos. `DriveAdapter` desacopla Google de dominio y `MemoryDriveProvider` permite pruebas/desarrollo sin una cuenta Google real.
-
-La migración base está en `apps/api/prisma/migrations/20260821000000_init/migration.sql`. La migración `20260823000000_indexed_archive_management` añade carpetas indexadas, pertenencia opcional de fotos y exclusiones locales sin asignar rutas históricas ficticias.
-
-## Verificación
+**Requisitos:** Node.js, pnpm 9 y Docker.
 
 ```bash
-pnpm format:check
+# 1. Variables de entorno (rellena SESSION_SECRET y TOKEN_ENCRYPTION_KEY)
+cp .env.example .env
+
+# 2. PostgreSQL (puerto host 5433) y Redis
+docker compose up -d
+
+# 3. Dependencias y migraciones
+pnpm install
+pnpm --filter @linea-de-vida/api prisma:deploy
+
+# 4. Web + API, y el worker en otra terminal
+pnpm dev
+pnpm dev:worker
+```
+
+Abre **http://localhost:3000**. Sin credenciales de Google puedes usar **Entrar en desarrollo**, que crea una sesión local sin fingir acceso a Drive.
+
+> Para conectar Google Drive de verdad necesitas un cliente OAuth propio. Los pasos están en la [referencia técnica](docs/technical-reference.md#google-cloud-y-oauth).
+
+## 🧪 Calidad
+
+```bash
+pnpm format:check   # formato (oxfmt)
 pnpm lint
 pnpm typecheck
-pnpm test
+pnpm test           # Vitest
 pnpm build
 ```
 
-## Limitaciones intencionales / siguiente fase
+## 📚 Documentación
 
-- Takeout requiere una carpeta exportada y seleccionada explícitamente; no importa rutas locales ni interpreta álbumes/eventos.
-- Una sola fuente y cuenta Drive en la experiencia; no hay selector de múltiples cuentas.
-- El selector navega desde un ID de carpeta introducido explícitamente; nunca puede abrir ni enumerar `root`/todo Drive. La navegación y el callback reales requieren credenciales Google válidas, URI registradas y una cuenta que conceda el permiso.
-- No usa Drive Changes API: cada ejecución recorre la fuente explícita y descendientes. El checkpoint no es un delta de Drive y una cola de carpetas excesiva se detiene de forma segura sin marcar `MISSING`. La edición masiva de fechas sigue limitada a 50 fotos por petición y no incluye motivo por foto.
-- Sin conversión HEIC ni procesamiento/copia permanente de imágenes; HEIC/HEIF se conservan indexados y descargables, con fallback de navegador.
-- La verificación OAuth real sigue pendiente: las pruebas automatizadas no pueden demostrar la configuración de Google Cloud, consentimiento, refresh, streaming ni revocación remota. El rate limit usa Redis entre réplicas y un fallback local acotado durante indisponibilidad; todavía requiere una prueba operativa de caída y recuperación con Redis real.
-- La interfaz usa solo contratos de la API: no mezcla contenido demostrativo con datos indexados.
-- El restyling de Organizar y Ajustes al estilo «Cielo nocturno» queda como siguiente fase; hoy conservan el tema de papel.
+| Documento                                                                                                   | Contenido                                                                     |
+| ----------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
+| [Referencia técnica](docs/technical-reference.md)                                                           | OAuth, producción, retención, API REST, medios, fechas y sincronización.      |
+| [DESIGN.md](DESIGN.md)                                                                                      | Diseño del «Cielo nocturno»: tokens, componentes, movimiento y accesibilidad. |
+| [PRODUCT.md](PRODUCT.md)                                                                                    | Propósito, usuarios y principios del producto.                                |
+| [Arquitectura](docs/architecture.md) · [Modelo de datos](docs/data-model.md)                                | Cómo está construido por dentro.                                              |
+| [Integración con Drive](docs/google-drive-integration.md) · [Sincronización](docs/sync-strategy.md)         | Cómo se leen y reconcilian las fotos.                                         |
+| [Google Takeout](docs/google-takeout.md)                                                                    | Cómo preparar una exportación para importarla.                                |
+| [Despliegue en producción](docs/production-deployment.md) · [CI/CD en VPS](docs/ci-cd-vps-guia-completa.md) | Llevarlo a un servidor.                                                       |
+| [Roadmap](docs/roadmap.md)                                                                                  | Fases completadas y siguientes pasos.                                         |
+
+## 🧭 Principios
+
+- **Privacidad** — cada usuario accede solo a su archivo; Drive nunca se modifica.
+- **Fidelidad temporal** — no se inventa ninguna parte de una fecha.
+- **Contemplar y encontrar** — una experiencia evocadora que no estorba a la búsqueda rápida.
+- **Alcance explícito** — solo las carpetas elegidas, nunca todo Drive.
+
+<div align="center">
+
+<sub>Hecho con cariño para guardar recuerdos ✦</sub>
+
+</div>
