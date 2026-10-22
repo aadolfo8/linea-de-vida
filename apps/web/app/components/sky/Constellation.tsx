@@ -1,7 +1,14 @@
 'use client';
 
 import Link from 'next/link';
-import { useLayoutEffect, useMemo, useRef, type CSSProperties, type ReactNode } from 'react';
+import {
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  type CSSProperties,
+  type PointerEvent,
+  type ReactNode,
+} from 'react';
 import { api } from '../../../lib/api';
 import { thumbnailVariantUrl } from '../../../lib/media';
 import { photoAspectRatio, type TimelinePhoto } from '../timeline-model';
@@ -20,6 +27,9 @@ import { useSky, useSkyFrame, useSkyItem } from './SkyStage';
 const PLACEHOLDER_ASPECTS = [1.5, 0.75, 1.5, 1.33, 0.8, 1.78, 1.5];
 /** A group asks for its photos once it is this many viewports away. */
 const NEAR_VIEWPORTS = 1.6;
+/** A touch that moves less than this far and ends this fast is a tap, not a scroll. */
+const TAP_SLOP = 10;
+const TAP_MAX_MS = 300;
 /** How big a still-unrevealed placeholder star stays. */
 const STAR_SCALE = 0.06;
 
@@ -110,7 +120,7 @@ export function Constellation({
   epoch?: number;
   /** Fires once per epoch, when the group approaches the viewport. */
   onNear?: () => void;
-  onEnter: (href: string, cluster: Element | null) => void;
+  onEnter: (href: string, cluster: Element | null, title: string) => void;
 }) {
   const { engine, viewport, orientation, reduced } = useSky();
   const horizontal = orientation === 'horizontal';
@@ -126,6 +136,9 @@ export function Constellation({
   const near = useRef(onNear);
   const requested = useRef(false);
   const settled = useRef(false);
+  const touch = useRef<{ id: number; x: number; y: number; at: number } | null>(null);
+  /** When a touch tap already entered, so the click it produces does not enter twice. */
+  const tapped = useRef(0);
   useLayoutEffect(() => {
     near.current = onNear;
   });
@@ -185,6 +198,32 @@ export function Constellation({
         marginTop: geometry.marginLead,
         marginBottom: geometry.marginTail,
       };
+  // The gaps between groups belong to the nearest group, so a tap there still enters it.
+  const reach = {
+    '--grp-reach-lead': `${Math.min(120, Math.max(0, geometry.marginLead) / 2)}px`,
+    '--grp-reach-tail': `${Math.min(120, Math.max(0, geometry.marginTail) / 2)}px`,
+  } as CSSProperties;
+  // A tap counts even while the track is still settling from a scroll: the browser then
+  // reports no click, but the pointer never moved. A drag ends in pointercancel instead.
+  const onPointerDown = (event: PointerEvent) => {
+    if (event.pointerType === 'mouse' || !event.isPrimary) return;
+    touch.current = {
+      id: event.pointerId,
+      x: event.clientX,
+      y: event.clientY,
+      at: event.timeStamp,
+    };
+  };
+  const onPointerUp = (event: PointerEvent) => {
+    const start = touch.current;
+    touch.current = null;
+    if (!start || start.id !== event.pointerId) return;
+    const moved = Math.hypot(event.clientX - start.x, event.clientY - start.y);
+    if (moved >= TAP_SLOP || event.timeStamp - start.at >= TAP_MAX_MS) return;
+    tapped.current = event.timeStamp;
+    onEnter(href, clusterRef.current, title);
+  };
+
   const label: CSSProperties = horizontal
     ? { left: geometry.clusterX, bottom: geometry.labelBottom }
     : { left: geometry.clusterX, top: 0 };
@@ -198,11 +237,17 @@ export function Constellation({
       data-undated={undated}
       data-node-x={geometry.nodeX}
       data-node-y={geometry.nodeY}
-      style={section}
+      style={{ ...section, ...reach }}
+      data-axis={horizontal ? 'x' : 'y'}
+      onPointerDown={onPointerDown}
+      onPointerUp={onPointerUp}
+      onPointerCancel={() => (touch.current = null)}
       onClick={(event) => {
         if (!isPlainClick(event)) return;
         event.preventDefault();
-        onEnter(href, clusterRef.current);
+        // The tap already entered; its click arrives right after and must not repeat it.
+        if (tapped.current && event.timeStamp - tapped.current < 700) return;
+        onEnter(href, clusterRef.current, title);
       }}
     >
       <span ref={labelRef} className="sky-lab" style={{ ...label, opacity: reduced ? 1 : 0 }}>

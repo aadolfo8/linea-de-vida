@@ -647,3 +647,42 @@
 .sky-gate button:hover {
   border-color: var(--sky-accent);
 }
+
+/* "Abriendo 2022…": shown over the empty sky while a slow navigation is on its way. */
+.sky-opening {
+  position: fixed;
+  z-index: 70;
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 72px);
+  left: 50%;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  max-width: calc(100vw - 32px);
+  padding: 10px 18px;
+  border: 1px solid var(--sky-line);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--sky-ink-2) 88%, transparent);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  font-family: var(--sky-mono);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  transform: translateX(-50%);
+}
+.sky-opening[data-failed='true'] {
+  border-color: var(--sky-accent);
+}
+.sky-opening-star {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--sky-accent);
+  box-shadow: 0 0 10px var(--sky-glow);
+  animation: sky-pulse 1.2s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .sky-opening-star {
+    animation: none;
+  }
+}

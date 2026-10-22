@@ -169,7 +169,7 @@ export function YearsDepth({
             more={summary ? Math.max(0, item.photoCount - summary.previews.length) : 0}
             epoch={epoch}
             onNear={() => requestSummary(item.year)}
-            onEnter={(href, cluster) => travel(href, 'in', cluster, null)}
+            onEnter={(href, cluster, title) => travel(href, 'in', cluster, null, title)}
           />
         );
       })}
