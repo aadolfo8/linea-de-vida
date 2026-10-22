@@ -25,14 +25,16 @@ Delivery: forecast ~1000–1400 authored lines in 3 tasks on `feat/portadas`; th
 
 ## Tasks
 
-- [ ] **PO-1 — Cover data and API.** `PhotoCover` model + migration (scope kind YEAR / MONTH / UNKNOWN_MONTH, year, month, photoId, position; per-user; cascade on photo/user delete); `GET /v1/covers?year=`, `PUT /v1/covers` (replace one scope's ordered set, validated), `DELETE /v1/covers` (back to automatic); `/timeline/years/:year` and `/month-previews` use chosen covers first plus NTILE fill. Tests. Route: delegated writer.
-- [ ] **PO-2 — Portadas screen.** `/portadas` route, nav entry, year → month/"Sin mes" navigator, candidate grid with ordered numbered selection, live constellation preview, save / reset to automatic, missing-slot notice, `notifyArchiveIndexUpdated` after saving. Tests. Route: delegated writer.
-- [ ] **PO-3 — Docs.** Technical reference (endpoints, fill rule), `DESIGN.md` (Portadas surface), README feature table. Route: delegated writer.
+- [x] **PO-1 — Cover data and API.** `PhotoCover` model + migration (scope kind YEAR / MONTH / UNKNOWN_MONTH, year, month, photoId, position; per-user; cascade on photo/user delete); `GET /v1/covers?year=`, `PUT /v1/covers` (replace one scope's ordered set, validated), `DELETE /v1/covers` (back to automatic); `/timeline/years/:year` and `/month-previews` use chosen covers first plus NTILE fill. Tests. Route: delegated writer.
+- [x] **PO-2 — Portadas screen.** `/portadas` route, nav entry, year → month/"Sin mes" navigator, candidate grid with ordered numbered selection, live constellation preview, save / reset to automatic, missing-slot notice, `notifyArchiveIndexUpdated` after saving. Tests. Route: delegated writer.
+- [x] **PO-3 — Docs.** Technical reference (endpoints, fill rule), `DESIGN.md` (Portadas surface), README feature table. Route: delegated writer.
 
 ## Progress
 
 - 2026-10-22: exploration done; fill mode A chosen; feature document created.
+- 2026-10-22: PO-1 7eb9c2b (PhotoCover + migration 20261022100000_photo_covers, /v1/covers GET/PUT/DELETE, year summary and month-previews put valid chosen covers first and fill the rest), PO-2 a751d93 (/portadas screen, nav entry, mini-mosaic preview, ordered selection with earlier/later buttons, save / back to automatic, unsaved-changes guard, dropped-photo notice), PO-3 9d6c141 (docs). Deviations accepted: year `<select>` instead of a year list; preview is a mosaic() mini preview, approximate for the auto-filled part; reordering by buttons, not drag.
+- Checks: api 395 passed / 5 skipped, typecheck, lint ok; web 46 files / 426 passed, typecheck, lint, build ok (writer); parent spot check: covers + month-previews specs 21 passed, portadas spec 19 passed; parent read-through of the migration and raw SQL found no issue. NOT verified: migration and raw SQL against a real PostgreSQL (Docker Desktop not running; integration spec skipped).
 
 ## Next step
 
-PO-1.
+User runs `pnpm --filter @linea-de-vida/api prisma:deploy` against the local DB and tries /portadas; then merge to main.
