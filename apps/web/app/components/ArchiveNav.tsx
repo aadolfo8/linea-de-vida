@@ -3,13 +3,14 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { CalendarDays, FolderCog, Menu, Settings2 } from 'lucide-react';
+import { CalendarDays, FolderCog, Images, Menu, Settings2 } from 'lucide-react';
 import { Button } from '../../components/ui/button';
 import { apiJson } from '../../lib/api';
 
 const links = [
   { href: '/timeline', label: 'Cronología', icon: CalendarDays },
   { href: '/ordenar', label: 'Ordenar', icon: FolderCog },
+  { href: '/portadas', label: 'Portadas', icon: Images },
   { href: '/ajustes', label: 'Ajustes', icon: Settings2 },
 ] as const;
 
@@ -153,6 +154,15 @@ export function ArchiveNav({
         >
           <FolderCog aria-hidden="true" className="size-4" />
           <span>Ordenar</span>
+        </Link>
+        <Link
+          className="inline-flex min-h-11 items-center gap-2 px-3 text-sm text-map-muted no-underline transition-colors hover:text-map-route aria-[current=page]:bg-map-route-soft aria-[current=page]:text-map-ink max-[680px]:shrink-0 max-[680px]:px-2 max-[680px]:whitespace-nowrap"
+          data-cursor="route"
+          href="/portadas"
+          aria-current={pathname === '/portadas' ? 'page' : undefined}
+        >
+          <Images aria-hidden="true" className="size-4" />
+          <span>Portadas</span>
         </Link>
         <Link
           className="inline-flex min-h-11 items-center gap-2 px-3 text-sm text-map-muted no-underline transition-colors hover:text-map-route aria-[current=page]:bg-map-route-soft aria-[current=page]:text-map-ink max-[680px]:shrink-0 max-[680px]:px-2 max-[680px]:whitespace-nowrap"
