@@ -1,4 +1,5 @@
-import { photoCountText, storedLabel } from './dates';
+import { photoCountLabel } from '../../app/components/timeline-model';
+import { storedLabel } from './dates';
 import type { FilenameSuggestions, FolderDatePreview, OrderingPhoto, Pile } from './types';
 
 /** The folder date preview as one plain sentence. */
@@ -7,7 +8,7 @@ export function previewSentence(preview: FolderDatePreview) {
   if (preview.willChangeCount === 0)
     return 'Con estas opciones no cambiaría ninguna foto: todas conservan la fecha que ya tienen.';
   const parts = [
-    `Cambiará la fecha de ${photoCountText(preview.willChangeCount)} de ${preview.scopePhotoCount.toLocaleString('es-ES')}.`,
+    `Cambiará la fecha de ${photoCountLabel(preview.willChangeCount)} de ${preview.scopePhotoCount.toLocaleString('es-ES')}.`,
   ];
   if (preview.preservesManualCount > 0)
     parts.push(
@@ -15,11 +16,11 @@ export function previewSentence(preview: FolderDatePreview) {
     );
   if (preview.replacesAutomaticCount > 0)
     parts.push(
-      `Se sustituye la fecha de cámara de ${photoCountText(preview.replacesAutomaticCount)}.`,
+      `Se sustituye la fecha de cámara de ${photoCountLabel(preview.replacesAutomaticCount)}.`,
     );
   if (preview.replacesFolderNameDateCount > 0)
     parts.push(
-      `Se sustituye la fecha del nombre de ${photoCountText(preview.replacesFolderNameDateCount)}.`,
+      `Se sustituye la fecha del nombre de ${photoCountLabel(preview.replacesFolderNameDateCount)}.`,
     );
   return parts.join(' ');
 }
@@ -62,8 +63,8 @@ export const emptyCopy: Record<Pile, { title: string; text: string }> = {
 export function headline(counts: { undated: number; yearOnly: number; total: number }) {
   if (counts.total === 0) return 'Aún no hay fotos que ordenar. Añade una carpeta desde Ajustes.';
   if (counts.undated + counts.yearOnly === 0)
-    return `Todo está en su sitio: ${photoCountText(counts.total)} con fecha.`;
-  return `Tienes ${photoCountText(counts.undated)} sin fecha y ${photoCountText(counts.yearOnly)} con solo el año. Selecciónalas y ponles fecha; aparecerán en su sitio de la cronología.`;
+    return `Todo está en su sitio: ${photoCountLabel(counts.total)} con fecha.`;
+  return `Tienes ${photoCountLabel(counts.undated)} sin fecha y ${photoCountLabel(counts.yearOnly)} con solo el año. Selecciónalas y ponles fecha; aparecerán en su sitio de la cronología.`;
 }
 
 const KIND_LABELS: Record<string, string> = {

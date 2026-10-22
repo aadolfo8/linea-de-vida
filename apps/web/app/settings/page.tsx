@@ -1,24 +1,13 @@
-'use client';
+import { redirect } from 'next/navigation';
+import { legacySettingsHref } from '../../lib/ordering/location';
 
-import { ArchiveNav } from '../components/ArchiveNav';
-import { ArchiveWorkspace } from '../components/ArchiveWorkspace';
-import { ProtectedSurface } from '../components/ProtectedSurface';
-import { activeDriveConnection } from '../../lib/api';
+type SearchParams = Record<string, string | string[] | undefined>;
 
-export default function SettingsPage() {
-  return (
-    <ProtectedSurface>
-      {(session) => (
-        <>
-          <ArchiveNav name={session.user.displayName} />
-          <ArchiveWorkspace
-            area="settings"
-            sessionConnection={activeDriveConnection(session)}
-            userName={session.user.displayName}
-            userEmail={session.user.email}
-          />
-        </>
-      )}
-    </ProtectedSurface>
-  );
+/** The old address keeps working, and so does the Drive consent that returns to it. */
+export default async function LegacySettingsPage({
+  searchParams,
+}: {
+  searchParams: Promise<SearchParams>;
+}) {
+  redirect(legacySettingsHref(await searchParams));
 }

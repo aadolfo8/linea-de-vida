@@ -4,7 +4,8 @@ import { ChevronRight, X } from 'lucide-react';
 import { useId, useRef, type KeyboardEvent } from 'react';
 import { api } from '../../lib/api';
 import { suggestionText } from '../../lib/ordering/copy';
-import { draftFromStored, draftLabel, photoCountText, storedLabel } from '../../lib/ordering/dates';
+import { draftFromStored, draftLabel, storedLabel } from '../../lib/ordering/dates';
+import { photoCountLabel } from '../components/timeline-model';
 import { thumbnailVariantUrl } from '../../lib/media';
 import type {
   FilenameSuggestions,
@@ -169,7 +170,7 @@ export function ActionBar({
 }) {
   return (
     <div className="ord-actions" role="toolbar" aria-label="Acciones con la selección">
-      <span className="count">{photoCountText(count)}</span>
+      <span className="count">{photoCountLabel(count)}</span>
       <button
         type="button"
         className={hiddenPile ? 'sp-btn' : 'sp-btn primary'}

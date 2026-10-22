@@ -1,3 +1,4 @@
+import { capitalize } from '../../app/components/timeline-model';
 import type { DateDraft, DatePayload, DatePrecision, FolderDateRule } from './types';
 
 export const MONTH_NAMES = [
@@ -51,7 +52,6 @@ export function parseYearInput(text: string, now: Date = new Date()): number | n
 export const daysInMonth = (year: number, month: number) =>
   new Date(Date.UTC(year, month, 0)).getUTCDate();
 
-export const capitalize = (value: string) => value.charAt(0).toUpperCase() + value.slice(1);
 export const monthName = (month: number) => capitalize(MONTH_NAMES[month - 1] ?? '');
 
 /** Keeps a draft coherent: a day needs a month, and cannot exceed the month's length. */
@@ -127,9 +127,6 @@ export const originLabels = {
   manual: 'a mano',
   none: '',
 } as const;
-
-export const photoCountText = (count: number) =>
-  `${count.toLocaleString('es-ES')} ${count === 1 ? 'foto' : 'fotos'}`;
 
 /** The ISO value the API would store for a date request: the first instant of its period. */
 export const storedValueFromPayload = (payload: DatePayload) =>

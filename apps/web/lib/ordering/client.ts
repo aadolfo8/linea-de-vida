@@ -1,4 +1,4 @@
-import { apiJson } from '../api';
+import { ApiError, apiJson, isUnauthenticated, json } from '../api';
 import { chunk } from './selection';
 import type {
   DatePayload,
@@ -30,13 +30,11 @@ const scopeParams = (scope: OrderScope) => {
   return params;
 };
 
-const json = (method: string, body?: unknown): RequestInit => ({
-  method,
-  headers: { 'Content-Type': 'application/json' },
-  ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-});
-
-/** Runs a batch endpoint over chunks of ids and merges the per-id answers. */
+/**
+ * Runs a batch endpoint over chunks of ids and merges the per-id answers. An expired session, or
+ * a request that failed before anything was applied, is thrown so the screen can say what
+ * happened; only a chunk that fails after earlier ones succeeded becomes FAILED rows.
+ */
 async function inBatches(
   ids: readonly string[],
   send: (batch: string[]) => Promise<{ results: PerIdResult[] }>,
@@ -45,7 +43,9 @@ async function inBatches(
   for (const batch of chunk(ids, BATCH_LIMIT)) {
     try {
       results.push(...(await send(batch)).results);
-    } catch {
+    } catch (error) {
+      if (isUnauthenticated(error) || (results.length === 0 && error instanceof ApiError))
+        throw error;
       // A failed chunk fails only its own ids; the others keep what they got.
       results.push(...batch.map((id) => ({ id, status: 'FAILED' })));
     }

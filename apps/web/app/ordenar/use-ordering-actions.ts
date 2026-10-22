@@ -1,13 +1,13 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { signOutIfExpired } from '../../lib/api';
 import { notifyArchiveIndexUpdated } from '../../lib/archive-index-events';
 import { orderingApi } from '../../lib/ordering/client';
 import {
   draftLabel,
   draftToPayload,
   payloadFromStored,
-  photoCountText,
   storedValueFromPayload,
   timelinePathFor,
 } from '../../lib/ordering/dates';
@@ -28,7 +28,7 @@ import type {
   FolderDateRule,
   OrderingPhoto,
 } from '../../lib/ordering/types';
-import { timelineHrefWithReturn } from '../components/timeline-model';
+import { photoCountLabel, timelineHrefWithReturn } from '../components/timeline-model';
 import { apiErrorCopy } from '../../lib/sources/errors';
 import type { OrderingData } from './use-ordering-data';
 
@@ -95,6 +95,7 @@ export function useOrderingActions(
       try {
         await action();
       } catch (error) {
+        signOutIfExpired(error);
         show({
           tone: 'error',
           message: apiErrorCopy(
@@ -111,10 +112,19 @@ export function useOrderingActions(
     [show],
   );
 
+  /** An undo that fails offers "Reintentar" on that same undo, not a no-op. */
+  const undoable = useCallback(
+    (action: () => Promise<void>) => {
+      const undo = (): Promise<void> => run(action, undo);
+      return undo;
+    },
+    [run],
+  );
+
   /** After a change: refresh the counts and say, for assistive technology, what is left. */
   const settle = useCallback(async (message: string) => {
     const counts = await dataRef.current.refreshCounts();
-    if (counts) setAnnouncement(`${message} Quedan ${photoCountText(counts.undated)} sin fecha.`);
+    if (counts) setAnnouncement(`${message} Quedan ${photoCountLabel(counts.undated)} sin fecha.`);
   }, []);
 
   const restore = useCallback(
@@ -142,7 +152,7 @@ export function useOrderingActions(
         failed
           ? {
               tone: 'error',
-              message: `${photoCountText(failed)} no se pudieron devolver a como estaban. Recarga la página para ver el estado real.`,
+              message: `${photoCountLabel(failed)} no se pudieron devolver a como estaban. Recarga la página para ver el estado real.`,
             }
           : { tone: 'ok', message },
       );
@@ -183,7 +193,7 @@ export function useOrderingActions(
           onChanged(done);
         }
         const message = done.length
-          ? `${photoCountText(done.length)} → ${label}${failed.length ? `. ${photoCountText(failed.length)} no se pudieron guardar.` : ''}`
+          ? `${photoCountLabel(done.length)} → ${label}${failed.length ? `. ${photoCountLabel(failed.length)} no se pudieron guardar.` : ''}`
           : 'No se pudo poner la fecha. Tus fotos no han cambiado.';
         const doneSet = new Set(done);
         const returnTo = `${window.location.pathname}${window.location.search}`;
@@ -197,22 +207,19 @@ export function useOrderingActions(
               }
             : undefined,
           undo: done.length
-            ? () =>
-                run(
-                  () =>
-                    restore(
-                      previous.filter((photo) => doneSet.has(photo.id)),
-                      'Hecho: las fotos vuelven a como estaban.',
-                    ),
-                  async () => undefined,
-                )
+            ? undoable(() =>
+                restore(
+                  previous.filter((photo) => doneSet.has(photo.id)),
+                  'Hecho: las fotos vuelven a como estaban.',
+                ),
+              )
             : undefined,
           retry: failed.length ? () => applyDate(failed, draft) : undefined,
         });
         if (done.length) void settle(message);
       }, retry);
     },
-    [onChanged, restore, run, settle, show],
+    [onChanged, restore, run, settle, show, undoable],
   );
 
   const clearDates = useCallback(
@@ -241,18 +248,15 @@ export function useOrderingActions(
           show({
             tone: result.failed.length ? 'error' : 'ok',
             message: changed.size
-              ? `Quitaste la fecha puesta a mano a ${photoCountText(changed.size)}.${result.failed.length ? ` ${photoCountText(result.failed.length)} no se pudieron cambiar.` : ''}`
+              ? `Quitaste la fecha puesta a mano a ${photoCountLabel(changed.size)}.${result.failed.length ? ` ${photoCountLabel(result.failed.length)} no se pudieron cambiar.` : ''}`
               : 'No se pudo quitar la fecha. Tus fotos no han cambiado.',
             undo: changed.size
-              ? () =>
-                  run(
-                    () =>
-                      restore(
-                        manual.filter((photo) => changed.has(photo.id)),
-                        'Hecho: las fechas vuelven a como estaban.',
-                      ),
-                    async () => undefined,
-                  )
+              ? undoable(() =>
+                  restore(
+                    manual.filter((photo) => changed.has(photo.id)),
+                    'Hecho: las fechas vuelven a como estaban.',
+                  ),
+                )
               : undefined,
             retry: result.failed.length ? () => clearDates(result.failed) : undefined,
           });
@@ -260,7 +264,7 @@ export function useOrderingActions(
         () => clearDates(ids),
       );
     },
-    [onChanged, restore, run, settle, show],
+    [onChanged, restore, run, settle, show, undoable],
   );
 
   const setHidden = useCallback(
@@ -280,37 +284,33 @@ export function useOrderingActions(
             onChanged(left);
           }
           const message = left.length
-            ? `${hide ? `${photoCountText(left.length)} ocultas. Siguen en tu Drive.` : `${photoCountText(left.length)} vuelven a tu archivo.`}${result.failed.length ? ` ${photoCountText(result.failed.length)} no se pudieron cambiar.` : ''}`
+            ? `${hide ? `${photoCountLabel(left.length)} ocultas. Siguen en tu Drive.` : `${photoCountLabel(left.length)} vuelven a tu archivo.`}${result.failed.length ? ` ${photoCountLabel(result.failed.length)} no se pudieron cambiar.` : ''}`
             : 'No se pudo cambiar la visibilidad. Tus fotos no han cambiado.';
           const changed = result.changed;
           show({
             tone: result.failed.length ? 'error' : 'ok',
             message,
             undo: changed.length
-              ? () =>
-                  run(
-                    async () => {
-                      const back = hide
-                        ? await orderingApi.unhide(changed)
-                        : await orderingApi.hide(changed);
-                      const undone = classifyResults(
-                        back.results,
-                        hide ? UNHIDE_STATUSES : HIDE_STATUSES,
-                      );
-                      notifyArchiveIndexUpdated();
-                      dataRef.current.reloadList();
-                      void settle('Hecho.');
-                      show(
-                        undone.failed.length
-                          ? {
-                              tone: 'error',
-                              message: `${photoCountText(undone.failed.length)} no se pudieron devolver. Recarga la página para ver el estado real.`,
-                            }
-                          : { tone: 'ok', message: 'Hecho: las fotos vuelven a estar como antes.' },
-                      );
-                    },
-                    async () => undefined,
-                  )
+              ? undoable(async () => {
+                  const back = hide
+                    ? await orderingApi.unhide(changed)
+                    : await orderingApi.hide(changed);
+                  const undone = classifyResults(
+                    back.results,
+                    hide ? UNHIDE_STATUSES : HIDE_STATUSES,
+                  );
+                  notifyArchiveIndexUpdated();
+                  dataRef.current.reloadList();
+                  void settle('Hecho.');
+                  show(
+                    undone.failed.length
+                      ? {
+                          tone: 'error',
+                          message: `${photoCountLabel(undone.failed.length)} no se pudieron devolver. Recarga la página para ver el estado real.`,
+                        }
+                      : { tone: 'ok', message: 'Hecho: las fotos vuelven a estar como antes.' },
+                  );
+                })
               : undefined,
             retry: result.failed.length ? () => setHidden(result.failed, hide) : undefined,
           });
@@ -319,7 +319,7 @@ export function useOrderingActions(
         () => setHidden(ids, hide),
       );
     },
-    [onChanged, run, settle, show],
+    [onChanged, run, settle, show, undoable],
   );
 
   const acceptSuggestions = useCallback(async (): Promise<void> => {
@@ -329,7 +329,7 @@ export function useOrderingActions(
       notifyArchiveIndexUpdated();
       d.reloadList();
       const message = appliedCount
-        ? `${photoCountText(appliedCount)} fechadas por su nombre. Si alguna no es correcta, ponle otra fecha.`
+        ? `${photoCountLabel(appliedCount)} fechadas por su nombre. Si alguna no es correcta, ponle otra fecha.`
         : 'Ninguna foto cambió: ya no había nada que aplicar.';
       show({ tone: 'ok', message });
       void settle(message);
@@ -347,30 +347,26 @@ export function useOrderingActions(
           const { affectedCount } = await orderingApi.setFolderDate(folder.id, body);
           notifyArchiveIndexUpdated();
           dataRef.current.reloadList();
-          const message = `«${folder.name}» ahora es de ${draftLabel({ year: body.year, month: body.month ?? null, day: body.day ?? null })}. ${photoCountText(affectedCount)} cambiadas.`;
+          const message = `«${folder.name}» ahora es de ${draftLabel({ year: body.year, month: body.month ?? null, day: body.day ?? null })}. ${photoCountLabel(affectedCount)} cambiadas.`;
           void settle(message);
           show({
             tone: 'ok',
             message,
-            undo: () =>
-              run(
-                async () => {
-                  const before = previous ? ruleToBody(previous) : null;
-                  if (before) await orderingApi.setFolderDate(folder.id, before);
-                  else await orderingApi.removeFolderDate(folder.id);
-                  notifyArchiveIndexUpdated();
-                  dataRef.current.reloadList();
-                  void settle('Hecho.');
-                  show({ tone: 'ok', message: `Hecho: «${folder.name}» vuelve a como estaba.` });
-                },
-                async () => undefined,
-              ),
+            undo: undoable(async () => {
+              const before = previous ? ruleToBody(previous) : null;
+              if (before) await orderingApi.setFolderDate(folder.id, before);
+              else await orderingApi.removeFolderDate(folder.id);
+              notifyArchiveIndexUpdated();
+              dataRef.current.reloadList();
+              void settle('Hecho.');
+              show({ tone: 'ok', message: `Hecho: «${folder.name}» vuelve a como estaba.` });
+            }),
           });
         },
         () => applyFolderDate(folder, body, previous),
       );
     },
-    [run, settle, show],
+    [run, settle, show, undoable],
   );
 
   const removeFolderDate = useCallback(
@@ -383,34 +379,30 @@ export function useOrderingActions(
           const { affectedCount } = await orderingApi.removeFolderDate(folder.id);
           notifyArchiveIndexUpdated();
           dataRef.current.reloadList();
-          const message = `Quitaste la fecha de «${folder.name}». ${photoCountText(affectedCount)} cambiadas.`;
+          const message = `Quitaste la fecha de «${folder.name}». ${photoCountLabel(affectedCount)} cambiadas.`;
           void settle(message);
           const before = previous ? ruleToBody(previous) : null;
           show({
             tone: 'ok',
             message,
             undo: before
-              ? () =>
-                  run(
-                    async () => {
-                      await orderingApi.setFolderDate(folder.id, before);
-                      notifyArchiveIndexUpdated();
-                      dataRef.current.reloadList();
-                      void settle('Hecho.');
-                      show({
-                        tone: 'ok',
-                        message: `Hecho: «${folder.name}» vuelve a como estaba.`,
-                      });
-                    },
-                    async () => undefined,
-                  )
+              ? undoable(async () => {
+                  await orderingApi.setFolderDate(folder.id, before);
+                  notifyArchiveIndexUpdated();
+                  dataRef.current.reloadList();
+                  void settle('Hecho.');
+                  show({
+                    tone: 'ok',
+                    message: `Hecho: «${folder.name}» vuelve a como estaba.`,
+                  });
+                })
               : undefined,
           });
         },
         () => removeFolderDate(folder, previous),
       );
     },
-    [run, settle, show],
+    [run, settle, show, undoable],
   );
 
   return {

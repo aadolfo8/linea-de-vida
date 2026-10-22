@@ -27,6 +27,8 @@ describe('order location', () => {
     expect(parseOrderLocation('?pile=none').pile).toBe('undated');
     expect(parseOrderLocation('?pile=done').pile).toBe('dated');
     expect(parseOrderLocation('?pile=whatever').pile).toBeNull();
+    expect(parseOrderLocation('?pile=constructor').pile).toBeNull();
+    expect(parseOrderLocation('?pile=__proto__').pile).toBeNull();
   });
 
   it('writes only what differs from the defaults and round-trips', () => {
