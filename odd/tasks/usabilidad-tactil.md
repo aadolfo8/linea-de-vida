@@ -28,16 +28,20 @@ Delivery strategy: `ask-on-risk`. Forecast ~600–900 authored changed lines acr
 
 ## Tasks
 
-- [ ] **UT-1 — Reliable entry into a year/month.** `try/finally` around travel, reset `travelling`/`busy` on every failure path, tolerant exit guard for slow navigations (keep a visible loading state instead of bouncing back), whole group area tappable. Tests. Route: delegated writer (4+ files).
-- [ ] **UT-2 — Touch feel.** Time-based damping and near-direct tracking on coarse pointers, ignore height-only viewport changes from browser chrome, `touch-action: manipulation`, tap highlight, CTA always visible on `(hover: none)`, 44px rail targets. Tests. Route: delegated writer.
-- [ ] **UT-3 — Loading skeletons.** Skeleton for the years depth and first year, shimmering `--sky-tile` placeholders until images arrive. Tests. Route: delegated writer.
-- [ ] **UT-4 — Faster photos.** API: Drive thumbnail for the small width (fallback to current path), private long-lived cache headers. Web: request previews only when scroll settles near a group, prioritise the group nearest the centre, limit concurrency, sensible `sizes`. Docs updated. Tests. Route: delegated writer.
-- [ ] **UT-5 — Folder names in Ordenar.** Two-line clamp and full name on hover/long-press (`title`). Route: inline (one CSS/TSX pair).
+- [x] **UT-1 — Reliable entry into a year/month.** `try/finally` around travel, reset `travelling`/`busy` on every failure path, tolerant exit guard for slow navigations (keep a visible loading state instead of bouncing back), whole group area tappable. Tests. Route: delegated writer (4+ files).
+- [x] **UT-2 — Touch feel.** Time-based damping and near-direct tracking on coarse pointers, ignore height-only viewport changes from browser chrome, `touch-action: manipulation`, tap highlight, CTA always visible on `(hover: none)`, 44px rail targets. Tests. Route: delegated writer.
+- [x] **UT-3 — Loading skeletons.** Skeleton for the years depth and first year, shimmering `--sky-tile` placeholders until images arrive. Tests. Route: delegated writer.
+- [x] **UT-4 — Faster photos.** API: Drive thumbnail for the small width (fallback to current path), private long-lived cache headers. Web: request previews only when scroll settles near a group, prioritise the group nearest the centre, limit concurrency, sensible `sizes`. Docs updated. Tests. Route: delegated writer.
+- [x] **UT-5 — Folder names in Ordenar.** Two-line clamp and full name on hover/long-press (`title`). Route: inline (one CSS/TSX pair).
 
 ## Progress
 
 - 2026-10-22: exploration done, feature document created.
+- 2026-10-22: UT-5 done in 108b5d2 (2-line clamp, `title`, 12px indent, 320px sidebar); ordenar spec 45 passed, web typecheck ok, committed-content oxfmt ok. UT-1..UT-4 delegated to one writer.
+- 2026-10-22: UT-1 a6404ef (try/finally, 12s tolerant guard with "Abriendo…" status, touch tap <10px/<300ms, gaps tappable); UT-2 aa06112 (time-based damping, tau 158ms desktop / 18ms coarse, height-only resize filter, touch-action, CTA on hover:none); UT-3 74be3a5 (skeletons, shimmering placeholders, reduced motion); UT-4 498ab26 (Drive `=s960` preview for 640w with fallback, `private, max-age=86400`, settle-gated load queue max 3, fetchpriority, 1280w only for tiles >420px; no persistent cache). Parent review found that a tap meant to stop a fling would enter a group: fixed in 9d18d43 (touch within 100ms of a scroll only stops it).
+- Checks (final): web test 44 files / 399 passed; web typecheck, lint ok; web build ok (writer); api test 379 passed / 5 skipped, api typecheck, lint ok (writer); committed-content oxfmt ok on apps/web, apps/api/src, docs. Not verified: real phone touch feel, real Google Drive `thumbnailLink` size suffix (falls back to original if different). Thresholds (settle 150ms/0.35px/ms, tau 18ms, 12s guard) need tuning on device.
+- Delivery: branch is ~1500 authored lines, above the ~400 budget; push/PR and slicing strategy are the user's decision.
 
 ## Next step
 
-UT-1.
+User tests on a real phone/touchscreen; then decide merge/PR (and chain strategy, since the branch exceeds the delivery budget).
