@@ -38,16 +38,22 @@ describe('ArchiveNav', () => {
     vi.clearAllMocks();
   });
 
-  it('separates the timeline, ordering and settings destinations', async () => {
+  it('separates the timeline, ordering, covers and settings destinations', async () => {
     await act(async () => root.render(<ArchiveNav name="Ana" />));
 
     const links = [...container.querySelectorAll('nav[aria-label="Navegación principal"] a')];
     expect(links.map((link) => [link.textContent, link.getAttribute('href')])).toEqual([
       ['Cronología', '/timeline'],
       ['Ordenar', '/ordenar'],
+      ['Portadas', '/portadas'],
       ['Ajustes', '/ajustes'],
     ]);
-    expect(links.map((link) => link.getAttribute('aria-current'))).toEqual([null, 'page', null]);
+    expect(links.map((link) => link.getAttribute('aria-current'))).toEqual([
+      null,
+      'page',
+      null,
+      null,
+    ]);
   });
 
   it('closes the session and returns to the welcome page', async () => {
@@ -88,7 +94,7 @@ describe('ArchiveNav', () => {
       expect(toggle().getAttribute('aria-expanded')).toBe('false');
       expect(toggle().getAttribute('aria-controls')).toBe(panel().id);
       expect(container.querySelector('.sky-nav')?.getAttribute('data-open')).toBe('false');
-      expect(panel().querySelectorAll('nav a')).toHaveLength(3);
+      expect(panel().querySelectorAll('nav a')).toHaveLength(4);
       expect(panel().textContent).toContain('Cerrar sesión');
     });
 

@@ -137,6 +137,16 @@ Media is requested only through the session-guarded API proxy, with `width=640|1
 - **Motion.** Tiles that change pile fly out (scale and fade, 320 ms); with `prefers-reduced-motion` they just disappear and all CSS transitions and animations are off.
 - **Ajustes.** One card per source with its state (up to date and when, reading with found/processed counts, or the last reading failed with Reintentar), its numbers and "Ordenar N", "Buscar fotos nuevas", "Quitar" (two taps; Drive is never touched). "Añadir fotos" is a three-step dialog: kind, pasted folder link checked on our side (name, subfolders, Takeout hint), and what happens next with live progress. Account and privacy follow. A single banner with "Conectar Drive" shows on both screens when Drive is disconnected.
 
+## Portadas
+
+`/portadas` is the third surface in the same night sky (`SkyPage`, the Ordenar desk and tokens) and is where the covers of the timeline are chosen: the photos that make up the mosaic of a year in the years depth and of each month and the Sin mes group in the year depth.
+
+- **Left column.** A year selector (newest with photos first) and, for that year, "Portada del año", every month with photos and "Sin mes" (only when it has photos), each with its state: "Automática" or "Elegida (n)". Below 900px the entries become a row of chips, as the piles of Ordenar do.
+- **Main area.** The scope title with "Elegidas: n de 8" (6 for months and Sin mes); a live preview drawn with the same weighted mosaic as the constellations (the first photo gets the largest cell, so order is visible), labelled approximate because the automatic fill is recomputed on save; the chosen strip in order; and the candidate grid, paged by cursor.
+- **Choosing.** Tapping a photo adds it with an order badge, tapping it again removes it and renumbers the rest. The strip has Mover antes, Mover después and Quitar buttons (44px, labelled with the position and file name) and focus follows the moved photo. At the maximum, a notice asks to remove one first and a polite live region announces it.
+- **Saving.** A floating bar (the Ordenar bar) shows the state and offers Guardar portada (enabled only with changes or a missing chosen photo) and Volver a automática, which shows a toast with Deshacer. Leaving a cover with unsaved changes asks first (Guardar y cambiar, Descartar y cambiar, Seguir editando) and the page warns before unload.
+- **Missing photos.** A chosen photo that was hidden, left the archive or was re-dated out of the group is dropped when read; the screen says "Una foto elegida ya no está en esta portada" and why, the cover keeps filling automatically, and saving a new choice replaces it.
+
 ## Out of scope
 
 - Light theme for the timeline: the sky is always dark (`color-scheme: dark`).
