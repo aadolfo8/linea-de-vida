@@ -129,4 +129,51 @@ describe('sky engine loop', () => {
     expect(engine.itemByKey('a')).toBeNull();
     expect(engine.itemByKey('b')?.el).toBe(b);
   });
+
+  describe('damping', () => {
+    /** Runs frames of `dt` ms for `total` ms and returns where the track ended up. */
+    const chase = (dt: number, total: number) => {
+      mount();
+      flush();
+      engine.trackLength = 20000;
+      engine.viewportLength = 1000;
+      engine.jumpTo(1000);
+      for (let elapsed = 0; elapsed < total; elapsed += dt) {
+        const callbacks = queue.splice(0);
+        clock += dt;
+        callbacks.forEach((callback) => callback(clock));
+      }
+      return engine.current;
+    };
+    afterEach(() => {
+      delete (window as { matchMedia?: unknown }).matchMedia;
+    });
+
+    it('covers the same distance in the same time whatever the frame rate', () => {
+      const at60 = chase(16, 480);
+      engine.detach();
+      document.body.replaceChildren();
+      queue = [];
+      engine = new SkyEngine();
+      const at30 = chase(32, 480);
+      expect(at60).toBeGreaterThan(900);
+      expect(Math.abs(at60 - at30)).toBeLessThan(15);
+    });
+
+    it('keeps the desktop feel: about a tenth of the gap per 60Hz frame', () => {
+      expect(chase(16.67, 16.67)).toBeCloseTo(100, -1);
+    });
+
+    it('follows almost directly on a coarse pointer', () => {
+      Object.defineProperty(window, 'matchMedia', {
+        configurable: true,
+        value: (query: string) => ({ matches: query === '(pointer: coarse)' }),
+      });
+      expect(chase(16, 96)).toBeGreaterThan(990);
+    });
+
+    it('does not jump when a frame stalls', () => {
+      expect(chase(500, 500)).toBeLessThan(500);
+    });
+  });
 });
