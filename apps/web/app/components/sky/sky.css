@@ -12,6 +12,7 @@
   --sky-accent: var(--color-sky-accent, #cfe0ff);
   --sky-glow: rgba(190, 210, 255, 0.55);
   --sky-tile: #0e1424;
+  --sky-shimmer: linear-gradient(100deg, var(--sky-tile) 35%, #18203a 50%, var(--sky-tile) 65%);
   --sky-bar-h: calc(env(safe-area-inset-top, 0px) + 60px);
   --sky-ease: cubic-bezier(0.22, 1, 0.36, 1);
   --sky-ui: var(--font-sky-ui, 'Figtree'), system-ui, -apple-system, 'Segoe UI', sans-serif;

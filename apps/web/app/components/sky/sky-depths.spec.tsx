@@ -199,6 +199,49 @@ describe('sky depths', () => {
       expect(links()[0]!.querySelectorAll('.sky-tile[data-star="true"]').length).toBeGreaterThan(0);
     });
 
+    it('keeps placeholder tiles visible at full size and shimmering until a photo arrives', async () => {
+      cache.loadTimelineYears.mockResolvedValue(years);
+      cache.loadYearSummary.mockReturnValue(new Promise(() => undefined));
+      await mount(depth);
+
+      const tiles = [...links()[0]!.querySelectorAll<HTMLElement>('.sky-tile[data-star="true"]')];
+      expect(tiles.every((tile) => !tile.style.transform.includes('scale'))).toBe(true);
+      expect(tiles.every((tile) => tile.dataset.loaded === undefined)).toBe(true);
+    });
+
+    it('stops the shimmer of a tile once its image loads or fails', async () => {
+      cache.loadTimelineYears.mockResolvedValue(years);
+      cache.loadYearSummary.mockImplementation(async (year: number) => ({
+        year,
+        total: 12,
+        months: [{ month: 1, photoCount: 5 }],
+        unknownMonthCount: 0,
+        previews: [photo(`p${year}a`), photo(`p${year}b`)],
+      }));
+      await mount(depth);
+
+      const [first, second] = [...links()[0]!.querySelectorAll('img')];
+      expect(first!.parentElement!.dataset.loaded).toBeUndefined();
+      await act(async () => first!.dispatchEvent(new Event('load')));
+      await act(async () => second!.dispatchEvent(new Event('error')));
+      expect(first!.parentElement!.dataset.loaded).toBe('true');
+      expect(second!.parentElement!.dataset.loaded).toBe('true');
+    });
+
+    it('shows a skeleton of constellations with a polite status while the years load', async () => {
+      cache.loadTimelineYears.mockReturnValue(new Promise(() => undefined));
+      await mount(depth);
+
+      const skeleton = container.querySelector('.sky-skeleton');
+      expect(skeleton?.getAttribute('aria-hidden')).toBe('true');
+      expect(skeleton?.querySelectorAll('.sky-skel-grp').length).toBeGreaterThan(1);
+      expect(skeleton?.querySelectorAll('.sky-skel-tile').length).toBeGreaterThan(4);
+      const status = container.querySelector('[role="status"]');
+      expect(status?.textContent).toBe('Cargando años…');
+      expect(status?.getAttribute('aria-live')).toBe('polite');
+      expect(container.querySelector('[aria-busy="true"]')).not.toBeNull();
+    });
+
     it('travels in through the group instead of following the plain link', async () => {
       cache.loadTimelineYears.mockResolvedValue(years);
       cache.loadYearSummary.mockReturnValue(new Promise(() => undefined));

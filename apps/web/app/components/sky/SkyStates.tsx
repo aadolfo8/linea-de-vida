@@ -2,10 +2,39 @@
 
 import './constellation.css';
 
-export function SkyLoading({ label }: { label: string }) {
+const SKELETON = {
+  /** The years depth: several constellations, each a numeral outline over a few tiles. */
+  years: [3, 4, 3],
+  /** A year or month depth: fewer, denser groups. */
+  depth: [5, 4],
+} as const;
+
+/**
+ * Loading state of a depth: a skeleton in the sky's look (decorative, hidden from assistive
+ * technology) plus the status line that is read out.
+ */
+export function SkyLoading({
+  label,
+  variant = 'depth',
+}: {
+  label: string;
+  variant?: keyof typeof SKELETON;
+}) {
   return (
     <div className="sky-state" aria-busy="true">
-      <p className="sky-wait" role="status">
+      <div className="sky-skeleton" data-variant={variant} aria-hidden="true">
+        {SKELETON[variant].map((tiles, group) => (
+          <div key={group} className="sky-skel-grp">
+            <i className="sky-skel-num" />
+            <span className="sky-skel-tiles">
+              {Array.from({ length: tiles }, (_, tile) => (
+                <i key={tile} className="sky-skel-tile" />
+              ))}
+            </span>
+          </div>
+        ))}
+      </div>
+      <p className="sky-wait" role="status" aria-live="polite">
         {label}
       </p>
     </div>

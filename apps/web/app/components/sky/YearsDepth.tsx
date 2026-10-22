@@ -129,7 +129,7 @@ export function YearsDepth({
     [items, summaries],
   );
 
-  if (state === 'loading' && !years) return <SkyLoading label="Cargando años…" />;
+  if (state === 'loading' && !years) return <SkyLoading label="Cargando años…" variant="years" />;
   if (state === 'error' && !years)
     return (
       <SkyError
