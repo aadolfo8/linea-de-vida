@@ -331,6 +331,21 @@ describe('sky depths', () => {
         expect(travel).not.toHaveBeenCalled();
       });
 
+      it('only stops a fling when the touch lands while the page is still scrolling', async () => {
+        await act(async () =>
+          window.dispatchEvent(
+            Object.defineProperty(new Event('scroll'), 'timeStamp', { value: 960 }),
+          ),
+        );
+        await tap(links()[1]!, 1120);
+        expect(travel).not.toHaveBeenCalled();
+
+        // Long after the scroll stopped, the same touch is a tap again.
+        window.dispatchEvent(Object.defineProperty(new Event('scroll'), 'timeStamp', { value: 0 }));
+        await tap(links()[1]!, 1120);
+        expect(travel).toHaveBeenCalledOnce();
+      });
+
       it('leaves mouse input to the click', async () => {
         await act(async () =>
           links()[1]!.dispatchEvent(pointer('pointerdown', 10, 10, 1000, 'mouse')),
