@@ -212,7 +212,68 @@ describe('sky depths', () => {
         'in',
         expect.anything(),
         null,
+        expect.any(String),
       );
+    });
+
+    describe('touch taps', () => {
+      const pointer = (type: string, x: number, y: number, at: number, pointerType = 'touch') => {
+        const event = new MouseEvent(type, {
+          bubbles: true,
+          cancelable: true,
+          clientX: x,
+          clientY: y,
+        });
+        Object.defineProperties(event, {
+          pointerType: { value: pointerType },
+          pointerId: { value: 1 },
+          isPrimary: { value: true },
+          timeStamp: { value: at },
+        });
+        return event;
+      };
+      const tap = async (link: HTMLElement, upAt: number, dx = 2) => {
+        await act(async () => link.dispatchEvent(pointer('pointerdown', 10, 10, 1000)));
+        await act(async () => link.dispatchEvent(pointer('pointerup', 10 + dx, 10, upAt)));
+      };
+
+      beforeEach(async () => {
+        cache.loadTimelineYears.mockResolvedValue(years);
+        cache.loadYearSummary.mockReturnValue(new Promise(() => undefined));
+        await mount(depth);
+      });
+
+      it('enters on a short, still touch even without a click, and only once with its click', async () => {
+        await tap(links()[1]!, 1120);
+        expect(travel).toHaveBeenCalledOnce();
+
+        await act(async () =>
+          links()[1]!.dispatchEvent(
+            Object.defineProperty(
+              new MouseEvent('click', { bubbles: true, cancelable: true }),
+              'timeStamp',
+              { value: 1130 },
+            ),
+          ),
+        );
+        expect(travel).toHaveBeenCalledOnce();
+      });
+
+      it('treats a moving or slow touch as scrolling', async () => {
+        await tap(links()[1]!, 1120, 40);
+        await tap(links()[1]!, 1600);
+        expect(travel).not.toHaveBeenCalled();
+      });
+
+      it('leaves mouse input to the click', async () => {
+        await act(async () =>
+          links()[1]!.dispatchEvent(pointer('pointerdown', 10, 10, 1000, 'mouse')),
+        );
+        await act(async () =>
+          links()[1]!.dispatchEvent(pointer('pointerup', 10, 10, 1050, 'mouse')),
+        );
+        expect(travel).not.toHaveBeenCalled();
+      });
     });
 
     it('explains an archive without dated photos and points to Ordenar', async () => {

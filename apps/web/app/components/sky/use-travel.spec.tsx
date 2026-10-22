@@ -112,7 +112,8 @@ describe('useTravel', () => {
     stage.unregister();
   });
 
-  describe('exit guard', () => {
+  describe('slow navigation', () => {
+    const timers = ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] as const;
     const guarded = () => {
       const stage = fakeStage(false);
       const cancel = vi.fn();
@@ -121,32 +122,72 @@ describe('useTravel', () => {
       ]) as unknown as typeof stage.world.getAnimations;
       return { stage, cancel };
     };
+    const status = () => document.getElementById('sky-opening');
 
-    afterEach(() => vi.useRealTimers());
+    afterEach(() => {
+      vi.useRealTimers();
+      window.history.replaceState(null, '', '/');
+    });
 
-    it('gives the world back when the navigation never lands', async () => {
-      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    it('keeps the world away and says it is opening while the navigation is slow', async () => {
+      vi.useFakeTimers({ toFake: [...timers] });
       const { stage, cancel } = guarded();
-      await act(async () => travel('/timeline/2004', 'in', null, null));
+      await act(async () => travel('/timeline/2004', 'in', null, null, '2004'));
+      stage.engine.busy = true;
+      expect(status()).toBeNull();
+
+      await act(async () => vi.advanceTimersByTimeAsync(5000));
+      expect(status()?.textContent).toBe('Abriendo 2004…');
+      expect(status()?.getAttribute('role')).toBe('status');
+      expect(cancel).not.toHaveBeenCalled();
+      expect(stage.engine.busy).toBe(true);
+      stage.unregister();
+    });
+
+    it('lets a late navigation land without being cancelled', async () => {
+      vi.useFakeTimers({ toFake: [...timers] });
+      const { stage, cancel } = guarded();
+      await act(async () => travel('/timeline/2004', 'in', null, null, '2004'));
+      await act(async () => vi.advanceTimersByTimeAsync(8000));
+      window.history.replaceState(null, '', '/timeline/2004');
+
+      await act(async () => vi.advanceTimersByTimeAsync(20000));
+      expect(status()).toBeNull();
+      expect(cancel).not.toHaveBeenCalled();
+      expect(peekPendingTravel()).not.toBeNull();
+      stage.unregister();
+    });
+
+    it('gives the world back, and says so, when the navigation genuinely fails', async () => {
+      vi.useFakeTimers({ toFake: [...timers] });
+      const { stage, cancel } = guarded();
+      await act(async () => travel('/timeline/2004', 'in', null, null, '2004'));
       stage.engine.busy = true;
 
-      await act(async () => vi.advanceTimersByTimeAsync(3600));
+      await act(async () => vi.advanceTimersByTimeAsync(12100));
       expect(cancel).toHaveBeenCalledOnce();
       expect(stage.engine.busy).toBe(false);
       expect(peekPendingTravel()).toBeNull();
+      expect(status()?.dataset.failed).toBe('true');
+
+      await act(async () => vi.advanceTimersByTimeAsync(6000));
+      expect(status()).toBeNull();
+      // The user can try again.
+      await act(async () => travel('/timeline/2004', 'in', null, null));
+      expect(navigation.push).toHaveBeenCalledTimes(2);
       stage.unregister();
     });
 
     it('never lets an earlier trip cancel the animations of a later one', async () => {
-      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+      vi.useFakeTimers({ toFake: [...timers] });
       const { stage, cancel } = guarded();
       await act(async () => travel('/timeline/2004', 'in', null, null));
       await act(async () => vi.advanceTimersByTimeAsync(2000));
       await act(async () => travel('/timeline/2004/8', 'in', null, null));
       stage.engine.busy = true;
 
-      // The first trip's guard would fire here; it was replaced by the second trip's.
-      await act(async () => vi.advanceTimersByTimeAsync(1600));
+      // The first trip's watch would fire here; it was replaced by the second trip's.
+      await act(async () => vi.advanceTimersByTimeAsync(11000));
       expect(cancel).not.toHaveBeenCalled();
       expect(stage.engine.busy).toBe(true);
 
@@ -155,14 +196,46 @@ describe('useTravel', () => {
       stage.unregister();
     });
 
-    it('clears the guard when the owner unmounts', async () => {
-      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    it('clears the watch and the message when the owner unmounts', async () => {
+      vi.useFakeTimers({ toFake: [...timers] });
       const { stage, cancel } = guarded();
       await act(async () => travel('/timeline/2004', 'in', null, null));
+      await act(async () => vi.advanceTimersByTimeAsync(1000));
+      expect(status()).not.toBeNull();
       await act(async () => root.render(null));
+      expect(status()).toBeNull();
 
-      await act(async () => vi.advanceTimersByTimeAsync(5000));
+      await act(async () => vi.advanceTimersByTimeAsync(20000));
       expect(cancel).not.toHaveBeenCalled();
+      stage.unregister();
+    });
+  });
+
+  describe('failures', () => {
+    it('resets the travelling flag and the engine when the navigation throws', async () => {
+      const stage = fakeStage(false);
+      navigation.push.mockImplementationOnce(() => {
+        throw new Error('boom');
+      });
+      await act(async () => travel('/timeline/2004', 'in', null, null));
+      expect(stage.engine.busy).toBe(false);
+      expect(peekPendingTravel()).toBeNull();
+
+      await act(async () => travel('/timeline/2004', 'in', null, null));
+      expect(navigation.push).toHaveBeenCalledTimes(2);
+      stage.unregister();
+    });
+
+    it('resets the flags when the exit animation cannot start', async () => {
+      const stage = fakeStage(false);
+      animate.mockImplementationOnce(() => {
+        throw new Error('no animation');
+      });
+      await act(async () => travel('/timeline/2004', 'in', null, null));
+      expect(stage.engine.busy).toBe(false);
+
+      await act(async () => travel('/timeline/2005', 'in', null, null));
+      expect(navigation.push).toHaveBeenCalledExactlyOnceWith('/timeline/2005', { scroll: false });
       stage.unregister();
     });
   });

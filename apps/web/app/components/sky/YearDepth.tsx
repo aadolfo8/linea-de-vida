@@ -196,7 +196,7 @@ export function YearDepth({
             afterHeader={index === 0}
             photos={group.previews}
             more={Math.max(0, group.photoCount - group.previews.length)}
-            onEnter={(href, cluster) => travel(href, 'in', cluster, null)}
+            onEnter={(href, cluster, title) => travel(href, 'in', cluster, null, title)}
           />
         );
       })}

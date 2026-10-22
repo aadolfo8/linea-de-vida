@@ -6,6 +6,18 @@
   color: inherit;
   text-decoration: none;
 }
+/* Gaps between groups are margins; this widens the hit area into them without moving layout. */
+.sky-grp::before {
+  content: '';
+  position: absolute;
+  pointer-events: auto;
+}
+.sky-grp[data-axis='y']::before {
+  inset: calc(-1 * var(--grp-reach-lead, 0px)) 0 calc(-1 * var(--grp-reach-tail, 0px));
+}
+.sky-grp[data-axis='x']::before {
+  inset: 0 calc(-1 * var(--grp-reach-tail, 0px)) 0 calc(-1 * var(--grp-reach-lead, 0px));
+}
 .sky-lab {
   position: absolute;
   display: flex;
