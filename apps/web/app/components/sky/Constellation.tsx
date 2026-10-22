@@ -42,6 +42,13 @@ const SMALL_TILE = 420;
 /** A touch that moves less than this far and ends this fast is a tap, not a scroll. */
 const TAP_SLOP = 10;
 const TAP_MAX_MS = 300;
+/** A touch this soon after the page scrolled only stops the fling, as native lists do. */
+const FLING_STOP_MS = 100;
+let lastScrollAt = -Infinity;
+if (typeof window !== 'undefined')
+  window.addEventListener('scroll', (event) => (lastScrollAt = event.timeStamp), {
+    passive: true,
+  });
 /** How big a still-unrevealed placeholder star stays. */
 const STAR_SCALE = 0.06;
 
@@ -274,6 +281,10 @@ export function Constellation({
   // reports no click, but the pointer never moved. A drag ends in pointercancel instead.
   const onPointerDown = (event: PointerEvent) => {
     if (event.pointerType === 'mouse' || !event.isPrimary) return;
+    if (event.timeStamp - lastScrollAt < FLING_STOP_MS) {
+      touch.current = null;
+      return;
+    }
     touch.current = {
       id: event.pointerId,
       x: event.clientX,
