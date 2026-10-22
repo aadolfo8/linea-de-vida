@@ -19,6 +19,7 @@ import {
 } from '../timeline-model';
 import { useTimelinePosition } from '../useTimelinePosition';
 import { Constellation } from './Constellation';
+import { LoadQueue } from './load-queue';
 import { YEAR_CONSTELLATION } from './constellation-layout';
 import { SkyHint } from './SkyChrome';
 import { SkyRail, type SkyRailEntry } from './SkyRail';
@@ -49,7 +50,7 @@ export function YearsDepth({
   travel: TravelTo;
   onLanded: () => void;
 }) {
-  const { orientation } = useSky();
+  const { engine, orientation } = useSky();
   const [restore] = useState(() => shouldRestorePosition(ROOT));
   useTimelinePosition('sky:/timeline', { restorePosition: restore, variant: orientation });
 
@@ -61,15 +62,29 @@ export function YearsDepth({
   const [epoch, setEpoch] = useState(0);
   const requested = useRef(new Set<number>());
 
+  // Previews load nearest-first, a few groups at a time, and only for groups still wanted.
+  const queue = useMemo(
+    () =>
+      new LoadQueue((key) => {
+        const item = engine.itemByKey(key);
+        if (!item?.measured) return null;
+        const length = engine.viewportLength;
+        const distance = Math.abs(item.o + item.s / 2 - (engine.current + length / 2));
+        return distance > length * 3 ? null : distance;
+      }),
+    [engine],
+  );
+  useEffect(() => () => queue.dispose(), [queue]);
   useEffect(
     () =>
       subscribeArchiveIndexUpdated(() => {
         requested.current.clear();
+        queue.clear();
         setSummaries({});
         setEpoch((value) => value + 1);
         setAttempt((value) => value + 1);
       }),
-    [],
+    [queue],
   );
 
   useEffect(() => {
@@ -97,14 +112,22 @@ export function YearsDepth({
     setAttempt((value) => value + 1);
   };
 
-  const requestSummary = useCallback((year: number) => {
-    if (requested.current.has(year)) return;
-    requested.current.add(year);
-    loadYearSummary(year)
-      .then((summary) => setSummaries((current) => ({ ...current, [year]: summary })))
-      // The stars stay; a later visit asks again.
-      .catch(() => requested.current.delete(year));
-  }, []);
+  const requestSummary = useCallback(
+    (year: number) => {
+      if (requested.current.has(year)) return;
+      requested.current.add(year);
+      queue.request(
+        String(year),
+        () =>
+          loadYearSummary(year)
+            .then((summary) => setSummaries((current) => ({ ...current, [year]: summary })))
+            // The stars stay; a later visit asks again.
+            .catch(() => requested.current.delete(year)),
+        () => requested.current.delete(year),
+      );
+    },
+    [queue],
+  );
 
   const items = useMemo(() => (years?.items ?? []).filter((item) => item.photoCount > 0), [years]);
   const keys = useMemo(() => items.map((item) => String(item.year)), [items]);

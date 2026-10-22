@@ -55,6 +55,47 @@ describe('Google Drive media transport', () => {
     expect(body).toBe('small-thumbnail');
   });
 
+  describe('preview size', () => {
+    const sized = 'https://lh3.googleusercontent.com/private-thumbnail=s220';
+
+    it('rewrites only the size suffix of the link', async () => {
+      transport.get.mockResolvedValue({ data: { thumbnailLink: sized } });
+      await new GoogleDriveProvider().getThumbnailStream(connection, 'photo', undefined, 960);
+      expect(transport.request).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({
+          url: 'https://lh3.googleusercontent.com/private-thumbnail=s960',
+          maxRedirects: 0,
+        }),
+      );
+    });
+
+    it('keeps the default preview when no size is requested', async () => {
+      transport.get.mockResolvedValue({ data: { thumbnailLink: sized } });
+      await new GoogleDriveProvider().getThumbnailStream(connection, 'photo');
+      expect(transport.request).toHaveBeenCalledWith(expect.objectContaining({ url: sized }));
+    });
+
+    it.each([
+      ['a link without a size suffix', thumbnailLink, 960],
+      ['a size that is too large', sized, 100_000],
+      ['a size that is not an integer', sized, 12.5],
+    ])('refuses %s without calling Google', async (_name, link, size) => {
+      transport.get.mockResolvedValue({ data: { thumbnailLink: link } });
+      await expect(
+        new GoogleDriveProvider().getThumbnailStream(connection, 'photo', undefined, size),
+      ).rejects.toMatchObject({ status: 404 });
+      expect(transport.request).not.toHaveBeenCalled();
+    });
+
+    it('still refuses a resized link that leaves Google image hosts', async () => {
+      transport.get.mockResolvedValue({ data: { thumbnailLink: 'https://evil.example/x=s220' } });
+      await expect(
+        new GoogleDriveProvider().getThumbnailStream(connection, 'photo', undefined, 960),
+      ).rejects.toMatchObject({ status: 502 });
+      expect(transport.request).not.toHaveBeenCalled();
+    });
+  });
+
   it('requests and maps image dimensions from Drive metadata', async () => {
     transport.list.mockResolvedValue({
       data: {

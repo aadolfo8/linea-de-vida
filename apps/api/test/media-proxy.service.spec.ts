@@ -33,8 +33,15 @@ class FakeDrive extends DriveAdapter {
   async getFolder() {
     return null;
   }
-  async getThumbnailStream() {
+  thumbnailSizes: (number | undefined)[] = [];
+  async getThumbnailStream(
+    _connection?: unknown,
+    _fileId?: string,
+    _signal?: unknown,
+    size?: number,
+  ) {
     this.thumbnailCalls++;
+    this.thumbnailSizes.push(size);
     return { stream: this.thumbnailStream, contentType: 'image/jpeg' };
   }
   contentFileIds: string[] = [];
@@ -97,7 +104,7 @@ describe('media proxy', () => {
     expect(response.body()).toBe('thumbnail-stream');
   });
 
-  it('serves bounded responsive WebP thumbnails from the original image', async () => {
+  it('falls back to the original when Drive gives no usable preview for a small tile', async () => {
     const source = await sharp({
       create: { width: 1800, height: 1200, channels: 3, background: '#6b8e23' },
     })
@@ -116,9 +123,92 @@ describe('media proxy', () => {
     const metadata = await sharp(output).metadata();
     expect(metadata).toMatchObject({ format: 'webp', width: 640, height: 427 });
     expect(response.headers.get('Content-Type')).toBe('image/webp');
-    expect(response.headers.get('Cache-Control')).toBe('private, max-age=60, no-transform');
+    expect(response.headers.get('Cache-Control')).toBe('private, max-age=86400, no-transform');
     expect(drive.contentCalls).toBe(1);
-    expect(drive.thumbnailCalls).toBe(0);
+    // The fake preview is not an image: it was tried, rejected by the resize and replaced.
+    expect(drive.thumbnailCalls).toBe(1);
+  });
+
+  describe('small tiles cut from the Drive preview', () => {
+    const preview = () =>
+      sharp({ create: { width: 960, height: 640, channels: 3, background: '#445566' } })
+        .jpeg()
+        .toBuffer();
+
+    it('asks Drive for a slightly larger preview and never downloads the original', async () => {
+      const image = await preview();
+      const { service: proxy, drive } = service(ownerPhoto());
+      drive.getThumbnailStream = async (_c?: unknown, _f?: string, _s?: unknown, size?: number) => {
+        drive.thumbnailCalls++;
+        drive.thumbnailSizes.push(size);
+        return { stream: Readable.from(image), contentType: 'image/jpeg' };
+      };
+      const response = new ResponseMock();
+
+      await proxy.thumbnail('owner', 'photo-owner', request({ width: '640' }), response as any);
+
+      expect(drive.thumbnailSizes).toEqual([960]);
+      expect(drive.contentCalls).toBe(0);
+      const metadata = await sharp(Buffer.concat(response.chunks)).metadata();
+      expect(metadata).toMatchObject({ format: 'webp', width: 640, height: 427 });
+      expect(response.headers.get('Cache-Control')).toBe('private, max-age=86400, no-transform');
+    });
+
+    it('uses the original when the preview is refused or is not an image', async () => {
+      const original = await sharp({
+        create: { width: 1800, height: 1200, channels: 3, background: '#6b8e23' },
+      })
+        .jpeg()
+        .toBuffer();
+      for (const failure of [
+        () =>
+          Promise.reject(new DriveRequestError(404, 'Drive thumbnail size cannot be adjusted.')),
+        async () => ({ stream: Readable.from('<html></html>'), contentType: 'text/html' }),
+      ]) {
+        const { service: proxy, drive } = service(ownerPhoto());
+        drive.getThumbnailStream = failure as never;
+        drive.getContentStream = async () => {
+          drive.contentCalls++;
+          return { stream: Readable.from(original), contentType: 'image/jpeg' };
+        };
+        const response = new ResponseMock();
+
+        await proxy.thumbnail('owner', 'photo-owner', request({ width: '640' }), response as any);
+
+        expect(drive.contentCalls).toBe(1);
+        expect((await sharp(Buffer.concat(response.chunks)).metadata()).width).toBe(640);
+      }
+    });
+
+    it('keeps the large width on the original image', async () => {
+      const original = await sharp({
+        create: { width: 1800, height: 1200, channels: 3, background: '#6b8e23' },
+      })
+        .jpeg()
+        .toBuffer();
+      const { service: proxy, drive } = service(ownerPhoto());
+      drive.getContentStream = async () => {
+        drive.contentCalls++;
+        return { stream: Readable.from(original), contentType: 'image/jpeg' };
+      };
+      const response = new ResponseMock();
+
+      await proxy.thumbnail('owner', 'photo-owner', request({ width: '1280' }), response as any);
+
+      expect(drive.thumbnailCalls).toBe(0);
+      expect(drive.contentCalls).toBe(1);
+    });
+
+    it('does not fall back to the original when the client left', async () => {
+      const { service: proxy, drive } = service(ownerPhoto());
+      const client = request({ width: '640' });
+      drive.getThumbnailStream = async () => {
+        client.emit('aborted');
+        throw new Error('aborted');
+      };
+      await proxy.thumbnail('owner', 'photo-owner', client, new ResponseMock() as any);
+      expect(drive.contentCalls).toBe(0);
+    });
   });
 
   it('keeps responsive cache variants separate by requested width', async () => {
