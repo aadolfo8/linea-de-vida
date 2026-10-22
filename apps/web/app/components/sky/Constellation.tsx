@@ -22,6 +22,7 @@ import { mosaic } from './mosaic';
 import { clamp, seededRng, smooth } from './rng';
 import { isPlainClick } from './SkyChrome';
 import { useSky, useSkyFrame, useSkyItem } from './SkyStage';
+import { tileImageSettled, trackTileImage } from './tile-loading';
 
 /** Shapes of the stars shown while a group's photos are still on their way. */
 const PLACEHOLDER_ASPECTS = [1.5, 0.75, 1.5, 1.33, 0.8, 1.78, 1.5];
@@ -43,12 +44,15 @@ type Cell = {
   lag: number;
 };
 
-/** Tiles start as stars; the frame loop grows them into photos as they enter. */
+/** Tiles of photos start as stars; the frame loop grows them into photos as they enter. */
 const STAR_STYLE = {
   transform: `scale(${STAR_SCALE})`,
   borderRadius: '50%',
   '--dot': 1,
 } as CSSProperties;
+
+/** Placeholders stand for photos still on their way: visible at full size and shimmering. */
+const PLACEHOLDER_STYLE = { borderRadius: 6, '--dot': 0 } as CSSProperties;
 
 function useCells(
   photos: TimelinePhoto[] | null,
@@ -166,9 +170,10 @@ export function Constellation({
     settled.current = !frame.moved;
     const base = (1.12 - (item.o + item.s * 0.35 - frame.current) / frame.length) / 0.34;
     cells.forEach((cell, position) => {
+      if (!cell.photo) return;
       const tile = tileRefs.current[position];
       if (!tile) return;
-      const progress = cell.photo ? smooth(clamp(base - cell.lag * 1.4)) : STAR_SCALE;
+      const progress = smooth(clamp(base - cell.lag * 1.4));
       if (tile.dataset.progress === String(progress)) return;
       tile.dataset.progress = String(progress);
       tile.style.transform = `scale(${(0.05 + 0.95 * progress).toFixed(4)})`;
@@ -284,7 +289,7 @@ export function Constellation({
               top: cell.y,
               width: cell.w,
               height: cell.h,
-              ...(reduced && cell.photo ? undefined : STAR_STYLE),
+              ...(cell.photo ? (reduced ? undefined : STAR_STYLE) : PLACEHOLDER_STYLE),
             }}
           >
             {cell.photo && (
@@ -293,6 +298,9 @@ export function Constellation({
                 src={thumbnailVariantUrl(api, cell.photo.thumbnailUrl, 640)}
                 srcSet={`${thumbnailVariantUrl(api, cell.photo.thumbnailUrl, 640)} 640w, ${thumbnailVariantUrl(api, cell.photo.thumbnailUrl, 1280)} 1280w`}
                 sizes={`${Math.round(cell.w)}px`}
+                ref={trackTileImage}
+                onLoad={tileImageSettled}
+                onError={tileImageSettled}
                 alt=""
                 loading="lazy"
                 decoding="async"

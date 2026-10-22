@@ -45,6 +45,7 @@ import {
 } from './month-layout';
 import { shouldRestorePosition, travelLocation } from './travel';
 import { useMonthPhotos } from './use-month-photos';
+import { tileImageSettled, trackTileImage } from './tile-loading';
 import { useTravelEntry } from './use-travel';
 
 /** Tiles appear once as they come within this many viewports of the leading edge. */
@@ -447,6 +448,9 @@ const PhotoTile = memo(function PhotoTile({
         src={small}
         srcSet={`${small} 640w, ${large} 1280w`}
         sizes={`${Math.round(width)}px`}
+        ref={trackTileImage}
+        onLoad={tileImageSettled}
+        onError={tileImageSettled}
         alt=""
         width={photo.dimensions?.width}
         height={photo.dimensions?.height}
