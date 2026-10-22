@@ -6,6 +6,18 @@
   color: inherit;
   text-decoration: none;
 }
+/* Gaps between groups are margins; this widens the hit area into them without moving layout. */
+.sky-grp::before {
+  content: '';
+  position: absolute;
+  pointer-events: auto;
+}
+.sky-grp[data-axis='y']::before {
+  inset: calc(-1 * var(--grp-reach-lead, 0px)) 0 calc(-1 * var(--grp-reach-tail, 0px));
+}
+.sky-grp[data-axis='x']::before {
+  inset: 0 calc(-1 * var(--grp-reach-tail, 0px)) 0 calc(-1 * var(--grp-reach-lead, 0px));
+}
 .sky-lab {
   position: absolute;
   display: flex;
@@ -76,6 +88,11 @@
   background: var(--sky-tile);
   transform-origin: 50% 50%;
   will-change: transform, border-radius;
+}
+.sky-tile:not([data-loaded='true']) {
+  background: var(--sky-shimmer);
+  background-size: 220% 100%;
+  animation: sky-shimmer 1.8s linear infinite;
 }
 .sky-tile img {
   display: block;
@@ -231,6 +248,15 @@
   text-transform: uppercase;
 }
 
+@keyframes sky-shimmer {
+  from {
+    background-position: 110% 0;
+  }
+  to {
+    background-position: -110% 0;
+  }
+}
+
 @keyframes sky-pulse {
   50% {
     opacity: 0.35;
@@ -243,7 +269,61 @@
   .sky-tile img {
     transition: none;
   }
-  .sky-tile[data-star='true']::after {
+  .sky-tile[data-star='true']::after,
+  .sky-tile:not([data-loaded='true']),
+  .sky-skel-tile,
+  .sky-skel-num {
     animation: none;
   }
+}
+
+/* Skeleton of a depth while its data loads: faint outlines and tiles in the sky's own look. */
+.sky-skeleton {
+  display: grid;
+  gap: clamp(28px, 7vh, 72px);
+  width: min(1100px, calc(100vw - 48px));
+  margin: 0 auto;
+  pointer-events: none;
+}
+.sky-skel-grp {
+  display: grid;
+  gap: 14px;
+}
+.sky-skel-num {
+  width: clamp(120px, 22vw, 260px);
+  height: clamp(36px, 7vw, 76px);
+  border: 1px solid rgba(207, 224, 255, 0.22);
+  border-radius: 6px;
+  animation: sky-pulse 2.4s ease-in-out infinite;
+}
+.sky-skel-tiles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.sky-skel-tile {
+  flex: 1 1 120px;
+  max-width: 260px;
+  height: clamp(64px, 12vh, 120px);
+  border-radius: 6px;
+  background: var(--sky-shimmer);
+  background-size: 220% 100%;
+  animation: sky-shimmer 1.8s linear infinite;
+}
+.sky-skel-tile:nth-child(even) {
+  flex-basis: 180px;
+  animation-delay: -0.6s;
+}
+.sky-skel-tile:nth-child(3n) {
+  animation-delay: -1.2s;
+}
+.sky-skel-grp:nth-child(2) {
+  margin-left: clamp(0px, 8vw, 120px);
+}
+.sky-skel-grp:nth-child(3) {
+  margin-left: clamp(0px, 3vw, 48px);
+}
+.sky-state .sky-skeleton + .sky-wait {
+  justify-self: center;
+  margin-top: 28px;
 }

@@ -49,6 +49,11 @@
     opacity 0.7s var(--sky-ease),
     transform 0.9s var(--sky-ease);
 }
+.sky-ph:not([data-loaded='true']) {
+  background: var(--sky-shimmer);
+  background-size: 220% 100%;
+  animation: sky-shimmer 1.8s linear infinite;
+}
 .sky-ph[data-in] {
   opacity: 1;
   transform: none;
@@ -108,5 +113,11 @@
   .sky-ph {
     opacity: 1;
     transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sky-ph:not([data-loaded='true']) {
+    animation: none;
   }
 }

@@ -44,6 +44,8 @@ const photo = (id: string): TimelinePhoto => ({
 
 const RETURN = '/organizar?folder=abc';
 const settle = () => act(async () => new Promise<void>((resolve) => setTimeout(resolve, 60)));
+/** Previews are requested after the scroll rests for a moment, then queued nearest-first. */
+const settleLoads = () => act(async () => new Promise<void>((resolve) => setTimeout(resolve, 500)));
 
 describe('sky depths', () => {
   let container: HTMLDivElement;
@@ -145,6 +147,7 @@ describe('sky depths', () => {
         previews: [photo(`p${year}a`), photo(`p${year}b`)],
       }));
       await mount(depth);
+      await settleLoads();
 
       const year2004 = links()[1]!;
       expect(year2004.querySelectorAll('img')).toHaveLength(2);
@@ -157,6 +160,24 @@ describe('sky depths', () => {
       ]);
     });
 
+    it('waits for the scroll to rest before asking for previews, and ranks them for the centre', async () => {
+      cache.loadTimelineYears.mockResolvedValue(years);
+      cache.loadYearSummary.mockImplementation(async (year: number) => ({
+        year,
+        total: 12,
+        months: [{ month: 1, photoCount: 5 }],
+        unknownMonthCount: 0,
+        previews: [photo(`p${year}a`)],
+      }));
+      await mount(depth);
+      expect(cache.loadYearSummary).not.toHaveBeenCalled();
+
+      await settleLoads();
+      expect(cache.loadYearSummary).toHaveBeenCalledTimes(2);
+      const image = links()[1]!.querySelector('img')!;
+      expect(image.getAttribute('fetchpriority')).toBe('high');
+    });
+
     it('asks again for the previews of near groups after the archive index changes', async () => {
       cache.loadTimelineYears.mockResolvedValue(years);
       cache.loadYearSummary.mockImplementation(async (year: number) => ({
@@ -167,10 +188,11 @@ describe('sky depths', () => {
         previews: [photo(`p${year}a`)],
       }));
       await mount(depth);
+      await settleLoads();
       expect(cache.loadYearSummary.mock.calls.map((call) => call[0])).toEqual([1998, 2004]);
 
       await act(async () => notifyArchiveIndexUpdated());
-      await settle();
+      await settleLoads();
       expect(cache.loadYearSummary.mock.calls.map((call) => call[0])).toEqual([
         1998, 2004, 1998, 2004,
       ]);
@@ -199,6 +221,50 @@ describe('sky depths', () => {
       expect(links()[0]!.querySelectorAll('.sky-tile[data-star="true"]').length).toBeGreaterThan(0);
     });
 
+    it('keeps placeholder tiles visible at full size and shimmering until a photo arrives', async () => {
+      cache.loadTimelineYears.mockResolvedValue(years);
+      cache.loadYearSummary.mockReturnValue(new Promise(() => undefined));
+      await mount(depth);
+
+      const tiles = [...links()[0]!.querySelectorAll<HTMLElement>('.sky-tile[data-star="true"]')];
+      expect(tiles.every((tile) => !tile.style.transform.includes('scale'))).toBe(true);
+      expect(tiles.every((tile) => tile.dataset.loaded === undefined)).toBe(true);
+    });
+
+    it('stops the shimmer of a tile once its image loads or fails', async () => {
+      cache.loadTimelineYears.mockResolvedValue(years);
+      cache.loadYearSummary.mockImplementation(async (year: number) => ({
+        year,
+        total: 12,
+        months: [{ month: 1, photoCount: 5 }],
+        unknownMonthCount: 0,
+        previews: [photo(`p${year}a`), photo(`p${year}b`)],
+      }));
+      await mount(depth);
+      await settleLoads();
+
+      const [first, second] = [...links()[0]!.querySelectorAll('img')];
+      expect(first!.parentElement!.dataset.loaded).toBeUndefined();
+      await act(async () => first!.dispatchEvent(new Event('load')));
+      await act(async () => second!.dispatchEvent(new Event('error')));
+      expect(first!.parentElement!.dataset.loaded).toBe('true');
+      expect(second!.parentElement!.dataset.loaded).toBe('true');
+    });
+
+    it('shows a skeleton of constellations with a polite status while the years load', async () => {
+      cache.loadTimelineYears.mockReturnValue(new Promise(() => undefined));
+      await mount(depth);
+
+      const skeleton = container.querySelector('.sky-skeleton');
+      expect(skeleton?.getAttribute('aria-hidden')).toBe('true');
+      expect(skeleton?.querySelectorAll('.sky-skel-grp').length).toBeGreaterThan(1);
+      expect(skeleton?.querySelectorAll('.sky-skel-tile').length).toBeGreaterThan(4);
+      const status = container.querySelector('[role="status"]');
+      expect(status?.textContent).toBe('Cargando años…');
+      expect(status?.getAttribute('aria-live')).toBe('polite');
+      expect(container.querySelector('[aria-busy="true"]')).not.toBeNull();
+    });
+
     it('travels in through the group instead of following the plain link', async () => {
       cache.loadTimelineYears.mockResolvedValue(years);
       cache.loadYearSummary.mockReturnValue(new Promise(() => undefined));
@@ -212,7 +278,83 @@ describe('sky depths', () => {
         'in',
         expect.anything(),
         null,
+        expect.any(String),
       );
+    });
+
+    describe('touch taps', () => {
+      const pointer = (type: string, x: number, y: number, at: number, pointerType = 'touch') => {
+        const event = new MouseEvent(type, {
+          bubbles: true,
+          cancelable: true,
+          clientX: x,
+          clientY: y,
+        });
+        Object.defineProperties(event, {
+          pointerType: { value: pointerType },
+          pointerId: { value: 1 },
+          isPrimary: { value: true },
+          timeStamp: { value: at },
+        });
+        return event;
+      };
+      const tap = async (link: HTMLElement, upAt: number, dx = 2) => {
+        await act(async () => link.dispatchEvent(pointer('pointerdown', 10, 10, 1000)));
+        await act(async () => link.dispatchEvent(pointer('pointerup', 10 + dx, 10, upAt)));
+      };
+
+      beforeEach(async () => {
+        cache.loadTimelineYears.mockResolvedValue(years);
+        cache.loadYearSummary.mockReturnValue(new Promise(() => undefined));
+        await mount(depth);
+      });
+
+      it('enters on a short, still touch even without a click, and only once with its click', async () => {
+        await tap(links()[1]!, 1120);
+        expect(travel).toHaveBeenCalledOnce();
+
+        await act(async () =>
+          links()[1]!.dispatchEvent(
+            Object.defineProperty(
+              new MouseEvent('click', { bubbles: true, cancelable: true }),
+              'timeStamp',
+              { value: 1130 },
+            ),
+          ),
+        );
+        expect(travel).toHaveBeenCalledOnce();
+      });
+
+      it('treats a moving or slow touch as scrolling', async () => {
+        await tap(links()[1]!, 1120, 40);
+        await tap(links()[1]!, 1600);
+        expect(travel).not.toHaveBeenCalled();
+      });
+
+      it('only stops a fling when the touch lands while the page is still scrolling', async () => {
+        await act(async () =>
+          window.dispatchEvent(
+            Object.defineProperty(new Event('scroll'), 'timeStamp', { value: 960 }),
+          ),
+        );
+        await tap(links()[1]!, 1120);
+        expect(travel).not.toHaveBeenCalled();
+
+        // Long after the scroll stopped, the same touch is a tap again.
+        window.dispatchEvent(Object.defineProperty(new Event('scroll'), 'timeStamp', { value: 0 }));
+        await tap(links()[1]!, 1120);
+        expect(travel).toHaveBeenCalledOnce();
+      });
+
+      it('leaves mouse input to the click', async () => {
+        await act(async () =>
+          links()[1]!.dispatchEvent(pointer('pointerdown', 10, 10, 1000, 'mouse')),
+        );
+        await act(async () =>
+          links()[1]!.dispatchEvent(pointer('pointerup', 10, 10, 1050, 'mouse')),
+        );
+        expect(travel).not.toHaveBeenCalled();
+      });
     });
 
     it('explains an archive without dated photos and points to Ordenar', async () => {
