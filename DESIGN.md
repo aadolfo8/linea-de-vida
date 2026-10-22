@@ -1,6 +1,6 @@
 # Cielo nocturno — the timeline design
 
-This document describes the timeline as shipped, from the code in `apps/web/app/components`. Organizar and Ajustes are out of scope and keep their survey-paper look (see [Out of scope](#out-of-scope)).
+This document describes the timeline as shipped, from the code in `apps/web/app/components`, and how Ordenar and Ajustes borrow its sky (see [Ordenar and Ajustes](#ordenar-and-ajustes)).
 
 ## Purpose
 
@@ -127,8 +127,17 @@ Media is requested only through the session-guarded API proxy, with `width=640|1
 - The sky fonts are declared once in `app/fonts.ts` and exposed as CSS variables on `<body>` by the root layout; the palette stays scoped to `.sky` / `.sky-scope`.
 - The page fits one screen (`min-height: 100dvh`) and scrolls when zoomed or short.
 
+## Ordenar and Ajustes
+
+`/ordenar` and `/ajustes` live in the same night sky (`SkyPage`: the timeline's top bar and archive menu, a skip link, a faint static star layer; no travel and no canvas). The old `/organizar` and `/settings` addresses redirect to them.
+
+- **Tokens.** The `.sky` tokens, with short aliases in `components/sky/sky-page.css` (`--ink`, `--fg`, `--mute`, `--line`, `--accent`) plus two status colours used only for state: `--warn` (still to date) and `--ok` (done, up to date). Type is the same three faces.
+- **Ordenar.** Left column: piles with live counts (Sin fecha, Solo el año, Con fecha, Ocultas) and the Drive folder tree (`role="tree"`, arrows, Home/End, Enter/Space, per-subtree "N por fechar" or a check, a badge when the folder has a date). Below 900px the piles become a row of chips and the tree sits behind a "Carpetas de Drive" disclosure. The grid pages by cursor; click toggles, shift-click selects a range, Escape clears. A floating bar offers Poner fecha, Quitar fecha (only with manual dates), Ocultar / Volver a mostrar and Cancelar. The date sheet asks for the year, then the optional month ("No sé el mes") and day; the precision sent is exactly what was entered.
+- **Undo instead of confirmation.** Every reversible change shows one toast with Deshacer; a partial failure keeps the failed photos selected and offers Reintentar. Counts are announced through a polite live region.
+- **Motion.** Tiles that change pile fly out (scale and fade, 320 ms); with `prefers-reduced-motion` they just disappear and all CSS transitions and animations are off.
+- **Ajustes.** One card per source with its state (up to date and when, reading with found/processed counts, or the last reading failed with Reintentar), its numbers and "Ordenar N", "Buscar fotos nuevas", "Quitar" (two taps; Drive is never touched). "Añadir fotos" is a three-step dialog: kind, pasted folder link checked on our side (name, subfolders, Takeout hint), and what happens next with live progress. Account and privacy follow. A single banner with "Conectar Drive" shows on both screens when Drive is disconnected.
+
 ## Out of scope
 
-- Organizar and Ajustes keep the survey-paper theme (`--color-map-*`: ink `#0c2935`, paper `#f1efe8`, route `#1d7780`, active `#e96b4d`). Restyling them is a follow-up.
 - Light theme for the timeline: the sky is always dark (`color-scheme: dark`).
 - No new data claims: no face, place or content recognition, and no dates inferred beyond what the archive stores.
