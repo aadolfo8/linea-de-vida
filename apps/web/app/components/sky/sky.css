@@ -686,3 +686,41 @@
     animation: none;
   }
 }
+
+/* ---------- touch: no double-tap zoom delay, no grey flash, visible pressed state ---------- */
+.sky {
+  -webkit-tap-highlight-color: transparent;
+}
+.sky-grp,
+.sky-rail,
+.sky-bar,
+.sky :is(a, button),
+.sky-opening {
+  touch-action: manipulation;
+}
+/* The sky owns the whole gesture: no pull-to-refresh or edge bounce while it is on screen. */
+html:has(.sky),
+body:has(.sky) {
+  overscroll-behavior: none;
+}
+.sky-grp:active .sky-num {
+  color: rgba(207, 224, 255, 0.08);
+  -webkit-text-stroke-color: var(--sky-accent);
+}
+.sky-grp:active .sky-go {
+  opacity: 1;
+  transform: none;
+}
+.sky-rail button:active:not(:disabled),
+.sky-round:active,
+.sky-seg button:active {
+  color: var(--sky-accent);
+  background: color-mix(in srgb, var(--sky-accent) 14%, transparent);
+}
+/* Touch screens have no hover: the way in is always shown. */
+@media (hover: none) {
+  .sky-go {
+    opacity: 1;
+    transform: none;
+  }
+}

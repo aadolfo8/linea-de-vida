@@ -2,6 +2,7 @@ import type { SkyOrientation } from './orientation';
 import { clamp, seededRng } from './rng';
 import { createStars, drawStars, starCount, warpEnvelope, type Star } from './starfield';
 import { WARP_DURATION } from './travel';
+import { isCoarsePointer } from './viewport';
 
 /** A measured element on the track. Offsets come from layout, never from transformed rects. */
 export type SkyItem = {
@@ -33,7 +34,16 @@ type Parts = {
   canvas: HTMLCanvasElement;
 };
 
-const SMOOTHING = 0.1;
+/**
+ * Time constants (ms) of the chase of the track after the scroll position. 158ms is what a
+ * 10% step per 60Hz frame used to be, now independent of the frame rate. A finger already
+ * brings its own momentum, so touch follows almost directly instead of smoothing it twice.
+ */
+const DAMPING_TAU = 158;
+const DAMPING_TAU_TOUCH = 18;
+/** Longest step integrated at once, so a stalled frame does not make the track jump. */
+const MAX_FRAME_DT = 64;
+const NOMINAL_FRAME_DT = 1000 / 60;
 const JUMP_LEAD = 0.12;
 /** Rate of the canvas-only redraw while the track rests. */
 const TWINKLE_INTERVAL = 100;
@@ -66,6 +76,9 @@ export class SkyEngine {
   private dpr = 1;
   private warp = { start: 0, active: false, value: 0, direction: 1 as 1 | -1 };
   private raf = 0;
+  /** Timestamp of the previous frame of a run; 0 when the loop was idle. */
+  private lastFrame = 0;
+  private coarse = false;
   private twinkleTimer = 0;
   private lastDraw = -1;
   private dirty = true;
@@ -84,6 +97,7 @@ export class SkyEngine {
   attach(parts: Parts) {
     this.parts = parts;
     this.ctx = parts.canvas.getContext('2d');
+    this.coarse = isCoarsePointer();
     this.resize();
 
     const on = <K extends keyof WindowEventMap>(
@@ -333,6 +347,7 @@ export class SkyEngine {
     this.raf = 0;
     if (this.twinkleTimer) window.clearTimeout(this.twinkleTimer);
     this.twinkleTimer = 0;
+    this.lastFrame = 0;
   }
 
   /** At rest the stars still twinkle, but only the canvas redraws, at a low rate. */
@@ -342,6 +357,15 @@ export class SkyEngine {
     this.draw(performance.now(), false);
     this.twinkleTimer = window.setTimeout(this.twinkle, TWINKLE_INTERVAL);
   };
+
+  /** Fraction of the remaining distance to cover this frame: `1 - exp(-dt / tau)`. */
+  private dampingStep(time: number) {
+    if (this.reduced) return 1;
+    const elapsed = this.lastFrame ? time - this.lastFrame : NOMINAL_FRAME_DT;
+    this.lastFrame = time;
+    const dt = Math.min(MAX_FRAME_DT, Math.max(0, elapsed));
+    return 1 - Math.exp(-dt / (this.coarse ? DAMPING_TAU_TOUCH : DAMPING_TAU));
+  }
 
   private frame = (time: number) => {
     this.raf = 0;
@@ -353,7 +377,7 @@ export class SkyEngine {
       if (elapsed >= WARP_DURATION) this.warp = { ...this.warp, active: false, value: 0 };
     }
     const previous = this.current;
-    this.current += (this.target - this.current) * (this.reduced ? 1 : SMOOTHING);
+    this.current += (this.target - this.current) * this.dampingStep(time);
     if (Math.abs(this.target - this.current) < 0.05) this.current = this.target;
     const moved = previous !== this.current;
     parts.track.style.transform = this.horizontal
@@ -372,8 +396,9 @@ export class SkyEngine {
     // subscribers saw the track at rest. Everything that changes state wakes the loop again.
     if (moved || this.warp.active || this.dirty || Math.abs(this.target - this.current) > 0) {
       this.startLoop();
-    } else if (!this.reduced) {
-      this.twinkleTimer = window.setTimeout(this.twinkle, TWINKLE_INTERVAL);
+    } else {
+      this.lastFrame = 0;
+      if (!this.reduced) this.twinkleTimer = window.setTimeout(this.twinkle, TWINKLE_INTERVAL);
     }
   };
 
