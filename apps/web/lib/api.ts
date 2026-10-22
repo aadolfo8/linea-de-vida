@@ -34,8 +34,20 @@ export async function apiJson<T>(path: string, init?: RequestInit): Promise<T> {
   return response.json() as Promise<T>;
 }
 
+/** The `RequestInit` of a JSON request. */
+export const json = (method: string, body?: unknown): RequestInit => ({
+  method,
+  headers: { 'Content-Type': 'application/json' },
+  ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+});
+
 export const isUnauthenticated = (error: unknown) =>
   error instanceof ApiError && error.status === 401;
+
+/** An expired session sends the person back to the start instead of leaving a dead screen. */
+export function signOutIfExpired(error: unknown) {
+  if (isUnauthenticated(error)) window.location.replace('/');
+}
 
 export type Connection = { id: string; provider: string; status: string };
 export type Session = {
