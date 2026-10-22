@@ -14,6 +14,7 @@ import {
   type RefObject,
 } from 'react';
 import type { SkyOrientation } from './orientation';
+import { isBrowserChromeResize, isCoarsePointer } from './viewport';
 import { SkyEngine, type SkyFrame, type SkyItem } from './sky-engine';
 import { registerSkyStage } from './sky-registry';
 import './sky.css';
@@ -134,7 +135,14 @@ export function SkyStage({
     let timer = 0;
     const onResize = () => {
       window.clearTimeout(timer);
-      timer = window.setTimeout(() => setViewport(readViewport()), 150);
+      timer = window.setTimeout(
+        () =>
+          setViewport((previous) => {
+            const next = readViewport();
+            return isBrowserChromeResize(previous, next, isCoarsePointer()) ? previous : next;
+          }),
+        150,
+      );
     };
     window.addEventListener('resize', onResize);
     return () => {

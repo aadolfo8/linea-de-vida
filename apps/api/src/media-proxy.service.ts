@@ -24,6 +24,15 @@ const RESIZABLE_IMAGE_TYPES = new Set([
   'image/heic',
   'image/heif',
 ]);
+/**
+ * Small tiles are cut from Drive's own preview (about 100 KB) instead of the full original
+ * (up to 24 MB). The preview is requested a bit larger than the tile so the resize stays sharp.
+ */
+const DRIVE_THUMBNAIL_MAX_WIDTH = 640;
+const DRIVE_THUMBNAIL_OVERSAMPLE = 1.5;
+const MAX_DRIVE_THUMBNAIL_BYTES = 8 * 1024 * 1024;
+/** Thumbnails never change for a given photo copy, so browsers may keep them for a day. */
+const THUMBNAIL_CACHE_CONTROL = 'private, max-age=86400, no-transform';
 const MAX_RESIZE_INPUT_BYTES = 24 * 1024 * 1024;
 const MAX_RESIZE_INPUT_PIXELS = 80_000_000;
 type ThumbnailCacheEntry = { expiresAt: number; body: Buffer; contentType: string };
@@ -170,21 +179,36 @@ export class MediaProxyService {
     request.once('aborted', abort);
     response.once('close', abort);
     try {
-      const media = await withAbort(
-        this.drive.getContentStream(photo.source.connection, photo.driveFileId, controller.signal),
-        controller.signal,
-        (value) => value.stream.destroy(),
-      );
-      const input = await readBoundedStream(
-        media.stream,
-        MAX_RESIZE_INPUT_BYTES,
-        controller.signal,
-      );
-      const output = await sharp(input, { limitInputPixels: MAX_RESIZE_INPUT_PIXELS })
-        .rotate()
-        .resize({ width, withoutEnlargement: true, fit: 'inside' })
-        .webp({ quality: 86, effort: 4 })
-        .toBuffer();
+      const resize = (input: Buffer) =>
+        sharp(input, { limitInputPixels: MAX_RESIZE_INPUT_PIXELS })
+          .rotate()
+          .resize({ width, withoutEnlargement: true, fit: 'inside' })
+          .webp({ quality: 86, effort: 4 })
+          .toBuffer();
+      let output: Buffer | undefined;
+      if (width <= DRIVE_THUMBNAIL_MAX_WIDTH) {
+        try {
+          const preview = await this.readDrivePreview(photo, width, controller.signal);
+          if (preview) output = await resize(preview);
+        } catch (error) {
+          // Any preview problem just means the original is used instead.
+          if (controller.signal.aborted) throw error;
+        }
+      }
+      if (!output) {
+        const media = await withAbort(
+          this.drive.getContentStream(
+            photo.source.connection,
+            photo.driveFileId,
+            controller.signal,
+          ),
+          controller.signal,
+          (value) => value.stream.destroy(),
+        );
+        output = await resize(
+          await readBoundedStream(media.stream, MAX_RESIZE_INPUT_BYTES, controller.signal),
+        );
+      }
       if (controller.signal.aborted) {
         if (timedOut) throw new DriveRequestError(504, 'Image processing timed out.');
         return;
@@ -213,6 +237,25 @@ export class MediaProxyService {
       request.removeListener('aborted', abort);
       response.removeListener('close', abort);
     }
+  }
+
+  /** Drive's preview for a small tile; null when Drive does not give a usable image. */
+  private async readDrivePreview(photo: any, width: number, signal: AbortSignal) {
+    const media = await withAbort(
+      this.drive.getThumbnailStream(
+        photo.source.connection,
+        photo.driveFileId,
+        signal,
+        Math.round(width * DRIVE_THUMBNAIL_OVERSAMPLE),
+      ),
+      signal,
+      (value) => value.stream.destroy(),
+    );
+    if (!BROWSER_IMAGE_TYPES.has(normalizeMimeType(media.contentType))) {
+      media.stream.destroy();
+      return null;
+    }
+    return readBoundedStream(media.stream, MAX_DRIVE_THUMBNAIL_BYTES, signal);
   }
 
   async content(userId: string, photoId: string, request: Request, response: Response) {
@@ -374,7 +417,7 @@ export class MediaProxyService {
   private headers(response: Response, contentType: string, thumbnail: boolean) {
     response.set({
       'Content-Type': contentType,
-      'Cache-Control': thumbnail ? 'private, max-age=60, no-transform' : 'private, no-store',
+      'Cache-Control': thumbnail ? THUMBNAIL_CACHE_CONTROL : 'private, no-store',
       'X-Content-Type-Options': 'nosniff',
       Vary: 'Cookie',
     });

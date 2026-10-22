@@ -72,7 +72,8 @@ export function FolderTree({
             aria-selected={node.id === selectedId}
             aria-expanded={hasChildren ? open : undefined}
             className="ord-node"
-            style={{ paddingLeft: 8 + (level - 1) * 16 }}
+            style={{ paddingLeft: 8 + (level - 1) * 12 }}
+            title={node.name}
             onFocus={() => setFocusId(node.id)}
             onKeyDown={(event) => {
               if (event.target === event.currentTarget) onKeyDown(event, node.id);

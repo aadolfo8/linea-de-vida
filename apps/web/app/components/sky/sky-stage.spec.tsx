@@ -6,6 +6,7 @@ import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SkyChrome } from './SkyChrome';
+import { SkyEngine } from './sky-engine';
 import { SkyRail } from './SkyRail';
 import { SkyStage, useSky, useSkyItem } from './SkyStage';
 
@@ -256,5 +257,56 @@ describe('sky chrome', () => {
     expect(css).toMatch(
       /\.sky\[data-orientation='vertical'\] \.sky-track \{[^}]*padding-top: var\(--sky-bar-h\)/,
     );
+  });
+
+  it('is friendly to touch: manipulation gestures, pressed feedback, always-visible CTA, 44px targets', () => {
+    const css = readFileSync(resolve(__dirname, 'sky.css'), 'utf8');
+    const constellations = readFileSync(resolve(__dirname, 'constellation.css'), 'utf8');
+    expect(css).toMatch(/\.sky-grp,[^{]*\{[^}]*touch-action: manipulation/);
+    expect(css).toMatch(/-webkit-tap-highlight-color: transparent/);
+    expect(css).toMatch(/\.sky-grp:active \.sky-num/);
+    expect(css).toMatch(/html:has\(\.sky\),\s*body:has\(\.sky\) \{[^}]*overscroll-behavior: none/);
+    expect(css).toMatch(/@media \(hover: none\) \{\s*\.sky-go \{[^}]*opacity: 1/);
+    // Rail buttons are small to look at but keep the shared 44px hit area.
+    expect(css).toMatch(/\.sky :is\(a, button\),[^{]*\{[^}]*min-height: 44px/);
+    expect(constellations).toMatch(/\.sky-go \{[^}]*opacity: 0/);
+  });
+
+  it('ignores the small height changes of a mobile URL bar but not width or big changes', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const coarse = vi
+      .spyOn(window, 'matchMedia')
+      .mockImplementation(
+        (query: string) => ({ matches: query === '(pointer: coarse)' }) as MediaQueryList,
+      );
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(null);
+    const configure = vi.spyOn(SkyEngine.prototype, 'configure');
+    const resizeTo = async (width: number, height: number) => {
+      Object.assign(window, { innerWidth: width, innerHeight: height });
+      window.dispatchEvent(new Event('resize'));
+      await act(async () => vi.advanceTimersByTimeAsync(200));
+    };
+    Object.assign(window, { innerWidth: 400, innerHeight: 800 });
+    await act(async () =>
+      root.render(
+        <SkyStage orientation="vertical" onOrientationChange={() => undefined} label="Línea">
+          <Star itemKey="1" />
+        </SkyStage>,
+      ),
+    );
+    const base = configure.mock.calls.length;
+
+    await resizeTo(400, 740);
+    expect(configure.mock.calls.length).toBe(base);
+    await resizeTo(400, 800);
+    expect(configure.mock.calls.length).toBe(base);
+
+    await resizeTo(800, 400);
+    expect(configure.mock.calls.length).toBeGreaterThan(base);
+    const rotated = configure.mock.calls.length;
+    await resizeTo(800, 200);
+    expect(configure.mock.calls.length).toBeGreaterThan(rotated);
+    coarse.mockRestore();
+    vi.useRealTimers();
   });
 });
