@@ -123,6 +123,7 @@ function controllerFixture() {
       }),
       deleteMany: vi.fn(async () => ({ count: photos.length })),
     },
+    photoCover: { findMany: vi.fn(async () => []) },
     photoFile: {
       findMany: vi.fn(async () => []),
       deleteMany: vi.fn(async () => ({ count: 0 })),
@@ -451,6 +452,7 @@ describe('temporal timeline contracts', () => {
     const prisma: any = {
       $queryRawUnsafe: vi.fn(),
       photo: { findMany: vi.fn(async () => [record('preview', '2024-07-15')]) },
+      photoCover: { findMany: vi.fn(async () => []) },
     };
     return {
       prisma,

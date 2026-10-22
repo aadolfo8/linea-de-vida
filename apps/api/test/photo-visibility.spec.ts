@@ -125,6 +125,7 @@ describe('hidden photos leave every visible listing', () => {
         groupBy: vi.fn(async () => []),
         count: vi.fn(async () => 0),
       },
+      photoCover: { findMany: vi.fn(async () => []) },
       photoSource: { findFirst: vi.fn(async () => ({ id: 'source', userId: 'owner' })) },
       indexedFolder: {
         findFirst: vi.fn(async () => ({ id: 'folder', userId: 'owner', sourceId: 'source' })),

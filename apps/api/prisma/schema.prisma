@@ -49,6 +49,11 @@ enum PhotoStatus {
  UNSUPPORTED
  ACCESS_DENIED
 }
+enum CoverScopeKind {
+ YEAR
+ MONTH
+ UNKNOWN_MONTH
+}
 enum PhotoFileStatus {
  ACTIVE
  MISSING
@@ -108,6 +113,7 @@ model User {
  photoFiles PhotoFile[]
  indexedFolders IndexedFolder[]
  photoExclusions PhotoExclusion[]
+ photoCovers PhotoCover[]
 }
 model OAuthConnection {
  id String @id @default(cuid())
@@ -225,6 +231,7 @@ model Photo {
  folder IndexedFolder? @relation(fields:[folderId],references:[id],onDelete:SetNull)
  override ManualDateOverride?
  files PhotoFile[]
+ covers PhotoCover[]
  @@unique([userId,contentKey])
  @@index([userId,driveFileId])
  @@index([userId,status])
@@ -312,6 +319,23 @@ model PhotoExclusion {
  user User @relation(fields:[userId],references:[id],onDelete:Cascade)
  @@unique([userId,driveFileId])
  @@index([userId,createdAt])
+}
+/// A photo the user chose for a year, month or "Sin mes" cover. `month` is 0 unless the scope is a month,
+/// so the unique key never involves NULL. Only references are stored; validity is checked when read.
+model PhotoCover {
+ id String @id @default(cuid())
+ userId String
+ kind CoverScopeKind
+ year Int
+ month Int @default(0)
+ photoId String
+ position Int
+ createdAt DateTime @default(now())
+ user User @relation(fields:[userId],references:[id],onDelete:Cascade)
+ photo Photo @relation(fields:[photoId],references:[id],onDelete:Cascade)
+ @@unique([userId,kind,year,month,photoId])
+ @@index([userId,year])
+ @@index([photoId])
 }
 model ManualDateOverride {
  id String @id @default(cuid())
