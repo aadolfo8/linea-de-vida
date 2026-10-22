@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { isUnauthenticated } from '../../lib/api';
+import { ApiError, isUnauthenticated, signOutIfExpired } from '../../lib/api';
 import { orderingApi } from '../../lib/ordering/client';
 import {
   defaultPile,
@@ -39,10 +39,6 @@ const EMPTY_LIST: ListState = {
 
 const LEAVE_MS = 320;
 
-function signOutIfExpired(error: unknown) {
-  if (isUnauthenticated(error)) window.location.replace('/');
-}
-
 /**
  * Everything Ordenar reads: the sources, the piles, the folder tree, the photos of the current
  * view and the filename suggestions. The view itself (source, folder, pile) lives in the address.
@@ -56,14 +52,18 @@ export function useOrderingData({ reduced }: { reduced: boolean }) {
   const [tree, setTree] = useState<FolderTree | null>(null);
   const [piles, setPiles] = useState<PileCounts | null>(null);
   const [folder, setFolder] = useState<FolderDetail | null>(null);
+  const [folderFailed, setFolderFailed] = useState(false);
+  const [pilesFailed, setPilesFailed] = useState(false);
   const [suggestions, setSuggestions] = useState<FilenameSuggestions | null>(null);
   const [list, setList] = useState<ListState>(EMPTY_LIST);
   const [leaving, setLeaving] = useState<ReadonlySet<string>>(new Set());
   const [countsVersion, setCountsVersion] = useState(0);
   const [listVersion, setListVersion] = useState(0);
   const [sourcesVersion, setSourcesVersion] = useState(0);
+  const [folderVersion, setFolderVersion] = useState(0);
   const catalog = useRef(new Map<string, OrderingPhoto>());
-  const pileDecided = useRef<string | null>(null);
+  /** Callers of `refreshCounts` waiting for the one piles request the counts effect makes. */
+  const pilesWaiters = useRef<Array<(counts: PileCounts | null) => void>>([]);
 
   // The address is the source of truth for the view; read it once the page is in the browser.
   useEffect(() => setLocation(parseOrderLocation(window.location.search)), []);
@@ -106,8 +106,8 @@ export function useOrderingData({ reduced }: { reduced: boolean }) {
     [sourceId, folderId, includeSubfolders],
   );
   const scopeKey = `${sourceId}|${folderId}|${includeSubfolders}`;
-  const ready = location !== null && sources.status === 'ready' && sourceId !== null;
   const pile: Pile | null = location?.pile ?? null;
+  const ready = location !== null && sources.status === 'ready' && sourceId !== null;
 
   useEffect(() => {
     if (!ready || !sourceId) return;
@@ -127,28 +127,37 @@ export function useOrderingData({ reduced }: { reduced: boolean }) {
   useEffect(() => {
     if (!ready) return;
     let cancelled = false;
+    setPilesFailed(false);
+    const settleWaiters = (value: PileCounts | null) => {
+      for (const waiter of pilesWaiters.current.splice(0)) waiter(value);
+    };
     orderingApi
       .piles(scope)
       .then((value) => {
         if (cancelled) return;
         setPiles(value);
-        // First load of a view with no pile in the address: open the first pile that has work.
-        if (!location?.pile && pileDecided.current !== scopeKey) {
-          pileDecided.current = scopeKey;
-          patchLocation({ pile: defaultPile(value) });
-        }
+        setPilesFailed(false);
+        // A view with no pile in the address opens the first pile that has work, unless the
+        // person picked one while the counts were loading.
+        setLocation((current) =>
+          current && !current.pile ? { ...current, pile: defaultPile(value) } : current,
+        );
+        settleWaiters(value);
       })
       .catch((error: unknown) => {
         signOutIfExpired(error);
-        if (!cancelled) setPiles(null);
+        if (cancelled) return;
+        setPiles(null);
+        setPilesFailed(true);
+        settleWaiters(null);
       });
     return () => {
       cancelled = true;
     };
-    // `location.pile` is read only for the first decision; changing it must not refetch counts.
-  }, [ready, scopeKey, countsVersion]);
+  }, [ready, scope, countsVersion]);
 
   useEffect(() => {
+    setFolderFailed(false);
     if (!ready || !folderId) {
       setFolder(null);
       return;
@@ -157,17 +166,19 @@ export function useOrderingData({ reduced }: { reduced: boolean }) {
     orderingApi
       .folder(folderId)
       .then((value) => !cancelled && setFolder(value))
-      .catch(() => {
-        // A folder that no longer exists is dropped from the view instead of showing nothing.
-        if (!cancelled) {
+      .catch((error: unknown) => {
+        signOutIfExpired(error);
+        if (cancelled || isUnauthenticated(error)) return;
+        if (error instanceof ApiError && error.status === 404) {
+          // A folder that no longer exists is dropped from the view instead of showing nothing.
           setFolder(null);
           patchLocation({ folderId: null });
-        }
+        } else setFolderFailed(true);
       });
     return () => {
       cancelled = true;
     };
-  }, [ready, folderId, countsVersion, patchLocation]);
+  }, [ready, folderId, countsVersion, folderVersion, patchLocation]);
 
   useEffect(() => {
     if (!ready) return;
@@ -179,15 +190,24 @@ export function useOrderingData({ reduced }: { reduced: boolean }) {
     return () => {
       cancelled = true;
     };
-  }, [ready, scopeKey, countsVersion, scope]);
+  }, [ready, scope, countsVersion]);
 
   const remember = useCallback((photos: readonly OrderingPhoto[]) => {
     for (const photo of photos) catalog.current.set(photo.id, photo);
   }, []);
 
+  /** Names the view the list belongs to; a page that finishes for another view is dropped. */
+  const viewKey = `${scopeKey}|${pile}|${listVersion}`;
+  const viewRef = useRef(viewKey);
+  viewRef.current = viewKey;
+  const cursorRef = useRef<string | null>(null);
+  const loadingMoreRef = useRef(false);
+
   useEffect(() => {
     if (!ready || !pile) return;
     let cancelled = false;
+    cursorRef.current = null;
+    loadingMoreRef.current = false;
     setList(EMPTY_LIST);
     orderingApi
       .photos(scope, pile)
@@ -209,18 +229,18 @@ export function useOrderingData({ reduced }: { reduced: boolean }) {
     return () => {
       cancelled = true;
     };
-  }, [ready, scope, scopeKey, pile, listVersion, remember]);
+  }, [ready, scope, pile, listVersion, remember]);
 
-  const cursorRef = useRef<string | null>(null);
   cursorRef.current = list.nextCursor;
-  const loadingMoreRef = useRef(false);
   const loadMore = useCallback(async () => {
     const cursor = cursorRef.current;
     if (!cursor || !pile || loadingMoreRef.current) return;
+    const view = viewRef.current;
     loadingMoreRef.current = true;
     setList((current) => ({ ...current, loadingMore: true, moreFailed: false }));
     try {
       const page = await orderingApi.photos(scope, pile, { cursor });
+      if (viewRef.current !== view) return;
       remember(page.items);
       setList((current) => {
         const known = new Set(current.items.map((item) => item.id));
@@ -233,9 +253,10 @@ export function useOrderingData({ reduced }: { reduced: boolean }) {
       });
     } catch (error) {
       signOutIfExpired(error);
-      setList((current) => ({ ...current, loadingMore: false, moreFailed: true }));
+      if (viewRef.current === view)
+        setList((current) => ({ ...current, loadingMore: false, moreFailed: true }));
     } finally {
-      loadingMoreRef.current = false;
+      if (viewRef.current === view) loadingMoreRef.current = false;
     }
   }, [pile, scope, remember]);
 
@@ -256,15 +277,23 @@ export function useOrderingData({ reduced }: { reduced: boolean }) {
     [pile, scope, remember],
   );
 
-  const reloadList = useCallback(() => setListVersion((value) => value + 1), []);
-  const refreshCounts = useCallback(async () => {
-    setCountsVersion((value) => value + 1);
-    try {
-      return await orderingApi.piles(scope);
-    } catch {
-      return null;
-    }
-  }, [scope]);
+  const pilesFailedRef = useRef(false);
+  pilesFailedRef.current = pilesFailed;
+  /** Reloads the photos; when the counts never arrived they are asked for again too. */
+  const reloadList = useCallback(() => {
+    setListVersion((value) => value + 1);
+    if (pilesFailedRef.current) setCountsVersion((value) => value + 1);
+  }, []);
+  /** Asks for fresh counts; the counts effect makes the only request and answers every caller. */
+  const refreshCounts = useCallback(
+    () =>
+      new Promise<PileCounts | null>((resolve) => {
+        pilesWaiters.current.push(resolve);
+        setCountsVersion((value) => value + 1);
+      }),
+    [],
+  );
+  const reloadFolder = useCallback(() => setFolderVersion((value) => value + 1), []);
   const reloadSources = useCallback(() => setSourcesVersion((value) => value + 1), []);
 
   /** Photos that changed pile fly out of the view; with reduced motion they just disappear. */
@@ -303,6 +332,10 @@ export function useOrderingData({ reduced }: { reduced: boolean }) {
     [],
   );
 
+  // Without counts and without a pile in the address there is nothing to list yet: say so.
+  const shownList: ListState =
+    pilesFailed && !pile && list.status === 'loading' ? { ...EMPTY_LIST, status: 'error' } : list;
+
   return {
     location,
     patchLocation,
@@ -315,8 +348,10 @@ export function useOrderingData({ reduced }: { reduced: boolean }) {
     piles,
     tree,
     folder,
+    folderFailed,
+    reloadFolder,
     suggestions,
-    list,
+    list: shownList,
     leaving,
     catalog,
     remember,

@@ -7,7 +7,8 @@ import { activeDriveConnection, api, type Session } from '../../lib/api';
 import { orderingApi } from '../../lib/ordering/client';
 import { notifyArchiveIndexUpdated } from '../../lib/archive-index-events';
 import { emptyCopy, headline, pileCopy } from '../../lib/ordering/copy';
-import { draftFromStored, draftToPayload, photoCountText } from '../../lib/ordering/dates';
+import { draftFromStored, draftToPayload } from '../../lib/ordering/dates';
+import { photoCountLabel } from '../components/timeline-model';
 import { withManualDate } from '../../lib/ordering/results';
 import {
   addAll,
@@ -158,7 +159,7 @@ export function OrdenarScreen({ session }: { session: Session }) {
       void data.refreshCounts();
       actions.show({
         tone: 'ok',
-        message: `Hecho: ${photoCountText(summary.dated)} fechadas${summary.hidden ? ` y ${photoCountText(summary.hidden)} ocultas` : ''}.`,
+        message: `Hecho: ${photoCountLabel(summary.dated)} fechadas${summary.hidden ? ` y ${photoCountLabel(summary.hidden)} ocultas` : ''}.`,
       });
     }
   };
@@ -225,7 +226,7 @@ export function OrdenarScreen({ session }: { session: Session }) {
               <h2>{title}</h2>
               <p className="ord-sub">
                 {pile ? pileCopy[pile].sub : ''}
-                {piles && pile ? ` ${photoCountText(piles[pile])}.` : ''}
+                {piles && pile ? ` ${photoCountLabel(piles[pile])}.` : ''}
               </p>
             </div>
             <div className="ord-tools">
@@ -263,6 +264,14 @@ export function OrdenarScreen({ session }: { session: Session }) {
                 void actions.removeFolderDate({ id: folder.id, name: folder.name }, folderRule)
               }
             />
+          )}
+          {data.folderFailed && (
+            <div role="alert" className="sp-alert">
+              No se pudo cargar esta carpeta.{' '}
+              <button type="button" className="sp-btn" onClick={data.reloadFolder}>
+                Reintentar
+              </button>
+            </div>
           )}
           {suggestions && suggestions.totalCount > 0 && (
             <SuggestionBanner
@@ -379,14 +388,14 @@ export function OrdenarScreen({ session }: { session: Session }) {
 
       {dialog === 'date' && (
         <DateSheet
-          title={`Poner fecha a ${photoCountText(selected.size)}`}
+          title={`Poner fecha a ${photoCountLabel(selected.size)}`}
           subtitle="Basta con el año. Si sabes el mes o el día, mejor."
           previewUrls={selectedPhotos
             .slice(0, 12)
             .map((photo) => thumbnailVariantUrl(api, photo.thumbnailUrl, 640))}
           extraPhotos={Math.max(0, selected.size - 12)}
           initial={initialDraft()}
-          applyText={`Poner a ${photoCountText(selected.size)}`}
+          applyText={`Poner a ${photoCountLabel(selected.size)}`}
           onApply={applyDate}
           onCancel={() => setDialog(null)}
         />
