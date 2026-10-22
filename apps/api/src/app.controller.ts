@@ -36,7 +36,8 @@ import {
 import { loadRuntimeConfig } from './production';
 import { FolderDateRuleService } from './folder-date-rule.service';
 import { findOverlappingFolderSource, FolderAncestryUnavailable } from './folder-source-overlap';
-import { readPhotoDimensions } from './photo-dimensions';
+import { compactPhoto } from './photo-summary';
+import { readYearCovers, spread, COVER_LIMITS } from './covers';
 import { refreshPhotos } from './photo-catalog';
 import { PhotoVisibilityService } from './photo-visibility.service';
 
@@ -99,18 +100,7 @@ export class AppController {
     }
   }
   private compactPhoto(photo: any) {
-    const dimensions = readPhotoDimensions(photo.imageMetadata);
-    return {
-      id: photo.id,
-      fileName: photo.fileName,
-      mimeType: photo.mimeType,
-      thumbnailUrl: `/v1/photos/${photo.id}/thumbnail`,
-      ...(dimensions ? { dimensions } : {}),
-      effectiveDate: {
-        value: photo.effectiveDateValue,
-        precision: photo.effectiveDatePrecision,
-      },
-    };
+    return compactPhoto(photo);
   }
   private year(value: string) {
     const year = Number(value);
@@ -1170,19 +1160,24 @@ export class AppController {
       start,
       end,
     );
+    // Chosen covers come first; the automatic picks fill the free slots without repeating them.
+    const chosen = (await readYearCovers(this.prisma, userId, parsedYear)).year.valid;
     const previewIds = await this.prisma.$queryRawUnsafe<{ id: string }[]>(
       `WITH ordered AS (
          SELECT id, "effectiveDateValue", NTILE(8) OVER (ORDER BY "effectiveDateValue" DESC, id DESC) AS bucket
          FROM "Photo" WHERE "userId" = $1 AND status = 'ACTIVE' AND "hiddenAt" IS NULL
            AND "effectiveDateValue" >= $2 AND "effectiveDateValue" < $3
+           AND id <> ALL($4::text[])
        ) SELECT DISTINCT ON (bucket) id FROM ordered ORDER BY bucket, "effectiveDateValue" DESC, id DESC`,
       userId,
       start,
       end,
+      chosen.map((photo) => photo.id),
     );
-    const records = previewIds.length
+    const fill = spread(previewIds, COVER_LIMITS.YEAR - chosen.length);
+    const records = fill.length
       ? await this.prisma.photo.findMany({
-          where: { userId, id: { in: previewIds.map((row) => row.id) } },
+          where: { userId, id: { in: fill.map((row) => row.id) } },
           include: { override: true },
         })
       : [];
@@ -1198,10 +1193,9 @@ export class AppController {
         photoCount: months.get(index + 1) ?? 0,
       })),
       unknownMonthCount,
-      previews: previewIds
-        .map((row) => byId.get(row.id))
-        .filter(Boolean)
-        .map((photo) => this.compactPhoto(photo)),
+      previews: [...chosen, ...fill.map((row) => byId.get(row.id)).filter(Boolean)].map((photo) =>
+        this.compactPhoto(photo),
+      ),
     };
   }
   @UseGuards(SessionGuard) @Get('timeline/years/:year/months/:month/photos') async monthPhotos(
@@ -1315,9 +1309,16 @@ export class AppController {
     const parsedYear = this.year(year);
     const start = new Date(Date.UTC(parsedYear, 0, 1));
     const end = new Date(Date.UTC(parsedYear + 1, 0, 1));
-    // One pass for the whole year: count per group and one photo per NTILE bucket (up to 6).
+    const covers = await readYearCovers(this.prisma, userId, parsedYear);
+    const chosenOf = (month: number | null) =>
+      (month === null ? covers.unknownMonth : covers.months.get(month))?.valid ?? [];
+    const chosenIds = [covers.unknownMonth, ...covers.months.values()].flatMap((scope) =>
+      scope.valid.map((photo) => photo.id),
+    );
+    // One pass for the whole year: count per group and one photo per NTILE bucket (up to 6),
+    // leaving out the photos already chosen as covers (they are counted, not picked again).
     const rows = await this.prisma.$queryRawUnsafe<
-      { month: number | null; photoCount: bigint; id: string }[]
+      { month: number | null; photoCount: bigint; id: string | null }[]
     >(
       `WITH scoped AS (
          SELECT id, "effectiveDateValue",
@@ -1326,34 +1327,43 @@ export class AppController {
          FROM "Photo" WHERE "userId" = $1 AND status = 'ACTIVE' AND "hiddenAt" IS NULL
            AND "effectiveDateValue" >= $2 AND "effectiveDateValue" < $3
            AND "effectiveDatePrecision" IN ('YEAR', 'MONTH', 'DAY')
+       ), counts AS (
+         SELECT month, COUNT(*) AS "photoCount" FROM scoped GROUP BY month
        ), bucketed AS (
          SELECT id, month, "effectiveDateValue",
-                COUNT(*) OVER (PARTITION BY month) AS "photoCount",
                 NTILE(6) OVER (PARTITION BY month ORDER BY "effectiveDateValue" DESC, id DESC) AS bucket
-         FROM scoped
-       ) SELECT DISTINCT ON (month, bucket) month, "photoCount", id FROM bucketed
-       ORDER BY month NULLS LAST, bucket, "effectiveDateValue" DESC, id DESC`,
+         FROM scoped WHERE id <> ALL($4::text[])
+       ), picked AS (
+         SELECT DISTINCT ON (month, bucket) month, bucket, id FROM bucketed
+         ORDER BY month, bucket, "effectiveDateValue" DESC, id DESC
+       ) SELECT c.month, c."photoCount", p.id FROM counts c
+       LEFT JOIN picked p ON p.month IS NOT DISTINCT FROM c.month
+       ORDER BY c.month NULLS LAST, p.bucket`,
       userId,
       start,
       end,
+      chosenIds,
     );
-    const records = rows.length
+    const fillRows = rows.filter((row) => row.id);
+    const records = fillRows.length
       ? await this.prisma.photo.findMany({
-          where: { userId, id: { in: rows.map((row) => row.id) } },
+          where: { userId, id: { in: fillRows.map((row) => row.id!) } },
           include: { override: true },
         })
       : [];
     const byId = new Map(records.map((photo) => [photo.id, photo]));
-    const groups = new Map<
-      number | null,
-      { photoCount: number; previews: ReturnType<AppController['compactPhoto']>[] }
-    >();
+    const groups = new Map<number | null, { photoCount: number; previews: any[] }>();
     for (const row of rows) {
-      const photo = byId.get(row.id);
       const group = groups.get(row.month) ?? { photoCount: Number(row.photoCount), previews: [] };
-      if (photo) group.previews.push(this.compactPhoto(photo));
+      const photo = row.id ? byId.get(row.id) : undefined;
+      if (photo) group.previews.push(photo);
       groups.set(row.month, group);
     }
+    for (const [month, group] of groups)
+      group.previews = [
+        ...chosenOf(month),
+        ...spread(group.previews, COVER_LIMITS.MONTH - chosenOf(month).length),
+      ].map((photo) => this.compactPhoto(photo));
     return {
       year: parsedYear,
       items: [...groups].map(([month, group]) => ({

@@ -15,6 +15,7 @@ const uniqueKeys: Record<string, string[][]> = {
   manualDateOverride: [['photoId']],
   indexedFolder: [['userId', 'driveFolderId']],
   folderDateRule: [['folderId']],
+  photoCover: [['userId', 'kind', 'year', 'month', 'photoId']],
 };
 
 const isObject = (value: unknown): value is Record<string, any> =>
@@ -41,6 +42,9 @@ export class MemoryPrisma {
       folder: { target: 'indexedFolder', local: 'folderId', foreign: 'id', many: false },
       source: { target: 'photoSource', local: 'sourceId', foreign: 'id', many: false },
     },
+    photoCover: {
+      photo: { target: 'photo', local: 'photoId', foreign: 'id', many: false },
+    },
     photoFile: {
       photo: { target: 'photo', local: 'photoId', foreign: 'id', many: false },
       source: { target: 'photoSource', local: 'sourceId', foreign: 'id', many: false },
@@ -55,12 +59,14 @@ export class MemoryPrisma {
     photo: [
       { table: 'photoFile', foreign: 'photoId' },
       { table: 'manualDateOverride', foreign: 'photoId' },
+      { table: 'photoCover', foreign: 'photoId' },
     ],
   };
 
   readonly photo = this.model('photo');
   readonly photoFile = this.model('photoFile');
   readonly photoExclusion = this.model('photoExclusion');
+  readonly photoCover = this.model('photoCover');
   readonly manualDateOverride = this.model('manualDateOverride');
   readonly indexedFolder = this.model('indexedFolder');
   readonly folderDateRule = this.model('folderDateRule');
