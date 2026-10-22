@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useId, useRef, useState, type KeyboardEvent } from 'react';
-import { api } from '../../lib/api';
+import { api, signOutIfExpired } from '../../lib/api';
 import { orderingApi } from '../../lib/ordering/client';
 import {
   DECADES,
@@ -50,23 +50,32 @@ function useQuickPhotos(scope: OrderScope) {
     setPhotos([]);
     setStatus('loading');
     (async () => {
-      let count = 0;
+      // A photo dated with only a year moves from "undated" to "year only" while this runs, so it
+      // can come back in the second pile: every id is taken once per session.
+      const seen = new Set<string>();
       for (const pile of ['undated', 'yearOnly'] as const) {
         let cursor: string | null = null;
         do {
+          if (seen.size >= MAX_PHOTOS) break;
           const page = await orderingApi.photos(scope, pile, {
             cursor,
             limit: 100,
             order: 'name',
           });
           if (cancelled) return;
-          count += page.items.length;
-          setPhotos((current) => [...current, ...page.items]);
-          cursor = count >= MAX_PHOTOS ? null : page.nextCursor;
+          const fresh = page.items
+            .filter((item) => !seen.has(item.id))
+            .slice(0, MAX_PHOTOS - seen.size);
+          for (const item of fresh) seen.add(item.id);
+          if (fresh.length) setPhotos((current) => [...current, ...fresh]);
+          cursor = page.nextCursor;
         } while (cursor);
       }
       if (!cancelled) setStatus('done');
-    })().catch(() => !cancelled && setStatus('error'));
+    })().catch((error: unknown) => {
+      signOutIfExpired(error);
+      if (!cancelled) setStatus('error');
+    });
     return () => {
       cancelled = true;
     };
@@ -139,6 +148,7 @@ export function QuickMode({
       setSummary((current) => ({ ...current, dated: current.dated + 1 }));
       advance();
     } catch (failure) {
+      signOutIfExpired(failure);
       setError(apiErrorCopy(failure, 'No se pudo guardar esta fecha. Comprueba la conexión.'));
     } finally {
       setSaving(false);
@@ -161,6 +171,7 @@ export function QuickMode({
       setSummary((current) => ({ ...current, hidden: current.hidden + 1 }));
       advance();
     } catch (failure) {
+      signOutIfExpired(failure);
       setError(apiErrorCopy(failure, 'No se pudo ocultar esta foto. Comprueba la conexión.'));
     } finally {
       setSaving(false);

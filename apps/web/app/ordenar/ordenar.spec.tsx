@@ -2,7 +2,7 @@
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Session } from '../../lib/api';
+import { ApiError, type Session } from '../../lib/api';
 import { createFakeArchive, fakePhoto } from './fake-archive';
 
 vi.mock('next/navigation', () => ({
@@ -51,7 +51,17 @@ const basicPhotos = () => [
   fakePhoto('p5', { folderId: 'f3', hidden: true }),
 ];
 
+/** Holds a request until `open()` is called, to race it against what the person does next. */
+const gate = () => {
+  let open!: () => void;
+  const opened = new Promise<void>((resolve) => (open = resolve));
+  return { opened, open };
+};
+const apiFailure = (status: number) => new ApiError(status, 'REQUEST_FAILED', 'failed', null, null);
+
 describe('Ordenar', () => {
+  /** Runs before each request reaches the fake archive; it can wait or reject. */
+  let intercept: ((path: string, init?: RequestInit) => Promise<void> | void) | null = null;
   let root: Root;
   let container: HTMLDivElement;
   let archive: ReturnType<typeof createFakeArchive>;
@@ -70,7 +80,10 @@ describe('Ordenar', () => {
   ) => {
     window.history.replaceState(null, '', url);
     archive = createFakeArchive(photos, options);
-    vi.mocked(apiJson).mockImplementation((path, init) => archive.handler(path, init) as never);
+    vi.mocked(apiJson).mockImplementation(async (path, init) => {
+      await intercept?.(path, init);
+      return archive.handler(path, init) as never;
+    });
     await act(async () => root.render(<OrdenarScreen session={session(connected)} />));
     await settle();
   };
@@ -117,6 +130,7 @@ describe('Ordenar', () => {
     await act(async () => root.unmount());
     container.remove();
     vi.clearAllMocks();
+    intercept = null;
   });
 
   describe('piles, tree and grid', () => {
@@ -625,6 +639,25 @@ describe('Ordenar', () => {
       );
     });
 
+    it('does not offer again a photo it dated with only a year while still loading', async () => {
+      const late = gate();
+      let held = false;
+      await mount();
+      intercept = async (path) => {
+        if (path.includes('pile=yearOnly') && !held) {
+          held = true;
+          await late.opened;
+        }
+      };
+      await click(need('button', 'Fechar una a una'));
+      for (const digit of '1998') await key(digit);
+      await key('Enter');
+      late.open();
+      await settle();
+      // p1 moved to "year only" while it loaded: it is counted once, with p4.
+      expect(need('[role="dialog"]').textContent).toContain('Foto 2 de 4');
+    });
+
     it('is not offered when nothing is left to date', async () => {
       await mount([fakePhoto('p1', { date: manual('2004-08-01T00:00:00.000Z', 'MONTH') })]);
       expect(need<HTMLButtonElement>('button', 'Fechar una a una').disabled).toBe(true);
@@ -672,6 +705,107 @@ describe('Ordenar', () => {
       failing = false;
       await click(need('[role="alert"] button', 'Reintentar'));
       expect(tiles().map((node) => node.getAttribute('aria-label'))).toEqual(['p4.jpg, 1998']);
+    });
+  });
+  describe('consistency under races and failures', () => {
+    const undatedMany = () => [
+      ...Array.from({ length: 70 }, (_, index) => fakePhoto(`u${String(index).padStart(2, '0')}`)),
+      fakePhoto('y1', { date: manual('1998-01-01T00:00:00.000Z', 'YEAR') }),
+    ];
+
+    it('drops a page that arrives after the person changed pile', async () => {
+      await mount(undatedMany());
+      const late = gate();
+      intercept = async (path) => {
+        if (path.includes('cursor=')) await late.opened;
+      };
+      await click(need('button', 'Cargar más fotos'));
+      await click(need('[data-pile="yearOnly"]'));
+      late.open();
+      await settle();
+      expect(tiles().map((node) => node.getAttribute('aria-label'))).toEqual(['y1.jpg, 1998']);
+    });
+
+    it('keeps the pile the person chose while the first counts were loading', async () => {
+      const slow = gate();
+      let first = true;
+      intercept = async (path) => {
+        if (path.startsWith('/ordering/piles') && first) {
+          first = false;
+          await slow.opened;
+        }
+      };
+      await mount();
+      await click(need('[data-pile="hidden"]'));
+      slow.open();
+      await settle();
+      expect(need('[data-pile="hidden"]').getAttribute('aria-pressed')).toBe('true');
+      expect(window.location.search).toBe('?pile=hidden');
+    });
+
+    it('does not crash on an address whose pile is an object property', async () => {
+      await mount(basicPhotos(), {}, true, '/ordenar?pile=constructor');
+      expect(window.location.search).toBe('?pile=undated');
+    });
+
+    it('shows a retryable error when the first counts fail and picks a pile on retry', async () => {
+      let failing = true;
+      intercept = (path) => {
+        if (failing && path.startsWith('/ordering/piles')) throw apiFailure(500);
+      };
+      await mount();
+      expect(need('[role="alert"]').textContent).toContain('No se pudieron cargar las fotos');
+      failing = false;
+      await click(need('[role="alert"] button', 'Reintentar'));
+      expect(window.location.search).toBe('?pile=undated');
+      expect(tiles()).toHaveLength(3);
+    });
+
+    it('keeps the folder and offers a retry when its detail fails for another reason', async () => {
+      let failing = true;
+      intercept = (path) => {
+        if (failing && path.startsWith('/indexed-folders/f1')) throw apiFailure(500);
+      };
+      await mount(basicPhotos(), {}, true, '/ordenar?folder=f1');
+      expect(window.location.search).toContain('folder=f1');
+      expect(need('[role="alert"]').textContent).toContain('No se pudo cargar esta carpeta');
+      failing = false;
+      await click(need('[role="alert"] button', 'Reintentar'));
+      expect(find('[role="alert"]')).toBeUndefined();
+      expect(window.location.search).toContain('folder=f1');
+    });
+
+    it('drops a folder that no longer exists', async () => {
+      intercept = (path) => {
+        if (path.startsWith('/indexed-folders/f1')) throw apiFailure(404);
+      };
+      await mount(basicPhotos(), {}, true, '/ordenar?folder=f1');
+      expect(window.location.search).not.toContain('folder=');
+    });
+
+    it('asks for the counts once per change', async () => {
+      await mount();
+      const before = requests('GET', '/ordering/piles').length;
+      await click(tile('p1'));
+      await click(need('.ord-actions button', 'Ocultar'));
+      expect(requests('GET', '/ordering/piles')).toHaveLength(before + 1);
+    });
+
+    it('retries the undo itself when the undo fails', async () => {
+      await mount();
+      await click(tile('p1'));
+      await click(need('.ord-actions button', 'Ocultar'));
+      let failing = true;
+      intercept = (path) => {
+        if (failing && path.startsWith('/photos/unhide')) throw apiFailure(500);
+      };
+      await click(need('.sp-toast button', 'Deshacer'));
+      expect(need('.sp-toast').textContent).toContain('Algo falló por nuestra parte');
+      failing = false;
+      await click(need('.sp-toast button', 'Reintentar'));
+      // The failed attempt never reached the archive; the retry did.
+      expect(requests('POST', '/photos/unhide')).toHaveLength(1);
+      expect(need('.sp-toast').textContent).toContain('vuelven a estar como antes');
     });
   });
 });

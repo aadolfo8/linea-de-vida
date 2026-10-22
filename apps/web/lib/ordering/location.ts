@@ -21,7 +21,7 @@ const PILE_ALIASES: Record<string, Pile> = {
 };
 
 const pileFrom = (value: string | null): Pile | null =>
-  value && value in PILE_ALIASES ? PILE_ALIASES[value]! : null;
+  value && Object.hasOwn(PILE_ALIASES, value) ? PILE_ALIASES[value]! : null;
 
 export function parseOrderLocation(search: string): OrderLocation {
   const params = new URLSearchParams(search);

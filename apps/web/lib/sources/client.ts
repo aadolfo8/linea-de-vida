@@ -1,15 +1,9 @@
-import { apiJson, settingsEndpoint, type Source } from '../api';
+import { apiJson, json, settingsEndpoint, type Source } from '../api';
 import { orderingApi } from '../ordering/client';
 import type { SyncRun } from './sync';
 import type { SourceType } from './takeout';
 
 export type DriveChild = { id: string; name: string };
-
-const json = (method: string, body?: unknown): RequestInit => ({
-  method,
-  headers: { 'Content-Type': 'application/json' },
-  ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-});
 
 export const sourcesApi = {
   list: () => apiJson<{ items: Source[] }>('/photo-sources'),
