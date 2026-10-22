@@ -35,10 +35,16 @@ export abstract class DriveAdapter {
     connection: { refreshTokenCiphertext: string | null },
     folderId: string,
   ): Promise<DriveItem | null>;
+  /**
+   * Drive's own preview of a file. `size` asks for a larger longest edge than the default one;
+   * a link whose size cannot be adjusted safely is refused (404) instead of returning a preview
+   * smaller than requested.
+   */
   abstract getThumbnailStream(
     connection: { refreshTokenCiphertext: string | null },
     fileId: string,
     signal?: AbortSignal,
+    size?: number,
   ): Promise<{ stream: Readable; contentType: string; contentLength?: number }>;
   abstract getContentStream(
     connection: { refreshTokenCiphertext: string | null },
@@ -47,6 +53,13 @@ export abstract class DriveAdapter {
   ): Promise<{ stream: Readable; contentType: string; contentLength?: number }>;
 }
 const FOLDER = 'application/vnd.google-apps.folder';
+const MAX_THUMBNAIL_SIZE = 2048;
+/** Drive thumbnail links end in `=s<longest edge>`; only that suffix is ever rewritten. */
+function resizedThumbnailLink(link: string, size: number) {
+  if (!Number.isInteger(size) || size < 1 || size > MAX_THUMBNAIL_SIZE || !/=s\d+$/.test(link))
+    throw new DriveRequestError(404, 'Drive thumbnail size cannot be adjusted.');
+  return link.replace(/=s\d+$/, `=s${size}`);
+}
 export class GoogleDriveProvider implements DriveAdapter {
   private authClient(connection: { refreshTokenCiphertext: string | null; status?: string }) {
     if (connection.status && connection.status !== 'ACTIVE')
@@ -141,6 +154,7 @@ export class GoogleDriveProvider implements DriveAdapter {
     connection: { refreshTokenCiphertext: string | null },
     fileId: string,
     signal?: AbortSignal,
+    size?: number,
   ) {
     try {
       signal?.throwIfAborted();
@@ -151,7 +165,11 @@ export class GoogleDriveProvider implements DriveAdapter {
       signal?.throwIfAborted();
       if (!metadata.data.thumbnailLink)
         throw new DriveRequestError(404, 'Drive thumbnail is unavailable.');
-      const url = new URL(metadata.data.thumbnailLink);
+      const url = new URL(
+        size
+          ? resizedThumbnailLink(metadata.data.thumbnailLink, size)
+          : metadata.data.thumbnailLink,
+      );
       // Only send OAuth credentials to Google's image hosts, never follow redirects.
       if (
         url.protocol !== 'https:' ||

@@ -2,9 +2,11 @@
 
 import Link from 'next/link';
 import {
+  useEffect,
   useLayoutEffect,
   useMemo,
   useRef,
+  useState,
   type CSSProperties,
   type PointerEvent,
   type ReactNode,
@@ -26,8 +28,17 @@ import { tileImageSettled, trackTileImage } from './tile-loading';
 
 /** Shapes of the stars shown while a group's photos are still on their way. */
 const PLACEHOLDER_ASPECTS = [1.5, 0.75, 1.5, 1.33, 0.8, 1.78, 1.5];
-/** A group asks for its photos once it is this many viewports away. */
+/** A group is near while it is within this many viewports ahead of the viewport... */
 const NEAR_VIEWPORTS = 1.6;
+/** ...or this many behind it. */
+const NEAR_BEHIND = 0.6;
+/** The scroll counts as settled below this speed (px/ms) for `SETTLE_DWELL` ms. */
+const SETTLE_SPEED = 0.35;
+const SETTLE_DWELL = 150;
+/** The group around the viewport centre gets its photos first. */
+const CENTRED_VIEWPORTS = 0.6;
+/** Tiles at most this wide (CSS px) are served by the 640 variant even on dense screens. */
+const SMALL_TILE = 420;
 /** A touch that moves less than this far and ends this fast is a tap, not a scroll. */
 const TAP_SLOP = 10;
 const TAP_MAX_MS = 300;
@@ -53,6 +64,21 @@ const STAR_STYLE = {
 
 /** Placeholders stand for photos still on their way: visible at full size and shimmering. */
 const PLACEHOLDER_STYLE = { borderRadius: 6, '--dot': 0 } as CSSProperties;
+
+/**
+ * Image sources of a preview tile. The 1280 variant is offered only to tiles big enough to
+ * need it: on a 2x phone a small tile would otherwise pick it just because its pixel width is
+ * doubled, and previews do not need that sharpness.
+ */
+export function previewSources(apiBase: string, thumbnailUrl: string, tileWidth: number) {
+  const small = thumbnailVariantUrl(apiBase, thumbnailUrl, 640);
+  if (tileWidth <= SMALL_TILE) return { src: small };
+  return {
+    src: small,
+    srcSet: `${small} 640w, ${thumbnailVariantUrl(apiBase, thumbnailUrl, 1280)} 1280w`,
+    sizes: `${Math.round(tileWidth)}px`,
+  };
+}
 
 function useCells(
   photos: TimelinePhoto[] | null,
@@ -122,7 +148,11 @@ export function Constellation({
   afterHeader?: boolean;
   /** Changing it (e.g. the archive index was invalidated) lets `onNear` fire again. */
   epoch?: number;
-  /** Fires once per epoch, when the group approaches the viewport. */
+  /**
+   * Fires when the group is near the viewport and the scroll has settled for a moment (so a
+   * fast flick past many groups requests nothing). It may fire again after the group was left
+   * and approached again, or after `epoch` changes; consumers deduplicate.
+   */
   onNear?: () => void;
   onEnter: (href: string, cluster: Element | null, title: string) => void;
 }) {
@@ -138,8 +168,12 @@ export function Constellation({
   const labelRef = useRef<HTMLSpanElement>(null);
   const tileRefs = useRef<(HTMLSpanElement | null)[]>([]);
   const near = useRef(onNear);
-  const requested = useRef(false);
+  const fired = useRef(false);
+  const dwell = useRef(0);
+  const motion = useRef<{ current: number; time: number } | null>(null);
   const settled = useRef(false);
+  const [centred, setCentred] = useState(false);
+  const centredNow = useRef(false);
   const touch = useRef<{ id: number; x: number; y: number; at: number } | null>(null);
   /** When a touch tap already entered, so the click it produces does not enter twice. */
   const tapped = useRef(0);
@@ -151,9 +185,10 @@ export function Constellation({
   useLayoutEffect(() => {
     if (seenEpoch.current === epoch) return;
     seenEpoch.current = epoch;
-    requested.current = false;
+    fired.current = false;
     engine.wake();
   }, [engine, epoch]);
+  useEffect(() => () => window.clearTimeout(dwell.current), []);
   // New tiles (or a new layout) must be painted at least once even if the track is at rest.
   useLayoutEffect(() => {
     settled.current = false;
@@ -162,9 +197,36 @@ export function Constellation({
   useSkyFrame((frame) => {
     const item = itemRef.current;
     if (!item?.measured) return;
-    if (!requested.current && (item.o - frame.current) / frame.length < NEAR_VIEWPORTS) {
-      requested.current = true;
-      near.current?.();
+    const last = motion.current;
+    motion.current = { current: frame.current, time: frame.time };
+    const speed = last
+      ? Math.abs(frame.current - last.current) / Math.max(1, frame.time - last.time)
+      : 0;
+    const isNear =
+      item.o - frame.current < NEAR_VIEWPORTS * frame.length &&
+      item.o + item.s - frame.current > -NEAR_BEHIND * frame.length;
+    if (!isNear) {
+      window.clearTimeout(dwell.current);
+      dwell.current = 0;
+      fired.current = false;
+    } else if (!fired.current) {
+      if (speed >= SETTLE_SPEED) {
+        window.clearTimeout(dwell.current);
+        dwell.current = 0;
+      } else if (!dwell.current) {
+        dwell.current = window.setTimeout(() => {
+          dwell.current = 0;
+          fired.current = true;
+          near.current?.();
+        }, SETTLE_DWELL);
+      }
+    }
+    const isCentred =
+      Math.abs(item.o + item.s / 2 - (frame.current + frame.length / 2)) <
+      CENTRED_VIEWPORTS * frame.length;
+    if (isCentred !== centredNow.current) {
+      centredNow.current = isCentred;
+      setCentred(isCentred);
     }
     if (reduced || (settled.current && !frame.moved)) return;
     settled.current = !frame.moved;
@@ -295,14 +357,13 @@ export function Constellation({
             {cell.photo && (
               /* eslint-disable-next-line @next/next/no-img-element -- Private media URLs rely on the browser's session cookies. */
               <img
-                src={thumbnailVariantUrl(api, cell.photo.thumbnailUrl, 640)}
-                srcSet={`${thumbnailVariantUrl(api, cell.photo.thumbnailUrl, 640)} 640w, ${thumbnailVariantUrl(api, cell.photo.thumbnailUrl, 1280)} 1280w`}
-                sizes={`${Math.round(cell.w)}px`}
+                {...previewSources(api, cell.photo.thumbnailUrl, cell.w)}
                 ref={trackTileImage}
                 onLoad={tileImageSettled}
                 onError={tileImageSettled}
                 alt=""
                 loading="lazy"
+                fetchPriority={centred ? 'high' : 'low'}
                 decoding="async"
                 style={reduced ? undefined : { opacity: 0 }}
               />

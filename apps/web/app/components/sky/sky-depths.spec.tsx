@@ -44,6 +44,8 @@ const photo = (id: string): TimelinePhoto => ({
 
 const RETURN = '/organizar?folder=abc';
 const settle = () => act(async () => new Promise<void>((resolve) => setTimeout(resolve, 60)));
+/** Previews are requested after the scroll rests for a moment, then queued nearest-first. */
+const settleLoads = () => act(async () => new Promise<void>((resolve) => setTimeout(resolve, 500)));
 
 describe('sky depths', () => {
   let container: HTMLDivElement;
@@ -145,6 +147,7 @@ describe('sky depths', () => {
         previews: [photo(`p${year}a`), photo(`p${year}b`)],
       }));
       await mount(depth);
+      await settleLoads();
 
       const year2004 = links()[1]!;
       expect(year2004.querySelectorAll('img')).toHaveLength(2);
@@ -157,6 +160,24 @@ describe('sky depths', () => {
       ]);
     });
 
+    it('waits for the scroll to rest before asking for previews, and ranks them for the centre', async () => {
+      cache.loadTimelineYears.mockResolvedValue(years);
+      cache.loadYearSummary.mockImplementation(async (year: number) => ({
+        year,
+        total: 12,
+        months: [{ month: 1, photoCount: 5 }],
+        unknownMonthCount: 0,
+        previews: [photo(`p${year}a`)],
+      }));
+      await mount(depth);
+      expect(cache.loadYearSummary).not.toHaveBeenCalled();
+
+      await settleLoads();
+      expect(cache.loadYearSummary).toHaveBeenCalledTimes(2);
+      const image = links()[1]!.querySelector('img')!;
+      expect(image.getAttribute('fetchpriority')).toBe('high');
+    });
+
     it('asks again for the previews of near groups after the archive index changes', async () => {
       cache.loadTimelineYears.mockResolvedValue(years);
       cache.loadYearSummary.mockImplementation(async (year: number) => ({
@@ -167,10 +188,11 @@ describe('sky depths', () => {
         previews: [photo(`p${year}a`)],
       }));
       await mount(depth);
+      await settleLoads();
       expect(cache.loadYearSummary.mock.calls.map((call) => call[0])).toEqual([1998, 2004]);
 
       await act(async () => notifyArchiveIndexUpdated());
-      await settle();
+      await settleLoads();
       expect(cache.loadYearSummary.mock.calls.map((call) => call[0])).toEqual([
         1998, 2004, 1998, 2004,
       ]);
@@ -219,6 +241,7 @@ describe('sky depths', () => {
         previews: [photo(`p${year}a`), photo(`p${year}b`)],
       }));
       await mount(depth);
+      await settleLoads();
 
       const [first, second] = [...links()[0]!.querySelectorAll('img')];
       expect(first!.parentElement!.dataset.loaded).toBeUndefined();
