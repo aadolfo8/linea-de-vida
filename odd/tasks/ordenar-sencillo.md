@@ -33,11 +33,11 @@ TDD not configured (no project/session setting): ordinary functional checks. `pn
 
 ## Tasks
 
-- [ ] **OS-1 — Content identity and re-import without duplicates (API).** Request `md5Checksum,size` from Drive; store them; one photo can have several Drive copies (new relation); sync attaches a new copy to the existing photo instead of creating a duplicate; reconciliation marks a photo missing only when all its copies are gone; Prisma migration and backfill strategy for existing rows; tests (re-export into the same source, export in a second source, old export deleted). Route: delegated writer.
-- [ ] **OS-2 — Ordering API.** Filename dates (WhatsApp/phone/screenshot patterns) below camera/Takeout and above folder names; soft hide with instant restore; batch set/clear of dates without the visible 50 limit (chunked server-side); folder date = include-subfolders + override-camera flags mapped onto the existing scopes; endpoints for piles counts, folder tree with per-subtree counts, photos by pile and folder subtree (cursor); suggestions endpoint. Route: delegated writer.
-- [ ] **OS-3 — Ordenar screen (web).** Route, piles, folder tree, grid/selection, action bar, date sheet, undo, suggestions, quick mode, peek; night-sky styling; tests. Route: delegated writer.
-- [ ] **OS-4 — Ajustes screen (web).** Source cards, add-photos wizard (paste link + preview + Takeout detection), sync progress, account, privacy; navigation rename (Cronología / Ordenar / Ajustes); tests. Route: delegated writer.
-- [ ] **OS-5 — Cleanup and finish.** Remove `ArchiveWorkspace` and dead code/styles/specs, keep `/organizar` and `/settings` redirects, docs (README, DESIGN.md), code review, browser QA. Route: delegated writer + parent review.
+- [x] **OS-1 — Content identity and re-import without duplicates (API).** Request `md5Checksum,size` from Drive; store them; one photo can have several Drive copies (new relation); sync attaches a new copy to the existing photo instead of creating a duplicate; reconciliation marks a photo missing only when all its copies are gone; Prisma migration and backfill strategy for existing rows; tests (re-export into the same source, export in a second source, old export deleted). Route: delegated writer.
+- [x] **OS-2 — Ordering API.** Filename dates (WhatsApp/phone/screenshot patterns) below camera/Takeout and above folder names; soft hide with instant restore; batch set/clear of dates without the visible 50 limit (chunked server-side); folder date = include-subfolders + override-camera flags mapped onto the existing scopes; endpoints for piles counts, folder tree with per-subtree counts, photos by pile and folder subtree (cursor); suggestions endpoint. Route: delegated writer.
+- [x] **OS-3 — Ordenar screen (web).** Route, piles, folder tree, grid/selection, action bar, date sheet, undo, suggestions, quick mode, peek; night-sky styling; tests. Route: delegated writer.
+- [x] **OS-4 — Ajustes screen (web).** Source cards, add-photos wizard (paste link + preview + Takeout detection), sync progress, account, privacy; navigation rename (Cronología / Ordenar / Ajustes); tests. Route: delegated writer.
+- [x] **OS-5 — Cleanup and finish.** Remove `ArchiveWorkspace` and dead code/styles/specs, keep `/organizar` and `/settings` redirects, docs (README, DESIGN.md), code review, browser QA. Route: delegated writer + parent review.
 
 ## Delivery
 
@@ -48,6 +48,11 @@ Forecast: about 4,000 authored changed lines. The user previously chose direct d
 - Branch `feat/ordenar-sencillo` from `main` @ `d178342`.
 - Engram mirror: `odd/ordenar-sencillo/tasks`.
 
+- OS-1/OS-2 (API) in `cb63cec`, `1e3f2ac`, `c806efa`, `f13c71b`, `aec96bf`; parent fixed a suite that crashed when skipped (`d72d609`); parent code review → 10 findings fixed in `fe86a99`, `67b765a` (primary-folder dates across copies, re-key/merge on checksum change, cycle-safe rule walk, dead exclusion key dropped, mirror columns, paging/cursor/time validation, scoped suggestion accept, coherent legacy restore). API tests 369 passed + PostgreSQL suite 5/5 on a throwaway PG 14.4 with all migrations.
+- OS-3 Ordenar in `c85c65d`; OS-4 Ajustes in `23e699b` (finished by the parent after the writer was interrupted); OS-5 legacy removal in `05ad160` (-4,495 lines). Parent web code review → 10 findings fixed in `2343380` (stale pages across views, default pile race, undo retry, quick-mode duplicates/cap, prototype-key pile, first-load error state, auth errors in batches, folder detail errors, duplicate piles requests, shared helpers). Web tests 372 passed; typecheck, lint, build clean.
+- Browser QA (headless Edge via CDP + scratchpad `mock-order.cjs`): piles, WhatsApp suggestion, nested tree, selection bar, date sheet, apply with undo toast and live counts, folder breadcrumb and folder-date banner, Ajustes cards and add-photos wizard, mobile layouts.
+- Not verified: real Drive/Takeout data, the merge of existing duplicates on the first production sync, physical-phone gestures.
+
 ## Next step
 
-OS-1 and OS-2 (one API writer, separate commits).
+Feature complete on `feat/ordenar-sencillo` (not pushed). Pending user decision: merge and push to `main` (deploys production and runs five new migrations, including the content-identity backfill).
