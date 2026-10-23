@@ -47,6 +47,14 @@ const NOMINAL_FRAME_DT = 1000 / 60;
 const JUMP_LEAD = 0.12;
 /** Rate of the canvas-only redraw while the track rests. */
 const TWINKLE_INTERVAL = 100;
+/** A touch must travel this far before it is read as a drag along one axis. */
+const SWIPE_SLOP = 8;
+/** Momentum of a released swipe decays with this time constant (ms). */
+const FLING_TAU = 325;
+/** Slower than this (px/ms) a release carries no momentum. */
+const FLING_MIN_SPEED = 0.05;
+/** Only the last stretch of the gesture decides how fast it was released. */
+const FLING_WINDOW = 90;
 const TEXT_ENTRY = 'input, textarea, select, [contenteditable="true"], [role="dialog"]';
 
 /**
@@ -85,6 +93,15 @@ export class SkyEngine {
   private measureQueued = false;
   private observer: ResizeObserver | null = null;
   private cleanups: (() => void)[] = [];
+  private swipe: {
+    x: number;
+    y: number;
+    origin: number;
+    axis: 'x' | 'y' | null;
+    samples: { x: number; t: number }[];
+  } | null = null;
+  /** Momentum (px/ms along the travel axis) left by a released swipe. */
+  private fling = 0;
 
   get maxScroll() {
     return Math.max(0, this.trackLength - this.viewportLength);
@@ -114,6 +131,70 @@ export class SkyEngine {
         if (this.busy) return;
         this.target = clamp(window.scrollY, 0, this.maxScroll);
         this.startLoop();
+      },
+      { passive: true },
+    );
+    // Sideways travel follows a horizontal finger. Vertical gestures stay with native scroll,
+    // which the track already follows, and a tap never moves enough to be taken for a drag.
+    on(
+      'touchstart',
+      (event) => {
+        this.fling = 0;
+        const touch = event.touches[0];
+        if (!touch || event.touches.length > 1 || this.busy || !this.horizontal) {
+          this.swipe = null;
+          return;
+        }
+        this.swipe = {
+          x: touch.clientX,
+          y: touch.clientY,
+          origin: this.target,
+          axis: null,
+          samples: [{ x: touch.clientX, t: event.timeStamp }],
+        };
+      },
+      { passive: true },
+    );
+    on(
+      'touchmove',
+      (event) => {
+        const swipe = this.swipe;
+        const touch = event.touches[0];
+        if (!swipe || !touch || this.busy || !this.horizontal) return;
+        const dx = touch.clientX - swipe.x;
+        const dy = touch.clientY - swipe.y;
+        if (!swipe.axis) {
+          if (Math.max(Math.abs(dx), Math.abs(dy)) < SWIPE_SLOP) return;
+          swipe.axis = Math.abs(dx) > Math.abs(dy) ? 'x' : 'y';
+        }
+        if (swipe.axis !== 'x') return;
+        if (event.cancelable) event.preventDefault();
+        swipe.samples.push({ x: touch.clientX, t: event.timeStamp });
+        while (swipe.samples.length > 2 && event.timeStamp - swipe.samples[0]!.t > FLING_WINDOW)
+          swipe.samples.shift();
+        this.jumpTo(swipe.origin - dx);
+      },
+      { passive: false },
+    );
+    const endSwipe = (event: TouchEvent) => {
+      const swipe = this.swipe;
+      if (event.touches.length > 0) return;
+      this.swipe = null;
+      if (!swipe || swipe.axis !== 'x' || this.reduced) return;
+      const first = swipe.samples[0]!;
+      const last = swipe.samples[swipe.samples.length - 1]!;
+      const elapsed = last.t - first.t;
+      if (elapsed <= 0 || event.timeStamp - last.t > FLING_WINDOW) return;
+      const speed = -(last.x - first.x) / elapsed;
+      if (Math.abs(speed) < FLING_MIN_SPEED) return;
+      this.fling = speed;
+      this.startLoop();
+    };
+    on('touchend', endSwipe, { passive: true });
+    on(
+      'touchcancel',
+      () => {
+        this.swipe = null;
       },
       { passive: true },
     );
@@ -358,6 +439,17 @@ export class SkyEngine {
     this.twinkleTimer = window.setTimeout(this.twinkle, TWINKLE_INTERVAL);
   };
 
+  /** Carries a released swipe on: the target keeps drifting while its speed fades out. */
+  private coast(time: number) {
+    const elapsed = this.lastFrame ? time - this.lastFrame : NOMINAL_FRAME_DT;
+    const dt = Math.min(MAX_FRAME_DT, Math.max(0, elapsed));
+    const next = clamp(this.target + this.fling * dt, 0, this.maxScroll);
+    const blocked = next === this.target;
+    this.fling *= Math.exp(-dt / FLING_TAU);
+    if (blocked || Math.abs(this.fling) < FLING_MIN_SPEED / 4) this.fling = 0;
+    if (next !== this.target) this.jumpTo(next);
+  }
+
   /** Fraction of the remaining distance to cover this frame: `1 - exp(-dt / tau)`. */
   private dampingStep(time: number) {
     if (this.reduced) return 1;
@@ -376,6 +468,7 @@ export class SkyEngine {
       this.warp.value = warpEnvelope(elapsed, WARP_DURATION);
       if (elapsed >= WARP_DURATION) this.warp = { ...this.warp, active: false, value: 0 };
     }
+    if (this.fling !== 0) this.coast(time);
     const previous = this.current;
     this.current += (this.target - this.current) * this.dampingStep(time);
     if (Math.abs(this.target - this.current) < 0.05) this.current = this.target;
@@ -394,7 +487,7 @@ export class SkyEngine {
     this.frameListeners.forEach((listener) => listener(frame));
     // Keep going while anything moves; the frame after the last movement already ran, so
     // subscribers saw the track at rest. Everything that changes state wakes the loop again.
-    if (moved || this.warp.active || this.dirty || Math.abs(this.target - this.current) > 0) {
+    if (moved || this.fling !== 0 || this.warp.active || this.dirty || Math.abs(this.target - this.current) > 0) {
       this.startLoop();
     } else {
       this.lastFrame = 0;
