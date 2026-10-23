@@ -13,8 +13,8 @@ const HEIGHT = 360;
 const GAP = 4;
 
 /**
- * The cover as the constellation draws it: the same mosaic, with the first photo getting the
- * largest cell. Order matters, so the same photos in another order look different.
+ * The cover as the constellation draws it: the same scattered collage, with the first photo
+ * largest and on top. Order matters, so the same photos in another order look different.
  */
 export function CoverPreview({
   photos,
@@ -42,7 +42,7 @@ export function CoverPreview({
       {cells.length === 0 ? (
         <p className="cov-preview-empty">Todavía no hay fotos para mostrar.</p>
       ) : (
-        cells.map(({ item, x, y, w, h }) => (
+        cells.map(({ item, x, y, w, h, rotate, z }) => (
           <div
             key={item.photo.id}
             className="cov-cell"
@@ -51,6 +51,8 @@ export function CoverPreview({
               top: `${(y / HEIGHT) * 100}%`,
               width: `${(w / WIDTH) * 100}%`,
               height: `${(h / HEIGHT) * 100}%`,
+              rotate: `${rotate}deg`,
+              zIndex: z,
             }}
           >
             {/* eslint-disable-next-line @next/next/no-img-element -- private proxy URLs, sized by the API */}
