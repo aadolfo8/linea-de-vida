@@ -38,4 +38,4 @@ Delivery: branch `fix/sky-mobile-polish`; the user merges to `main`.
 
 ## Next step
 
-Delegate SM-1..SM-4 to one writer.
+Merged to main on 2026-10-23; user checks touch feel and the collage on a real phone.
