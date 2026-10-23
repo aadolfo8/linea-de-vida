@@ -58,6 +58,8 @@ type Cell = {
   y: number;
   w: number;
   h: number;
+  rotate: number;
+  z: number;
   /** Reveal delay: tiles nearer the leading edge appear first. */
   lag: number;
 };
@@ -99,12 +101,14 @@ function useCells(
       : PLACEHOLDER_ASPECTS.map((aspect) => ({ photo: null, aspect }));
     const rng = seededRng(seed);
     return mosaic(source, geometry.clusterWidth, geometry.clusterHeight, rng, geometry.tileGap).map(
-      ({ item, x, y, w, h }) => ({
+      ({ item, x, y, w, h, rotate, z }) => ({
         photo: item.photo,
         x,
         y,
         w,
         h,
+        rotate,
+        z,
         lag:
           (horizontal ? x / geometry.clusterWidth : y / geometry.clusterHeight) * 0.5 +
           rng() * 0.25,
@@ -197,9 +201,12 @@ export function Constellation({
   }, [engine, epoch]);
   useEffect(() => () => window.clearTimeout(dwell.current), []);
   // New tiles (or a new layout) must be painted at least once even if the track is at rest.
+  // The frame loop is what grows stars into photos, and it sleeps while the track rests: wake
+  // it, or the photos of a group that just arrived stay stars until the person scrolls.
   useLayoutEffect(() => {
     settled.current = false;
-  }, [cells]);
+    engine.wake();
+  }, [cells, engine]);
 
   useSkyFrame((frame) => {
     const item = itemRef.current;
@@ -362,6 +369,8 @@ export function Constellation({
               top: cell.y,
               width: cell.w,
               height: cell.h,
+              rotate: `${cell.rotate}deg`,
+              zIndex: cell.z,
               ...(cell.photo ? (reduced ? undefined : STAR_STYLE) : PLACEHOLDER_STYLE),
             }}
           >

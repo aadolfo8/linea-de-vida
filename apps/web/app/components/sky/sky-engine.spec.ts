@@ -176,4 +176,90 @@ describe('sky engine loop', () => {
       expect(chase(500, 500)).toBeLessThan(500);
     });
   });
+
+  describe('touch swipes', () => {
+    const touch = (type: string, x: number, y: number, at: number, ended = false) => {
+      const event = new Event(type, { cancelable: true, bubbles: true }) as Event & {
+        touches: unknown[];
+      };
+      Object.defineProperty(event, 'timeStamp', { value: at });
+      event.touches = ended ? [] : [{ clientX: x, clientY: y }];
+      window.dispatchEvent(event);
+      return event;
+    };
+    const ready = (orientation: 'horizontal' | 'vertical') => {
+      mount();
+      engine.configure({ orientation, reduced: false });
+      flush();
+      engine.trackLength = 10000;
+      engine.viewportLength = 1000;
+      engine.jumpTo(2000);
+      flush();
+    };
+
+    it('travels sideways with a horizontal finger and keeps the gesture from scrolling', () => {
+      ready('horizontal');
+      touch('touchstart', 300, 200, 0);
+      const move = touch('touchmove', 200, 205, 16);
+      expect(move.defaultPrevented).toBe(true);
+      expect(engine.target).toBe(2100);
+      touch('touchmove', 100, 210, 32);
+      expect(engine.target).toBe(2200);
+    });
+
+    it('leaves vertical swipes and taps to the page', () => {
+      ready('horizontal');
+      touch('touchstart', 300, 200, 0);
+      expect(touch('touchmove', 302, 100, 16).defaultPrevented).toBe(false);
+      expect(touch('touchmove', 200, 90, 32).defaultPrevented).toBe(false);
+      expect(engine.target).toBe(2000);
+      touch('touchstart', 300, 200, 100);
+      expect(touch('touchmove', 303, 202, 116).defaultPrevented).toBe(false);
+    });
+
+    it('does nothing in vertical orientation', () => {
+      ready('vertical');
+      touch('touchstart', 300, 200, 0);
+      expect(touch('touchmove', 100, 200, 16).defaultPrevented).toBe(false);
+      expect(engine.target).toBe(2000);
+    });
+
+    it('keeps coasting after release, then comes to rest', () => {
+      ready('horizontal');
+      touch('touchstart', 500, 200, 0);
+      touch('touchmove', 400, 200, 16);
+      touch('touchmove', 300, 200, 32);
+      touch('touchend', 300, 200, 40, true);
+      const released = engine.target;
+      flush(20);
+      expect(engine.target).toBeGreaterThan(released + 50);
+      flush();
+      const rest = engine.target;
+      flush();
+      expect(engine.target).toBe(rest);
+      expect(queue).toHaveLength(0);
+    });
+
+    it('carries no momentum with reduced motion, and a new touch stops it', () => {
+      ready('horizontal');
+      engine.configure({ orientation: 'horizontal', reduced: true });
+      touch('touchstart', 500, 200, 0);
+      touch('touchmove', 300, 200, 16);
+      touch('touchend', 300, 200, 20, true);
+      const released = engine.target;
+      flush();
+      expect(engine.target).toBe(released);
+
+      engine.configure({ orientation: 'horizontal', reduced: false });
+      touch('touchstart', 500, 200, 100);
+      touch('touchmove', 400, 200, 116);
+      touch('touchmove', 300, 200, 132);
+      touch('touchend', 300, 200, 136, true);
+      flush(3);
+      touch('touchstart', 300, 200, 200);
+      const stopped = engine.target;
+      flush();
+      expect(engine.target).toBe(stopped);
+    });
+  });
 });

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  MIN_SIDEWAYS_GAP_SMALL,
   SMALL_GUTTER,
   SMALL_RAIL,
   YEAR_CONSTELLATION,
@@ -51,6 +52,34 @@ describe('constellation geometry', () => {
     expect(geometry.clusterY).toBeGreaterThanOrEqual(900 * 0.2);
     expect(geometry.clusterY + geometry.clusterHeight).toBeLessThanOrEqual(900);
     expect(geometry.nodeY).toBeGreaterThan(geometry.clusterY + geometry.clusterHeight);
+  });
+});
+
+describe('sideways spacing on small screens', () => {
+  const phones = [
+    { width: 390, height: 800 },
+    { width: 844, height: 390 },
+    { width: 360, height: 640 },
+    { width: 600, height: 900 },
+  ];
+
+  it.each(phones)('keeps years apart on %o', (viewport) => {
+    const second = constellationGeometry(YEAR_CONSTELLATION, viewport, 'horizontal', 1, 4);
+    expect(second.marginLead).toBeGreaterThanOrEqual(MIN_SIDEWAYS_GAP_SMALL);
+    expect(second.marginLead).toBeGreaterThanOrEqual(second.clusterWidth * 0.6);
+    expect(second.marginLead).toBeGreaterThanOrEqual(viewport.width * 0.2);
+  });
+
+  it('still grows the gap with the group on roomy screens', () => {
+    const wide = constellationGeometry(
+      YEAR_CONSTELLATION,
+      { width: 1440, height: 900 },
+      'horizontal',
+      1,
+      4,
+    );
+    expect(wide.marginLead).toBeGreaterThanOrEqual(wide.clusterWidth * 0.25);
+    expect(wide.marginLead).toBeGreaterThanOrEqual(1440 * 0.11);
   });
 });
 

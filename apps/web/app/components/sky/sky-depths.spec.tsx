@@ -5,6 +5,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { TimelinePhoto } from '../timeline-model';
 import { notifyArchiveIndexUpdated } from '../../../lib/archive-index-events';
+import { SkyEngine } from './sky-engine';
 import { SkyStage } from './SkyStage';
 import { YearDepth } from './YearDepth';
 import { YearsDepth } from './YearsDepth';
@@ -131,6 +132,31 @@ describe('sky depths', () => {
       expect(new URL(href, 'http://x').searchParams.get('returnTo')).toBe(RETURN);
       expect(new URL(href, 'http://x').searchParams.get('returnLabel')).toBe('Verano');
       expect(cache.loadYearSummary).not.toHaveBeenCalledWith(2000);
+    });
+
+    it('wakes the sky when the previews of a year arrive, so they appear without scrolling', async () => {
+      cache.loadTimelineYears.mockResolvedValue(years);
+      let resolve!: (value: unknown) => void;
+      cache.loadYearSummary.mockImplementation(
+        (year: number) =>
+          new Promise((done) => {
+            resolve = () =>
+              done({
+                year,
+                total: 12,
+                months: [{ month: 1, photoCount: 5 }],
+                unknownMonthCount: 0,
+                previews: [photo(`w${year}a`), photo(`w${year}b`)],
+              });
+          }),
+      );
+      await mount(depth);
+      await settleLoads();
+      const wake = vi.spyOn(SkyEngine.prototype, 'wake');
+      await act(async () => resolve(undefined));
+      await settle();
+      expect(container.querySelector('img')).not.toBeNull();
+      expect(wake).toHaveBeenCalled();
     });
 
     it('fills a year with its previews, month count and remaining photos once it is near', async () => {
