@@ -39,8 +39,9 @@
 .cov-cell {
   position: absolute;
   overflow: hidden;
-  border-radius: 6px;
+  border-radius: 4px;
   background: var(--ink-3);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.45);
 }
 .cov-cell img {
   display: block;

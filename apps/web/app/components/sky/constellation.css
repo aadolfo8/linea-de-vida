@@ -86,8 +86,18 @@
   position: absolute;
   overflow: hidden;
   background: var(--sky-tile);
+  border-radius: 3px;
   transform-origin: 50% 50%;
   will-change: transform, border-radius;
+}
+.sky-tile[data-star='true'] {
+  box-shadow: none;
+}
+/* Photos lie on the sky like prints: a soft shadow and a faint edge lift them off it. */
+.sky-tile:not([data-star='true']) {
+  box-shadow:
+    0 0 0 1px rgba(207, 224, 255, 0.14),
+    0 8px 22px rgba(0, 0, 4, 0.55);
 }
 .sky-tile:not([data-loaded='true']) {
   background: var(--sky-shimmer);
