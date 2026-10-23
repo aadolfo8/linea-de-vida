@@ -27,6 +27,8 @@ export const MONTH_CONSTELLATION: ConstellationKind = {
 /** Narrow vertical travel keeps a left gutter and the slim rail's column free of content. */
 export const SMALL_GUTTER = 16;
 export const SMALL_RAIL = 44;
+/** Least room (px) between two groups when travelling sideways on a small screen. */
+export const MIN_SIDEWAYS_GAP_SMALL = 170;
 
 export type ConstellationGeometry = {
   clusterWidth: number;
@@ -64,7 +66,17 @@ export function constellationGeometry(
     ? Math.min(vh * kind.hFrac * kind.ratio, vw * 0.84)
     : Math.min(small ? vw - SMALL_GUTTER - SMALL_RAIL : vw * kind.vFrac, kind.maxW);
   const clusterHeight = clusterWidth / kind.ratio;
-  const between = horizontal ? vw * (small ? 0.2 : 0.11) : vh * 0.2;
+  // Sideways, the room between groups follows the size of a group too: a narrow, tall phone has
+  // a small width but wide groups, which a width-only gap packed shoulder to shoulder.
+  // A phone held sideways is wide but short, so it counts as compact too.
+  const compact = small || vh < 500;
+  const between = horizontal
+    ? Math.max(
+        vw * (compact ? 0.2 : 0.11),
+        clusterWidth * (compact ? 0.6 : 0.25),
+        compact ? MIN_SIDEWAYS_GAP_SMALL : 0,
+      )
+    : vh * 0.2;
   const first = horizontal ? vw * (afterHeader ? 0.04 : 0.08) : vh * (afterHeader ? 0.06 : 0.26);
   const marginTail = index === count - 1 ? (horizontal ? vw * 0.3 : vh * 0.3) : 0;
   const marginLead = index === 0 ? first : between;

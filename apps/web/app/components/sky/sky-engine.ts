@@ -487,7 +487,13 @@ export class SkyEngine {
     this.frameListeners.forEach((listener) => listener(frame));
     // Keep going while anything moves; the frame after the last movement already ran, so
     // subscribers saw the track at rest. Everything that changes state wakes the loop again.
-    if (moved || this.fling !== 0 || this.warp.active || this.dirty || Math.abs(this.target - this.current) > 0) {
+    if (
+      moved ||
+      this.fling !== 0 ||
+      this.warp.active ||
+      this.dirty ||
+      Math.abs(this.target - this.current) > 0
+    ) {
       this.startLoop();
     } else {
       this.lastFrame = 0;
