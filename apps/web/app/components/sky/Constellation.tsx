@@ -197,9 +197,12 @@ export function Constellation({
   }, [engine, epoch]);
   useEffect(() => () => window.clearTimeout(dwell.current), []);
   // New tiles (or a new layout) must be painted at least once even if the track is at rest.
+  // The frame loop is what grows stars into photos, and it sleeps while the track rests: wake
+  // it, or the photos of a group that just arrived stay stars until the person scrolls.
   useLayoutEffect(() => {
     settled.current = false;
-  }, [cells]);
+    engine.wake();
+  }, [cells, engine]);
 
   useSkyFrame((frame) => {
     const item = itemRef.current;
