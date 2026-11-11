@@ -9,7 +9,7 @@ services:
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      test: ['CMD-SHELL', 'pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB']
       interval: 10s
       timeout: 5s
       retries: 10
@@ -19,11 +19,11 @@ services:
   redis:
     image: redis:7-alpine
     restart: unless-stopped
-    command: ["redis-server", "--appendonly", "yes"]
+    command: ['redis-server', '--appendonly', 'yes']
     volumes:
       - redis-data:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ['CMD', 'redis-cli', 'ping']
       interval: 10s
       timeout: 5s
       retries: 10
@@ -37,15 +37,15 @@ services:
     env_file: .env
     command:
       [
-        "pnpm",
-        "--filter",
-        "@linea-de-vida/api",
-        "exec",
-        "prisma",
-        "migrate",
-        "deploy",
-        "--schema",
-        "prisma/schema.prisma",
+        'pnpm',
+        '--filter',
+        '@linea-de-vida/api',
+        'exec',
+        'prisma',
+        'migrate',
+        'deploy',
+        '--schema',
+        'prisma/schema.prisma',
       ]
     depends_on:
       postgres:
@@ -58,7 +58,7 @@ services:
       target: runtime
     restart: unless-stopped
     env_file: .env
-    command: ["node", "apps/api/dist/src/main.js"]
+    command: ['node', 'apps/api/dist/src/main.js']
     depends_on:
       postgres:
         condition: service_healthy
@@ -69,9 +69,9 @@ services:
     healthcheck:
       test:
         [
-          "CMD",
-          "node",
-          "-e",
+          'CMD',
+          'node',
+          '-e',
           "fetch('http://127.0.0.1:3001/v1/readiness').then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))",
         ]
       interval: 10s
@@ -89,7 +89,7 @@ services:
       target: runtime
     restart: unless-stopped
     env_file: .env
-    command: ["node", "apps/api/dist/src/worker.js"]
+    command: ['node', 'apps/api/dist/src/worker.js']
     depends_on:
       postgres:
         condition: service_healthy
@@ -100,9 +100,9 @@ services:
     healthcheck:
       test:
         [
-          "CMD",
-          "node",
-          "-e",
+          'CMD',
+          'node',
+          '-e',
           "const fs = require('node:fs'); const { isWorkerHeartbeatHealthy, WORKER_HEALTH_FILE } = require('/app/apps/api/dist/src/worker-health.js'); let heartbeat; try { heartbeat = fs.readFileSync(WORKER_HEALTH_FILE, 'utf8'); } catch { process.exit(1); } process.exit(isWorkerHeartbeatHealthy(heartbeat, Date.now(), 1) ? 0 : 1)",
         ]
       interval: 10s
@@ -119,22 +119,13 @@ services:
         NEXT_PUBLIC_API_URL: /v1
     restart: unless-stopped
     working_dir: /app/apps/web
-    command:
-      [
-        "node",
-        "node_modules/next/dist/bin/next",
-        "start",
-        "-H",
-        "0.0.0.0",
-        "-p",
-        "3000",
-      ]
+    command: ['node', 'node_modules/next/dist/bin/next', 'start', '-H', '0.0.0.0', '-p', '3000']
     healthcheck:
       test:
         [
-          "CMD",
-          "node",
-          "-e",
+          'CMD',
+          'node',
+          '-e',
           "fetch('http://127.0.0.1:3000').then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))",
         ]
       interval: 10s
