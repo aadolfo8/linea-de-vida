@@ -93,16 +93,16 @@ pnpm build
 
 ## 📚 Documentación
 
-| Documento                                                                                                   | Contenido                                                                     |
-| ----------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
-| [Referencia técnica](docs/technical-reference.md)                                                           | OAuth, producción, retención, API REST, medios, fechas y sincronización.      |
-| [DESIGN.md](DESIGN.md)                                                                                      | Diseño del «Cielo nocturno»: tokens, componentes, movimiento y accesibilidad. |
-| [PRODUCT.md](PRODUCT.md)                                                                                    | Propósito, usuarios y principios del producto.                                |
-| [Arquitectura](docs/architecture.md) · [Modelo de datos](docs/data-model.md)                                | Cómo está construido por dentro.                                              |
-| [Integración con Drive](docs/google-drive-integration.md) · [Sincronización](docs/sync-strategy.md)         | Cómo se leen y reconcilian las fotos.                                         |
-| [Google Takeout](docs/google-takeout.md)                                                                    | Cómo preparar una exportación para importarla.                                |
-| [Despliegue en producción](docs/production-deployment.md) · [CI/CD en VPS](docs/ci-cd-vps-guia-completa.md) | Llevarlo a un servidor.                                                       |
-| [Roadmap](docs/roadmap.md)                                                                                  | Fases completadas y siguientes pasos.                                         |
+| Documento                                                                                                   | Contenido                                                                                                                                                 |
+| ----------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [Referencia técnica](docs/technical-reference.md)                                                           | OAuth, producción, retención, API REST, medios, fechas y sincronización.                                                                                  |
+| [DESIGN.md](DESIGN.md)                                                                                      | Diseño del «Cielo nocturno»: tokens, componentes, movimiento y accesibilidad.                                                                             |
+| [PRODUCT.md](PRODUCT.md)                                                                                    | Propósito, usuarios y principios del producto.                                                                                                            |
+| [Arquitectura](docs/architecture.md) · [Modelo de datos](docs/data-model.md)                                | Cómo está construido por dentro.                                                                                                                          |
+| [Integración con Drive](docs/google-drive-integration.md) · [Sincronización](docs/sync-strategy.md)         | Cómo se leen y reconcilian las fotos.                                                                                                                     |
+| [Google Takeout](docs/google-takeout.md)                                                                    | Cómo preparar una exportación para importarla.                                                                                                            |
+| [Despliegue en producción](docs/production-deployment.md) · [CI/CD en VPS](docs/ci-cd-vps-guia-completa.md) | Llevarlo a un servidor: Docker Compose detrás de un Caddy compartido en `/srv/proxy` (fuera de este repo), publicado en <https://linea-de-vida.hidan.es>. |
+| [Roadmap](docs/roadmap.md)                                                                                  | Fases completadas y siguientes pasos.                                                                                                                     |
 
 ## 🧭 Principios
 
