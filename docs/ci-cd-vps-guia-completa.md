@@ -4,7 +4,7 @@ Esta guía explica, desde cero y con intención didáctica, cómo construimos el
 
 El objetivo es que una persona sin experiencia previa pueda entender no solo qué comandos ejecutamos, sino qué problema resuelve cada pieza y cómo circula una petición desde Internet hasta la aplicación.
 
-> Nota de seguridad: los dominios, correos, direcciones IP, claves y contraseñas se representan mediante nombres genéricos. Los secretos reales viven en GitHub y en el archivo `.env` del VPS; nunca deben escribirse en este documento ni subirse al repositorio.
+> Nota de seguridad: salvo el dominio público de la app (`linea-de-vida.hidan.es`), los correos, direcciones IP, claves y contraseñas se representan mediante nombres genéricos. Los secretos reales viven en GitHub y en el archivo `.env` del VPS; nunca deben escribirse en este documento ni subirse al repositorio.
 
 ## 1. El resultado final, antes de entrar en detalles
 
@@ -15,16 +15,16 @@ Cuando un cambio llega a `main`, GitHub Actions realiza dos trabajos distintos:
 
 En producción, Docker Compose mantiene estos servicios:
 
-| Servicio      | Responsabilidad                                   | Público en Internet  |
-| ------------- | ------------------------------------------------- | -------------------- |
-| PostgreSQL    | Persistencia principal                            | No                   |
-| Redis         | Cola de trabajos de BullMQ                        | No                   |
-| `migrate`     | Aplicar migraciones Prisma una vez por despliegue | No                   |
-| API NestJS    | Autenticación, Google Drive, timeline y datos     | No                   |
-| Worker BullMQ | Procesamiento asíncrono de carpetas y fotos       | No                   |
-| Web Next.js   | Interfaz de usuario                               | No                   |
-| Nginx         | Entrada pública, proxy inverso y TLS              | Sí, puertos 80 y 443 |
-| Certbot       | Emisión y renovación puntual de certificados      | No, solo bajo perfil |
+| Servicio      | Responsabilidad                                   | Público en Internet |
+| ------------- | ------------------------------------------------- | ------------------- |
+| PostgreSQL    | Persistencia principal                            | No                  |
+| Redis         | Cola de trabajos de BullMQ                        | No                  |
+| `migrate`     | Aplicar migraciones Prisma una vez por despliegue | No                  |
+| API NestJS    | Autenticación, Google Drive, timeline y datos     | No                  |
+| Worker BullMQ | Procesamiento asíncrono de carpetas y fotos       | No                  |
+| Web Next.js   | Interfaz de usuario                               | No                  |
+
+Delante de ellos hay un **proxy inverso compartido (Caddy)** que vive en `/srv/proxy`, fuera de este repositorio. Es el único proceso del VPS que publica los puertos 80 y 443, gestiona HTTPS automáticamente y sirve también a otras aplicaciones del mismo servidor. La app está publicada en `https://linea-de-vida.hidan.es`.
 
 El tráfico sigue este recorrido:
 
@@ -32,9 +32,9 @@ El tráfico sigue este recorrido:
 flowchart LR
     U[Usuario y navegador] --> DNS[DNS público]
     DNS --> VPS[IP pública del VPS]
-    VPS --> N[Nginx: 80 y 443]
-    N -->|/v1/*| API[API NestJS: 3001]
-    N -->|resto de rutas| WEB[Next.js: 3000]
+    VPS --> N[Caddy compartido: 80 y 443]
+    N -->|/v1/* via red proxy| API[API NestJS: linea-api:3001]
+    N -->|resto de rutas via red proxy| WEB[Next.js: linea-web:3000]
     API --> DB[(PostgreSQL)]
     API --> R[(Redis)]
     API --> G[Google Drive API]
@@ -43,7 +43,7 @@ flowchart LR
     W --> G
 ```
 
-La idea más importante es esta: **Nginx es la única puerta pública**. PostgreSQL, Redis, API, worker y web viven en una red privada de Docker y no publican puertos al host.
+La idea más importante es esta: **el Caddy compartido es la única puerta pública**. Ningún servicio de este stack publica puertos al host. PostgreSQL, Redis, worker y `migrate` viven solo en la red privada `app`; API y web están además en la red Docker externa `proxy`, que es por donde Caddy los alcanza.
 
 ## 2. Conceptos básicos
 
@@ -117,7 +117,7 @@ Sin Compose tendríamos que ejecutar muchos comandos `docker run` manuales y rec
 
 ### 3.1 Docker Compose en lugar de instalar Node directamente
 
-Podríamos haber instalado Node.js, pnpm, PostgreSQL, Redis, Nginx y todas las dependencias directamente en Ubuntu. Es una solución válida para aplicaciones pequeñas, pero introduce diferencias entre máquinas y hace más difícil reproducir o revertir el entorno.
+Podríamos haber instalado Node.js, pnpm, PostgreSQL, Redis, un proxy inverso y todas las dependencias directamente en Ubuntu. Es una solución válida para aplicaciones pequeñas, pero introduce diferencias entre máquinas y hace más difícil reproducir o revertir el entorno.
 
 Elegimos Docker Compose porque:
 
@@ -129,11 +129,11 @@ Elegimos Docker Compose porque:
 
 La contrapartida es que Docker consume recursos y añade una capa que hay que comprender. Además, la primera versión construía imágenes dentro del VPS, lo que puede cargar CPU y memoria durante el build.
 
-### 3.2 Nginx en lugar de exponer Next.js y NestJS
+### 3.2 Un proxy inverso compartido en lugar de exponer Next.js y NestJS
 
 Podríamos publicar el puerto 3000 de Next.js y el 3001 de NestJS. No lo hicimos porque obligaría al navegador a conocer dos orígenes y expondría directamente procesos de aplicación.
 
-Nginx centraliza:
+El proxy es un Caddy compartido que se gestiona en `/srv/proxy`, fuera de este repositorio. Centraliza:
 
 - puertos públicos 80 y 443;
 - terminación TLS;
@@ -143,14 +143,16 @@ Nginx centraliza:
 - cabeceras `X-Forwarded-*` para que la API conozca protocolo, host e IP originales;
 - futura aplicación de límites, caché o cabeceras de seguridad.
 
+Como lo comparten varias aplicaciones del VPS, solo él puede ocupar los puertos 80 y 443; por eso este repositorio ya no declara ningún proxy propio.
+
 Alternativas:
 
-| Alternativa       | Ventaja                                    | Coste o motivo para no elegirla                                        |
-| ----------------- | ------------------------------------------ | ---------------------------------------------------------------------- |
-| Caddy             | HTTPS automático y configuración muy corta | Queríamos controlar explícitamente Nginx y Certbot                     |
-| Traefik           | Descubrimiento dinámico de contenedores    | Más complejidad para una sola aplicación                               |
-| HAProxy           | Proxy muy potente y eficiente              | Menos cómodo para servir desafíos ACME y configuración web general     |
-| Exponer Next/Nest | Configuración inicial mínima               | Peor aislamiento, CORS más complejo y sin terminación TLS centralizada |
+| Alternativa            | Ventaja                                 | Coste o motivo para no elegirla                                                                        |
+| ---------------------- | --------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| Nginx + Certbot propio | Control explícito de TLS y plantillas   | Fue la primera versión; choca en 80/443 con otras apps del VPS y exige bootstrap y renovación manuales |
+| Traefik                | Descubrimiento dinámico de contenedores | Más complejidad para una sola aplicación                                                               |
+| HAProxy                | Proxy muy potente y eficiente           | Menos cómodo para servir desafíos ACME y configuración web general                                     |
+| Exponer Next/Nest      | Configuración inicial mínima            | Peor aislamiento, CORS más complejo y sin terminación TLS centralizada                                 |
 
 ### 3.3 GitHub Actions por SSH
 
@@ -383,46 +385,41 @@ La diferencia entre health y readiness es conceptual:
 
 ### 7.6 Web Next.js
 
-Compose establece `working_dir: /app/apps/web`, porque `next start` busca `.next` en el directorio actual. Arranca en `0.0.0.0:3000`, necesario para que Nginx lo alcance desde otro contenedor.
+Compose establece `working_dir: /app/apps/web`, porque `next start` busca `.next` en el directorio actual. Arranca en `0.0.0.0:3000`, necesario para que el proxy lo alcance desde otro contenedor.
 
-### 7.7 Nginx
+### 7.7 Proxy inverso compartido (Caddy)
 
-Nginx publica:
+Este repositorio no contiene ningún proxy. Caddy vive en `/srv/proxy`, fuera del repo, y es lo único que publica los puertos 80 y 443. Obtiene y renueva los certificados TLS automáticamente.
+
+Caddy llega a los contenedores a través de una red Docker externa llamada `proxy`. En `docker-compose.production.yml` solo `api` y `web` se unen a ella, cada uno con un alias estable:
 
 ```yaml
-ports:
-  - '80:80'
-  - '443:443'
+api:
+  networks:
+    app:
+    proxy:
+      aliases: [linea-api]
+
+web:
+  networks:
+    app:
+    proxy:
+      aliases: [linea-web]
+
+networks:
+  app:
+  proxy:
+    external: true
 ```
 
-El script `deploy/nginx/start.sh` elige una única plantilla:
+Caddy envía `/v1/*` a `linea-api:3001` y el resto a `linea-web:3000`. Usamos alias en lugar de los nombres de servicio (`api`, `web`) porque la red `proxy` la comparten varias aplicaciones y un nombre genérico como `web` podría colisionar.
 
-- HTTP si `ENABLE_HTTPS=false` o falta certificado;
-- HTTPS si `ENABLE_HTTPS=true` y existen certificado y clave legibles.
+Dos reglas importantes:
 
-Después aplica `envsubst`, valida con `nginx -t` y arranca Nginx en primer plano.
+- `worker`, `postgres`, `redis` y `migrate` permanecen solo en la red `app`. Si el worker tuviera el alias `linea-web`, Caddy podría enrutar tráfico al contenedor equivocado.
+- La red `proxy` es `external: true`: Compose no la crea. Debe existir antes de `docker compose up` (la crea el stack de `/srv/proxy`); si no existe, el arranque falla.
 
-La plantilla HTTP sirve `/.well-known/acme-challenge/` para Certbot y envía tráfico al API o web. La plantilla HTTPS mantiene esa ruta en HTTP, redirige el resto a HTTPS y escucha en 443 con TLS 1.2 y 1.3.
-
-Los destinos internos no se fijan a la dirección IP que tenían al arrancar Nginx. Ambas plantillas usan el DNS integrado de Docker, `127.0.0.11`, y upstreams compartidos con `resolve` para volver a resolver `api` y `web` cada cinco segundos. Esto importa porque Compose puede recrear un contenedor con otra IP privada mientras Nginx continúa ejecutándose.
-
-### 7.8 Certbot
-
-Certbot se declara bajo un perfil llamado `certbot`. No se inicia en cada `docker compose up`; se ejecuta de forma puntual:
-
-```bash
-docker compose --env-file .env \
-  -f docker-compose.production.yml \
-  --profile certbot run --rm certbot
-```
-
-Usa el método **webroot HTTP-01**:
-
-1. Certbot coloca un archivo temporal en el volumen `certbot-webroot`.
-2. Let's Encrypt solicita ese archivo por HTTP usando el dominio público.
-3. Nginx lo sirve desde `/.well-known/acme-challenge/`.
-4. Si la autoridad comprueba que controlamos el dominio, entrega el certificado.
-5. Certbot guarda certificado y clave en el volumen `letsencrypt`.
+> Historia: la primera versión incluía Nginx y Certbot dentro de este Compose (`deploy/nginx`, `deploy/certbot`), con un bootstrap HTTP → HTTPS en dos fases. Se retiraron al pasar a un proxy compartido porque dos stacks no pueden publicar a la vez los puertos 80 y 443 del mismo VPS.
 
 ## 8. Por qué el worker es un proceso separado
 
@@ -563,22 +560,24 @@ Si el proveedor ofrece un firewall externo, debe permitir los mismos puertos. UF
 
 Una IP identifica la máquina, pero un dominio es necesario para una URL estable y para OAuth web con HTTPS.
 
-Usamos un subdominio gratuito de DuckDNS. El registro `A` asocia:
+La app usa el subdominio `linea-de-vida.hidan.es`. Su registro DNS asocia:
 
 ```text
-app-ejemplo.duckdns.org -> IP pública del VPS
+linea-de-vida.hidan.es -> IP pública del VPS
 ```
+
+El dominio que se usaba antes redirige con un 301 permanente al nuevo.
 
 Cuando el navegador solicita el dominio:
 
 1. pregunta al sistema DNS qué IP corresponde al nombre;
 2. recibe la IP del VPS;
 3. abre TCP 443;
-4. Nginx presenta el certificado TLS;
+4. Caddy presenta el certificado TLS;
 5. el navegador valida que el certificado pertenece al dominio;
-6. Nginx envía la petición al servicio interno adecuado.
+6. Caddy envía la petición al servicio interno adecuado.
 
-DuckDNS no transporta el tráfico ni aloja la app. Solo publica la asociación nombre-IP.
+El DNS no transporta el tráfico ni aloja la app. Solo publica la asociación nombre-IP.
 
 Alternativas:
 
@@ -610,12 +609,9 @@ GitHub usa un entorno llamado `production`. Allí se guardan:
 - credenciales Google OAuth;
 - callbacks OAuth;
 - límites de sincronización, rate limiting y caché;
-- `PUBLIC_DOMAIN`;
-- `LETSENCRYPT_EMAIL`;
-- `HSTS_MAX_AGE`;
-- `ENABLE_HTTPS`.
+- `PUBLIC_DOMAIN` (`linea-de-vida.hidan.es`).
 
-El workflow escribe `.env` con `umask 077`, de forma que solo su propietario puede leerlo.
+El workflow escribe `.env` con `umask 077`, de forma que solo su propietario puede leerlo. Como el `.env` del VPS se reescribe desde `VPS_ENV_FILE` en cada despliegue, ese secret debe llevar siempre el dominio actual (`https://linea-de-vida.hidan.es` en `API_ORIGIN`, `WEB_ORIGIN`, `ALLOWED_WEB_ORIGINS` y callbacks OAuth); cualquier cambio hecho a mano en el VPS se pierde en el siguiente deploy.
 
 Reglas importantes:
 
@@ -699,7 +695,7 @@ Después de un incidente en el que solo veíamos un ID de contenedor, añadimos 
 - nombre, estado y health de cada contenedor;
 - últimas 100 líneas del servicio problemático.
 
-Este cambio fue crucial: convirtió un “contenedor no sano” anónimo en una causa concreta de Nginx.
+Este cambio fue crucial: convirtió un “contenedor no sano” anónimo en una causa concreta (en aquel momento, del antiguo Nginx).
 
 ### 12.8 Rollback
 
@@ -715,51 +711,33 @@ Limitaciones actuales:
 
 Un rollback real no es simplemente “volver Git atrás”. Incluye compatibilidad de esquema, imágenes, configuración y datos.
 
-## 13. HTTPS con Let's Encrypt
+## 13. HTTPS con el Caddy compartido
 
 ### 13.1 Por qué necesitamos HTTPS
 
 HTTPS cifra el tráfico, autentica el dominio y protege cookies y tokens. Google OAuth exige redirect URIs HTTPS para aplicaciones web de producción.
 
-### 13.2 Bootstrap en dos fases
+### 13.2 Quién gestiona los certificados
 
-Existe un problema circular:
+El Caddy compartido de `/srv/proxy` obtiene y renueva automáticamente el certificado de `linea-de-vida.hidan.es` mediante ACME, y redirige HTTP a HTTPS. Este repositorio no tiene ninguna pieza de TLS: no hay plantillas, scripts de activación ni cron de renovación.
 
-- Nginx necesita certificado para arrancar HTTPS;
-- Let's Encrypt necesita alcanzar Nginx por HTTP para entregar el certificado.
+Requisitos para que funcione:
 
-La solución es desplegar en dos fases:
+- el DNS del dominio apunta a la IP del VPS;
+- los puertos 80 y 443 llegan a Caddy (UFW y firewall del proveedor);
+- la configuración de Caddy en `/srv/proxy` incluye el sitio y sus rutas hacia `linea-api` y `linea-web`.
 
-1. `ENABLE_HTTPS=false`: Nginx arranca en HTTP y sirve el desafío ACME.
-2. Certbot emite el certificado.
-3. `ENABLE_HTTPS=true`: Nginx valida archivos y elige la plantilla HTTPS.
+Cualquier cabecera como HSTS se configura también en Caddy, no aquí. Sigue valiendo la prudencia: no activar `includeSubDomains` o `preload` sin revisar todo el dominio.
 
-### 13.3 HSTS conservador
+### 13.3 Cómo era antes
 
-HSTS indica al navegador que use siempre HTTPS. Una configuración incorrecta puede bloquear el dominio durante mucho tiempo. Por eso comenzamos con:
-
-```text
-HSTS_MAX_AGE=0
-```
-
-Solo debe aumentarse después de verificar HTTPS, redirección, API y OAuth durante un periodo suficiente. No conviene activar `includeSubDomains` o `preload` sin revisar todo el dominio.
-
-### 13.4 Renovación
-
-Los certificados de Let's Encrypt tienen vida corta. Certbot debe ejecutar `renew` diariamente mediante cron o systemd timer. La mayoría de ejecuciones no renuevan nada; cuando el certificado entra en la ventana de renovación, obtiene uno nuevo y Nginx debe recargarse.
-
-Alternativas:
-
-- Certbot instalado en el host;
-- Caddy con HTTPS automático;
-- Traefik con ACME;
-- certificado gestionado por Cloudflare o un balanceador externo.
-
-Elegimos Certbot en Docker para mantener la infraestructura versionada junto a Compose.
+La primera versión usaba Nginx y Certbot dentro de este Compose. Tenía un problema circular (Nginx necesitaba el certificado para servir HTTPS, y Let's Encrypt necesitaba alcanzar Nginx por HTTP para emitirlo) que resolvíamos con un bootstrap en dos fases, un `HSTS_MAX_AGE=0` conservador y un cron diario de renovación. Al mover el VPS a un proxy compartido, todo eso pasó a ser responsabilidad de Caddy y se eliminó del repositorio.
 
 ## 14. Cronología de problemas reales y soluciones
 
 Esta sección es especialmente valiosa: cada fallo revela una suposición incorrecta.
+
+> Los apartados 14.10, 14.12, 14.13 y 14.15 ocurrieron con el antiguo Nginx + Certbot, retirado después en favor del Caddy compartido (ver 7.7 y 13.3). Se conservan por lo que enseñan.
 
 ### 14.1 CI no encontraba tipos Prisma
 
@@ -889,7 +867,7 @@ Esta sección es especialmente valiosa: cada fallo revela una suposición incorr
 
 **Solución operativa:** comprobar el certificado mediante `certbot certificates`, establecer `ENABLE_HTTPS=true`, recrear Nginx y ejecutar `nginx -t`.
 
-**Pendiente técnico:** corregir `enable-https.sh` para no depender de un binario ausente.
+**Estado:** `enable-https.sh` se eliminó junto con Nginx y Certbot al migrar al Caddy compartido.
 
 **Lección:** una imagen mínima contiene menos herramientas de diagnóstico; los scripts deben validarse dentro de la imagen real.
 
@@ -966,9 +944,11 @@ sudo -u deploy -- sh -c '
 ```bash
 sudo -u deploy -- sh -c '
   cd /srv/linea-de-vida &&
-  docker compose -f docker-compose.production.yml logs --tail 200 api worker nginx
+  docker compose -f docker-compose.production.yml logs --tail 200 api worker web
 '
 ```
+
+Los logs del proxy (Caddy) se consultan desde `/srv/proxy`, no desde este Compose.
 
 No conviene imprimir `.env`, `docker inspect` completo o variables si el resultado va a compartirse públicamente.
 
@@ -1009,7 +989,7 @@ El rollback debería:
 - ejecutar health checks después de restaurar;
 - informar claramente si la restauración también falla.
 
-Para cambios importantes podríamos adoptar blue/green: levantar una segunda versión, validarla y cambiar Nginx solo cuando esté sana.
+Para cambios importantes podríamos adoptar blue/green: levantar una segunda versión, validarla y cambiar el destino del proxy solo cuando esté sana.
 
 ### 16.3 Backups
 
@@ -1045,27 +1025,22 @@ Revisiones recomendadas:
 
 ### 16.6 Health checks más representativos
 
-El worker solo comprueba que PID 1 existe. Un health check mejor verificaría conexión a Redis y que BullMQ está listo. Nginx podría comprobar una respuesta HTTPS local cuando TLS esté activo, no únicamente `nginx -t`.
+El worker solo comprueba que PID 1 existe. Un health check mejor verificaría conexión a Redis y que BullMQ está listo. El proxy compartido no tiene health check en este repo; un monitor externo de `https://linea-de-vida.hidan.es/v1/health` cubriría el recorrido completo.
 
 ## 17. Mapa de archivos
 
-| Archivo                                      | Responsabilidad                                             |
-| -------------------------------------------- | ----------------------------------------------------------- |
-| `.github/workflows/ci.yml`                   | Validación automática del código                            |
-| `.github/workflows/deploy-production.yml`    | Conexión SSH, despliegue, health y rollback                 |
-| `Dockerfile`                                 | Construcción de API, worker y web                           |
-| `.dockerignore`                              | Exclusión de archivos innecesarios o sensibles del contexto |
-| `docker-compose.production.yml`              | Topología completa de producción                            |
-| `.env.production.example`                    | Contrato de variables sin secretos reales                   |
-| `deploy/nginx/start.sh`                      | Selección segura entre HTTP y HTTPS                         |
-| `deploy/nginx/templates/http.conf.template`  | Bootstrap HTTP y ACME                                       |
-| `deploy/nginx/templates/https.conf.template` | TLS, redirección y proxy                                    |
-| `deploy/certbot/enable-https.sh`             | Activación TLS; actualmente requiere corrección             |
-| `deploy/certbot/renew-certificates.sh`       | Renovación y recarga de Nginx                               |
-| `apps/api/src/main.ts`                       | Proceso HTTP de NestJS                                      |
-| `apps/api/src/worker.ts`                     | Consumidor BullMQ permanente                                |
-| `apps/api/src/sync.service.ts`               | Encolado y ejecución de sincronizaciones                    |
-| `apps/api/prisma/schema.prisma`              | Modelo de datos y generación de Prisma Client               |
+| Archivo                                   | Responsabilidad                                             |
+| ----------------------------------------- | ----------------------------------------------------------- |
+| `.github/workflows/ci.yml`                | Validación automática del código                            |
+| `.github/workflows/deploy-production.yml` | Conexión SSH, despliegue, health y rollback                 |
+| `Dockerfile`                              | Construcción de API, worker y web                           |
+| `.dockerignore`                           | Exclusión de archivos innecesarios o sensibles del contexto |
+| `docker-compose.production.yml`           | Topología completa de producción                            |
+| `.env.production.example`                 | Contrato de variables sin secretos reales                   |
+| `apps/api/src/main.ts`                    | Proceso HTTP de NestJS                                      |
+| `apps/api/src/worker.ts`                  | Consumidor BullMQ permanente                                |
+| `apps/api/src/sync.service.ts`            | Encolado y ejecución de sincronizaciones                    |
+| `apps/api/prisma/schema.prisma`           | Modelo de datos y generación de Prisma Client               |
 
 ## 18. Checklist de una infraestructura sana
 
@@ -1083,19 +1058,21 @@ El worker solo comprueba que PID 1 existe. Un health check mejor verificaría co
 - [ ] Docker y Compose v2 funcionan como `deploy`.
 - [ ] UFW permite solo los puertos necesarios.
 - [ ] PostgreSQL y Redis no publican puertos.
+- [ ] La red Docker externa `proxy` existe y el Caddy de `/srv/proxy` está activo.
+- [ ] Solo `api` y `web` están en la red `proxy` (alias `linea-api` y `linea-web`).
 - [ ] Existen backups probados.
 
 ### GitHub
 
 - [ ] Los siete secrets de conexión/despliegue están configurados.
-- [ ] `VPS_ENV_FILE` contiene el entorno completo actualizado.
+- [ ] `VPS_ENV_FILE` contiene el entorno completo actualizado, con el dominio `https://linea-de-vida.hidan.es`.
 - [ ] La clave VPS -> GitHub es una Deploy Key de solo lectura.
 - [ ] `known_hosts` fue verificado, no aceptado ciegamente.
 
 ### Aplicación
 
 - [ ] Migraciones terminan con código 0.
-- [ ] API, worker, web y Nginx están sanos.
+- [ ] API, worker y web están sanos.
 - [ ] El worker consume la cola.
 - [ ] `/v1/readiness` responde.
 - [ ] Una sincronización real completa su `SyncRun`.
@@ -1103,11 +1080,11 @@ El worker solo comprueba que PID 1 existe. Un health check mejor verificaría co
 ### Internet y TLS
 
 - [ ] DNS resuelve a la IP correcta.
-- [ ] HTTP permite ACME.
-- [ ] HTTPS presenta certificado válido para el dominio.
-- [ ] HTTP redirige a HTTPS después del bootstrap.
+- [ ] Los puertos 80 y 443 llegan al Caddy compartido.
+- [ ] HTTPS presenta certificado válido para `linea-de-vida.hidan.es`.
+- [ ] HTTP redirige a HTTPS.
 - [ ] OAuth tiene callbacks HTTPS exactos.
-- [ ] La renovación automática está programada y observada.
+- [ ] La expiración del certificado se monitoriza (Caddy lo renueva solo).
 
 ## 19. Conclusión
 
@@ -1120,9 +1097,9 @@ El sistema final no es “un workflow que copia archivos”. Es una cadena de co
 - Compose declara orden, red, volúmenes y salud;
 - PostgreSQL conserva negocio;
 - Redis y el worker desacoplan tareas largas;
-- Nginx es la frontera pública;
+- el Caddy compartido es la frontera pública;
 - DNS convierte un nombre estable en una IP;
-- Let's Encrypt demuestra control del dominio y cifra el tráfico;
+- Caddy obtiene y renueva por ACME el certificado que demuestra control del dominio y cifra el tráfico;
 - los health checks y logs permiten decidir si una versión está realmente lista.
 
 Los fallos que encontramos no fueron tiempo perdido. Expusieron supuestos que solo aparecían en un entorno limpio o con datos reales: rutas relativas, directorios de trabajo, artefactos generados, permisos del host, bootstrap inicial, interacción con entrypoints de imágenes y observabilidad insuficiente.
