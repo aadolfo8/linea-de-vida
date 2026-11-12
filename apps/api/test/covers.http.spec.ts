@@ -2,37 +2,37 @@ import 'reflect-metadata';
 import { INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { CsrfGuard, SessionGuard } from '../src/auth';
 import { CoversController } from '../src/covers.controller';
 import { CoversService } from '../src/covers.service';
-import { MemoryPrisma } from './support/memory-prisma';
+import { dropUsers, pgClient, pgUrl, photoRow, resetUsers } from './support/pg';
 
 const ORIGIN = 'http://localhost:3000';
+const P = 'cv';
+const OWNER = `${P}-owner`;
+const OTHER = `${P}-other`;
 
 const photo = (
   id: string,
   date: string | null,
   precision: 'YEAR' | 'MONTH' | 'DAY' | 'UNKNOWN',
   extra: Record<string, unknown> = {},
-) => ({
-  id,
-  userId: 'owner',
-  fileName: `${id}.jpg`,
-  mimeType: 'image/jpeg',
-  imageMetadata: null,
-  status: 'ACTIVE',
-  hiddenAt: null,
-  effectiveDateValue: date ? new Date(date) : null,
-  effectiveDatePrecision: precision,
-  ...extra,
-});
+) =>
+  photoRow(P, id, {
+    effectiveDateValue: date ? new Date(date) : null,
+    effectiveDatePrecision: precision,
+    ...extra,
+  });
+
+const prisma = pgClient();
+const covers = () =>
+  prisma.photoCover.findMany({ orderBy: [{ createdAt: 'asc' }, { position: 'asc' }] });
 
 async function createApp() {
-  const memory = new MemoryPrisma();
-  memory
-    .rows('photo')
-    .push(
+  await resetUsers(prisma, P);
+  await prisma.photo.createMany({
+    data: [
       photo('d1', '2024-03-02', 'DAY'),
       photo('d2', '2024-03-20', 'DAY'),
       photo('m1', '2024-03-01', 'MONTH'),
@@ -42,12 +42,13 @@ async function createApp() {
       photo('undated', null, 'UNKNOWN'),
       photo('hidden', '2024-03-05', 'DAY', { hiddenAt: new Date('2026-01-01') }),
       photo('missing', '2024-03-06', 'DAY', { status: 'MISSING' }),
-      photo('foreign', '2024-03-07', 'DAY', { userId: 'other' }),
-    );
+      photo('foreign', '2024-03-07', 'DAY', { userId: OTHER }),
+    ],
+  });
   const app = (
     await Test.createTestingModule({
       controllers: [CoversController],
-      providers: [{ provide: CoversService, useValue: new CoversService(memory as any) }],
+      providers: [{ provide: CoversService, useValue: new CoversService(prisma as any) }],
     })
       .overrideGuard(SessionGuard)
       .useValue({
@@ -62,16 +63,20 @@ async function createApp() {
       .compile()
   ).createNestApplication();
   await app.init();
-  return { app, memory };
+  return { app };
 }
 
-describe('Portadas HTTP contracts', () => {
+describe.skipIf(!pgUrl)('Portadas HTTP contracts (PostgreSQL)', () => {
   let app: INestApplication | undefined;
   afterEach(async () => {
     await app?.close();
     app = undefined;
   });
-  const call = (method: 'get' | 'put' | 'delete', path: string, user = 'owner') =>
+  afterAll(async () => {
+    await dropUsers(prisma, P);
+    await prisma.$disconnect();
+  });
+  const call = (method: 'get' | 'put' | 'delete', path: string, user = OWNER) =>
     request(app!.getHttpServer())[method](path).set('x-test-user', user).set('Origin', ORIGIN);
   const put = (body: unknown, user?: string) => call('put', '/v1/covers', user).send(body as any);
 
@@ -101,7 +106,7 @@ describe('Portadas HTTP contracts', () => {
     expect(body.items[0].photos.map((p: any) => p.id)).toEqual(['y1', 'd3']);
     expect(body.items[1].photos.map((p: any) => p.id)).toEqual(['d2', 'd1', 'm1']);
     expect(body.items[1].photos[0]).toMatchObject({ thumbnailUrl: '/v1/photos/d2/thumbnail' });
-    expect(created.memory.rows('photoCover').map((row) => row.month)).toEqual([3, 3, 3, 0, 0, 0]);
+    expect((await covers()).map((row) => row.month)).toEqual([3, 3, 3, 0, 0, 0]);
   });
 
   it('replaces a whole scope and clears it with an empty list', async () => {
@@ -109,12 +114,12 @@ describe('Portadas HTTP contracts', () => {
     app = created.app;
     await put({ kind: 'MONTH', year: 2024, month: 3, photoIds: ['d1', 'd2'] }).expect(200);
     await put({ kind: 'MONTH', year: 2024, month: 3, photoIds: ['d2', 'd1', 'd2'] }).expect(200);
-    expect(created.memory.rows('photoCover').map((row) => [row.photoId, row.position])).toEqual([
+    expect((await covers()).map((row) => [row.photoId, row.position])).toEqual([
       ['d2', 0],
       ['d1', 1],
     ]);
     await put({ kind: 'MONTH', year: 2024, month: 3, photoIds: [] }).expect(200);
-    expect(created.memory.rows('photoCover')).toHaveLength(0);
+    expect(await covers()).toHaveLength(0);
   });
 
   it('keeps year and month covers independent and returns to automatic with DELETE', async () => {
@@ -126,7 +131,7 @@ describe('Portadas HTTP contracts', () => {
       .send({ kind: 'MONTH', year: 2024, month: 3 })
       .expect(200)
       .expect(({ body }) => expect(body.photoIds).toEqual([]));
-    expect(created.memory.rows('photoCover').map((row) => row.kind)).toEqual(['YEAR']);
+    expect((await covers()).map((row) => row.kind)).toEqual(['YEAR']);
   });
 
   it('rejects the whole request, writing nothing, with a status per photo', async () => {
@@ -151,7 +156,7 @@ describe('Portadas HTTP contracts', () => {
           { id: 'd3', status: 'NOT_ELIGIBLE' },
         ]);
       });
-    expect(created.memory.rows('photoCover').map((row) => row.photoId)).toEqual(['d1']);
+    expect((await covers()).map((row) => row.photoId)).toEqual(['d1']);
   });
 
   it('applies the eligibility rules of each kind', async () => {
@@ -168,8 +173,11 @@ describe('Portadas HTTP contracts', () => {
   it('enforces the limits of 8 per year and 6 per month', async () => {
     const created = await createApp();
     app = created.app;
-    for (let index = 0; index < 9; index++)
-      created.memory.rows('photo').push(photo(`bulk${index}`, `2024-03-${10 + index}`, 'DAY'));
+    await prisma.photo.createMany({
+      data: Array.from({ length: 9 }, (_, index) =>
+        photo(`bulk${index}`, `2024-03-${10 + index}`, 'DAY'),
+      ),
+    });
     const ids = (count: number) => Array.from({ length: count }, (_, index) => `bulk${index}`);
     await put({ kind: 'YEAR', year: 2024, photoIds: ids(8) }).expect(200);
     await put({ kind: 'YEAR', year: 2024, photoIds: ids(9) })
@@ -201,10 +209,12 @@ describe('Portadas HTTP contracts', () => {
     const created = await createApp();
     app = created.app;
     await put({ kind: 'MONTH', year: 2024, month: 3, photoIds: ['d1', 'd2', 'm1'] }).expect(200);
-    const rows = created.memory.rows('photo');
-    rows.find((row) => row.id === 'd1')!.hiddenAt = new Date();
-    rows.find((row) => row.id === 'd2')!.effectiveDateValue = new Date('2024-09-02');
-    rows.find((row) => row.id === 'm1')!.status = 'MISSING';
+    await prisma.photo.update({ where: { id: 'd1' }, data: { hiddenAt: new Date() } });
+    await prisma.photo.update({
+      where: { id: 'd2' },
+      data: { effectiveDateValue: new Date('2024-09-02') },
+    });
+    await prisma.photo.update({ where: { id: 'm1' }, data: { status: 'MISSING' } });
     const { body } = await call('get', '/v1/covers?year=2024').expect(200);
     const month = body.items.find((item: any) => item.kind === 'MONTH');
     expect(month.photos).toEqual([]);
@@ -213,9 +223,9 @@ describe('Portadas HTTP contracts', () => {
       { photoId: 'd2', reason: 'OUT_OF_SCOPE' },
       { photoId: 'm1', reason: 'NOT_ACTIVE' },
     ]);
-    expect(created.memory.rows('photoCover')).toHaveLength(3);
+    expect(await covers()).toHaveLength(3);
     // Shown again: it returns by itself.
-    rows.find((row) => row.id === 'd1')!.hiddenAt = null;
+    await prisma.photo.update({ where: { id: 'd1' }, data: { hiddenAt: null } });
     const again = await call('get', '/v1/covers?year=2024').expect(200);
     expect(again.body.items.find((item: any) => item.kind === 'MONTH').photos).toHaveLength(1);
   });
@@ -224,13 +234,13 @@ describe('Portadas HTTP contracts', () => {
     const created = await createApp();
     app = created.app;
     await put({ kind: 'MONTH', year: 2024, month: 3, photoIds: ['d1'] }).expect(200);
-    const { body } = await call('get', '/v1/covers?year=2024', 'other').expect(200);
+    const { body } = await call('get', '/v1/covers?year=2024', OTHER).expect(200);
     expect(body.items).toHaveLength(1);
     expect(body.items[0]).toMatchObject({ kind: 'YEAR', photos: [], dropped: [] });
-    await call('delete', '/v1/covers', 'other').send({ kind: 'MONTH', year: 2024, month: 3 });
-    expect(created.memory.rows('photoCover')).toHaveLength(1);
-    await created.memory.photo.delete({ where: { id: 'd1' } });
-    expect(created.memory.rows('photoCover')).toHaveLength(0);
+    await call('delete', '/v1/covers', OTHER).send({ kind: 'MONTH', year: 2024, month: 3 });
+    expect(await covers()).toHaveLength(1);
+    await prisma.photo.delete({ where: { id: 'd1' } });
+    expect(await covers()).toHaveLength(0);
   });
 
   it('requires a session and, for changes, an allowed origin', async () => {
@@ -244,13 +254,13 @@ describe('Portadas HTTP contracts', () => {
       .expect(403);
     await request(app.getHttpServer())
       .put('/v1/covers')
-      .set('x-test-user', 'owner')
+      .set('x-test-user', OWNER)
       .set('Origin', 'http://attacker.example.test')
       .send(body)
       .expect(403);
     await request(app.getHttpServer())
       .delete('/v1/covers')
-      .set('x-test-user', 'owner')
+      .set('x-test-user', OWNER)
       .set('Origin', 'http://attacker.example.test')
       .send(body)
       .expect(403);
