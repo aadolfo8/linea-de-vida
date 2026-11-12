@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { ApiError, activeDriveConnection, type Session } from '../../lib/api';
 import { notifyArchiveIndexUpdated } from '../../lib/archive-index-events';
 import { coversApi } from '../../lib/covers/client';
@@ -26,6 +26,7 @@ import { apiErrorCopy } from '../../lib/sources/errors';
 import { DriveBanner } from '../components/DriveBanner';
 import { SkyPage } from '../components/SkyPage';
 import { SkyToast } from '../components/SkyToast';
+import { useToast } from '../../lib/use-toast';
 import { photoCountLabel, type TimelinePhoto } from '../components/timeline-model';
 import { GridSkeleton, LoadMore } from '../ordenar/PhotoGrid';
 import { CandidateGrid, ChosenStrip } from './CoverParts';
@@ -55,15 +56,11 @@ export function PortadasScreen({ session }: { session: Session }) {
   const [draft, setDraft] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const [pending, setPending] = useState<Target | null>(null);
-  const [toast, setToast] = useState<Toast | null>(null);
+  const { toast, show, dismiss } = useToast<Omit<Toast, 'key'>>(TOAST_MS);
   const [announcement, setAnnouncement] = useState('');
   const known = useRef(new Map<string, TimelinePhoto>());
-  const toastTimer = useRef<number | undefined>(undefined);
-  const toastKey = useRef(0);
   const focusRequest = useRef<{ id: string; act: string; index: number } | null>(null);
   const yearSelectId = useId();
-
-  useEffect(() => () => window.clearTimeout(toastTimer.current), []);
 
   // The newest year with photos opens first.
   useEffect(() => {
@@ -112,17 +109,6 @@ export function PortadasScreen({ session }: { session: Session }) {
     return group?.previews ?? [];
   }, [data, scope]);
   const shown = previewPhotos(chosenPhotos, automatic, limit);
-
-  const show = useCallback((next: Omit<Toast, 'key'>) => {
-    window.clearTimeout(toastTimer.current);
-    toastKey.current += 1;
-    setToast({ ...next, key: toastKey.current });
-    toastTimer.current = window.setTimeout(() => setToast(null), TOAST_MS);
-  }, []);
-  const dismiss = useCallback(() => {
-    window.clearTimeout(toastTimer.current);
-    setToast(null);
-  }, []);
 
   // Keyboard focus follows a moved or removed photo instead of falling back to the page.
   useEffect(() => {

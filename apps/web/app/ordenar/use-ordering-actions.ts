@@ -1,6 +1,7 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useToast } from '../../lib/use-toast';
+import { useCallback, useRef, useState } from 'react';
 import { signOutIfExpired } from '../../lib/api';
 import { notifyArchiveIndexUpdated } from '../../lib/archive-index-events';
 import { orderingApi } from '../../lib/ordering/client';
@@ -64,27 +65,22 @@ export function useOrderingActions(
 ) {
   const dataRef = useRef(data);
   dataRef.current = data;
-  const [toast, setToast] = useState<Toast | null>(null);
+  const {
+    toast,
+    show: showToast,
+    dismiss,
+  } = useToast<Omit<Toast, 'key'>>(TOAST_MS, (next) => next.tone === 'ok');
   const [announcement, setAnnouncement] = useState('');
   const [busy, setBusy] = useState(false);
   const busyRef = useRef(false);
-  const keyRef = useRef(0);
-  const timer = useRef<number | undefined>(undefined);
 
-  useEffect(() => () => window.clearTimeout(timer.current), []);
-
-  const dismiss = useCallback(() => {
-    window.clearTimeout(timer.current);
-    setToast(null);
-  }, []);
-
-  const show = useCallback((next: Omit<Toast, 'key'>) => {
-    window.clearTimeout(timer.current);
-    keyRef.current += 1;
-    setToast({ key: keyRef.current, ...next });
-    setAnnouncement(next.message);
-    if (next.tone === 'ok') timer.current = window.setTimeout(() => setToast(null), TOAST_MS);
-  }, []);
+  const show = useCallback(
+    (next: Omit<Toast, 'key'>) => {
+      showToast(next);
+      setAnnouncement(next.message);
+    },
+    [showToast],
+  );
 
   /** One action at a time; an unexpected error becomes a message with a retry, never silence. */
   const run = useCallback(
