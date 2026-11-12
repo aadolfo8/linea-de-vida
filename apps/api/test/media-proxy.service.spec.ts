@@ -135,7 +135,9 @@ describe('media proxy', () => {
     const metadata = await sharp(output).metadata();
     expect(metadata).toMatchObject({ format: 'webp', width: 640, height: 427 });
     expect(response.headers.get('Content-Type')).toBe('image/webp');
-    expect(response.headers.get('Cache-Control')).toBe('private, max-age=31536000, immutable, no-transform');
+    expect(response.headers.get('Cache-Control')).toBe(
+      'private, max-age=31536000, immutable, no-transform',
+    );
     expect(drive.contentCalls).toBe(1);
     // The fake preview is not an image: it was tried, rejected by the resize and replaced.
     expect(drive.thumbnailCalls).toBe(1);
@@ -163,7 +165,9 @@ describe('media proxy', () => {
       expect(drive.contentCalls).toBe(0);
       const metadata = await sharp(Buffer.concat(response.chunks)).metadata();
       expect(metadata).toMatchObject({ format: 'webp', width: 640, height: 427 });
-      expect(response.headers.get('Cache-Control')).toBe('private, max-age=31536000, immutable, no-transform');
+      expect(response.headers.get('Cache-Control')).toBe(
+        'private, max-age=31536000, immutable, no-transform',
+      );
     });
 
     it('uses the original when the preview is refused or is not an image', async () => {
@@ -553,7 +557,9 @@ describe('persistent thumbnails', () => {
 
       const second = new ResponseMock();
       const fresh = new MediaProxyService(
-        { photo: { findFirst: vi.fn(async () => ownerPhoto({ contentKey: 'md5:abc:10' })) } } as any,
+        {
+          photo: { findFirst: vi.fn(async () => ownerPhoto({ contentKey: 'md5:abc:10' })) },
+        } as any,
         drive,
         new ThumbnailStore({ THUMBNAIL_DIR: dir } as NodeJS.ProcessEnv),
       );
@@ -609,9 +615,7 @@ describe('persistent thumbnails', () => {
       for (const id of ['a', 'b', 'c']) await store.set('owner', id, `md5:${id}:1`, 640, chunk);
       await store.prune();
       const left = (
-        await Promise.all(
-          ['a', 'b', 'c'].map((id) => store.get('owner', id, `md5:${id}:1`, 640)),
-        )
+        await Promise.all(['a', 'b', 'c'].map((id) => store.get('owner', id, `md5:${id}:1`, 640)))
       ).filter(Boolean);
       expect(left.length).toBeLessThan(3);
       expect(left.length).toBeGreaterThan(0);

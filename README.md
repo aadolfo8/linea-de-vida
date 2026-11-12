@@ -155,15 +155,15 @@ flowchart LR
 
 ## Decisiones técnicas
 
-| Decisión                         | Por qué                                                                                                                                                                         |
-| -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **NestJS separado de Next.js**   | Los secretos de Google, el cifrado y la autorización por recurso viven fuera del navegador y del servidor de la web. La web solo habla REST con una cookie.                     |
-| **PostgreSQL + Prisma**          | Fotos, copias, carpetas, correcciones y portadas son relacionales. La fecha efectiva es una proyección transaccional de detección o corrección, con índices para la cronología. |
+| Decisión                         | Por qué                                                                                                                                                                                                      |
+| -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **NestJS separado de Next.js**   | Los secretos de Google, el cifrado y la autorización por recurso viven fuera del navegador y del servidor de la web. La web solo habla REST con una cookie.                                                  |
+| **PostgreSQL + Prisma**          | Fotos, copias, carpetas, correcciones y portadas son relacionales. La fecha efectiva es una proyección transaccional de detección o corrección, con índices para la cronología.                              |
 | **`SyncRun` como cola**          | Un escaneo de miles de fotos no cabe en una petición HTTP. La fila `SyncRun` es el trabajo (con checkpoint y reintentos) y un planificador en la API la toma con `SKIP LOCKED`. Sin Redis ni proceso aparte. |
-| **Identidad por contenido**      | `md5:<hash>:<tamaño>` único por usuario. La misma foto en dos carpetas o en dos exportaciones de Takeout es una foto con dos copias, no dos fotos.                              |
-| **`DriveAdapter` propio**        | Google no se filtra al dominio, y `MemoryDriveProvider` permite tests y desarrollo sin una cuenta real.                                                                         |
-| **Un motor de cielo propio**     | Scroll convertido en una pista con inercia, `translate3d` y canvas de estrellas a ~30 fps. Con `prefers-reduced-motion` todo navega sin zoom ni animación.                      |
-| **Deshacer en vez de confirmar** | Ocultar, fechar o cambiar una portada es reversible, así que no se pregunta: se hace y se ofrece «Deshacer».                                                                    |
+| **Identidad por contenido**      | `md5:<hash>:<tamaño>` único por usuario. La misma foto en dos carpetas o en dos exportaciones de Takeout es una foto con dos copias, no dos fotos.                                                           |
+| **`DriveAdapter` propio**        | Google no se filtra al dominio, y `MemoryDriveProvider` permite tests y desarrollo sin una cuenta real.                                                                                                      |
+| **Un motor de cielo propio**     | Scroll convertido en una pista con inercia, `translate3d` y canvas de estrellas a ~30 fps. Con `prefers-reduced-motion` todo navega sin zoom ni animación.                                                   |
+| **Deshacer en vez de confirmar** | Ocultar, fechar o cambiar una portada es reversible, así que no se pregunta: se hace y se ofrece «Deshacer».                                                                                                 |
 
 ## Estructura
 

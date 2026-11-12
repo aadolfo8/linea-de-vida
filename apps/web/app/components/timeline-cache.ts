@@ -96,9 +96,9 @@ export function invalidateTimelineCache() {
   archiveRevision += 1;
   // Requests in flight are left to finish for their callers; they drop their own result (above).
   queryClient.removeQueries({
-    predicate: (query) => query.queryKey[0] !== SESSION_KEY[0] && query.state.fetchStatus !== 'fetching',
+    predicate: (query) =>
+      query.queryKey[0] !== SESSION_KEY[0] && query.state.fetchStatus !== 'fetching',
   });
 }
 
 if (typeof window !== 'undefined') subscribeArchiveIndexUpdated(invalidateTimelineCache);
-

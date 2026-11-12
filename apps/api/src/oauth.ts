@@ -55,10 +55,7 @@ export class GoogleOAuthProvider implements GoogleOAuthClient {
   }
   async revoke(token: string) {
     this.configured();
-    const oauth = new OAuth2Client(
-      process.env.GOOGLE_CLIENT_ID,
-      process.env.GOOGLE_CLIENT_SECRET,
-    );
+    const oauth = new OAuth2Client(process.env.GOOGLE_CLIENT_ID, process.env.GOOGLE_CLIENT_SECRET);
     await oauth.revokeToken(token);
   }
 }

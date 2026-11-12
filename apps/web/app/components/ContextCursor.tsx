@@ -90,7 +90,9 @@ export function ContextCursor() {
       ref={element}
       aria-hidden="true"
       className="context-cursor context-cursor--action"
-      style={{ transform: `translate3d(${-expandedCursorSize / 2}px, ${-expandedCursorSize / 2}px, 0)` }}
+      style={{
+        transform: `translate3d(${-expandedCursorSize / 2}px, ${-expandedCursorSize / 2}px, 0)`,
+      }}
     >
       <span ref={label}>{cursorLabel.action}</span>
     </span>

@@ -160,7 +160,10 @@ export class GoogleDriveProvider implements DriveAdapter {
     try {
       signal?.throwIfAborted();
       const auth = this.authClient(connection);
-      const metadata = await drive({ version: 'v3', auth }).files.get({ fileId, fields: 'thumbnailLink' }, { signal });
+      const metadata = await drive({ version: 'v3', auth }).files.get(
+        { fileId, fields: 'thumbnailLink' },
+        { signal },
+      );
       signal?.throwIfAborted();
       if (!metadata.data.thumbnailLink)
         throw new DriveRequestError(404, 'Drive thumbnail is unavailable.');

@@ -11,6 +11,8 @@
     "prisma:deploy": "node ../../scripts/with-local-env.cjs node ./node_modules/prisma/build/index.js migrate deploy"
   },
   "dependencies": {
+    "@googleapis/drive": "^10.0.0",
+    "@googleapis/oauth2": "^1.0.7",
     "@nestjs/common": "^11.0.1",
     "@nestjs/core": "^11.0.1",
     "@nestjs/platform-express": "^11.0.1",
@@ -19,8 +21,6 @@
     "class-validator": "^0.14.2",
     "cookie-parser": "^1.4.7",
     "express": "^5.2.1",
-    "@googleapis/drive": "^10.0.0",
-    "@googleapis/oauth2": "^1.0.7",
     "google-auth-library": "^9.15.1",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1",

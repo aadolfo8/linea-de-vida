@@ -15,7 +15,12 @@ type ButtonProps = ComponentProps<'button'> & {
   size?: keyof typeof sizes;
 };
 
-export function Button({ className, variant = 'default', size = 'default', ...props }: ButtonProps) {
+export function Button({
+  className,
+  variant = 'default',
+  size = 'default',
+  ...props
+}: ButtonProps) {
   return (
     <button
       data-slot="button"

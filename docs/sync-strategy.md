@@ -18,15 +18,15 @@ El escaneo no impone un máximo artificial de fotos. Solo conserva una página y
 
 ## Paginación, reintento e idempotencia
 
-| Riesgo                  | Política                                                                                                                                       |
-| ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
-| Listas grandes          | Cursor y cola de carpetas persistidos por `SyncRun`; una reentrega continúa desde la última página confirmada.                                 |
-| Saturación              | `SYNC_ITEM_CONCURRENCY` (5 por defecto, 5–10) y páginas de `SYNC_PAGE_SIZE` (100 por defecto).                                                 |
+| Riesgo                  | Política                                                                                                                                                                                                                                                                                                              |
+| ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Listas grandes          | Cursor y cola de carpetas persistidos por `SyncRun`; una reentrega continúa desde la última página confirmada.                                                                                                                                                                                                        |
+| Saturación              | `SYNC_ITEM_CONCURRENCY` (5 por defecto, 5–10) y páginas de `SYNC_PAGE_SIZE` (100 por defecto).                                                                                                                                                                                                                        |
 | 429/5xx                 | `Retry-After` tiene prioridad; si no existe, backoff exponencial con jitter. Drive se reintenta 3 veces y el planificador reintenta el run hasta 3 veces (`attempts`, `nextAttemptAt`) antes de marcarlo `FAILED`. Un run `RUNNING` sin actividad durante 10 minutos vuelve a `QUEUED` y reanuda desde su checkpoint. |
-| Autorización/validación | 401/403/4xx no transitorios no se reintentan; quedan `FAILED` con incidencia.                                                                  |
-| Reentrega de trabajo    | Un índice parcial único y `jobId=source:<sourceId>` permiten una sola ejecución activa por fuente.                                             |
-| Archivo desaparecido    | Solo un `SUCCEEDED` completo marca `MISSING` por `lastSeenSyncRunId`; no borra filas, Takeout ni overrides.                                    |
-| Permiso denegado        | Marca foto/fuente según alcance, registra incidencia y no intenta el resto de recursos fuera de la fuente.                                     |
+| Autorización/validación | 401/403/4xx no transitorios no se reintentan; quedan `FAILED` con incidencia.                                                                                                                                                                                                                                         |
+| Reentrega de trabajo    | Un índice parcial único y `jobId=source:<sourceId>` permiten una sola ejecución activa por fuente.                                                                                                                                                                                                                    |
+| Archivo desaparecido    | Solo un `SUCCEEDED` completo marca `MISSING` por `lastSeenSyncRunId`; no borra filas, Takeout ni overrides.                                                                                                                                                                                                           |
+| Permiso denegado        | Marca foto/fuente según alcance, registra incidencia y no intenta el resto de recursos fuera de la fuente.                                                                                                                                                                                                            |
 
 ## PhotoDateResolver
 
