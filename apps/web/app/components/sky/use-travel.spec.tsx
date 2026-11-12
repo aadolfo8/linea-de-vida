@@ -12,7 +12,7 @@ const env = vi.hoisted(() => ({ reduced: false }));
 const navigation = vi.hoisted(() => ({ push: vi.fn() }));
 
 vi.mock('next/navigation', () => ({ useRouter: () => navigation }));
-vi.mock('motion/react', () => ({ useReducedMotion: () => env.reduced }));
+vi.mock('../../../lib/use-reduced-motion', () => ({ useReducedMotion: () => env.reduced }));
 
 const frame = () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
 const settle = async () => {

@@ -7,7 +7,7 @@ import type { SkyOrientation } from './orientation';
 import { SkyStage, useSkyItem } from './SkyStage';
 import { SkyThread } from './SkyThread';
 
-vi.mock('motion/react', () => ({ useReducedMotion: () => true }));
+vi.mock('../../../lib/use-reduced-motion', () => ({ useReducedMotion: () => true }));
 
 /** A group whose node sits at known offsets inside the section. */
 function Group({

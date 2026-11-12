@@ -1,6 +1,7 @@
 import { Injectable, ServiceUnavailableException } from '@nestjs/common';
 import { createHash, randomBytes } from 'node:crypto';
-import { google } from 'googleapis';
+import { oauth2 } from '@googleapis/oauth2';
+import { OAuth2Client } from 'google-auth-library';
 import { PrismaService } from './prisma.service';
 
 export const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.readonly';
@@ -34,14 +35,14 @@ export class GoogleOAuthProvider implements GoogleOAuthClient {
   }
   async exchange(code: string, redirectUri: string, codeVerifier: string) {
     this.configured();
-    const oauth = new google.auth.OAuth2(
+    const oauth = new OAuth2Client(
       process.env.GOOGLE_CLIENT_ID,
       process.env.GOOGLE_CLIENT_SECRET,
       redirectUri,
     );
     const { tokens } = await oauth.getToken({ code, codeVerifier, redirect_uri: redirectUri });
     oauth.setCredentials(tokens);
-    const identity = await google.oauth2({ version: 'v2', auth: oauth }).userinfo.get();
+    const identity = await oauth2({ version: 'v2', auth: oauth }).userinfo.get();
     if (!identity.data.id || !identity.data.email)
       throw new Error('Google did not return an identity.');
     return {
@@ -54,7 +55,7 @@ export class GoogleOAuthProvider implements GoogleOAuthClient {
   }
   async revoke(token: string) {
     this.configured();
-    const oauth = new google.auth.OAuth2(
+    const oauth = new OAuth2Client(
       process.env.GOOGLE_CLIENT_ID,
       process.env.GOOGLE_CLIENT_SECRET,
     );

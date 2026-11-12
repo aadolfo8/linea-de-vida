@@ -1,4 +1,5 @@
-import { drive_v3, google } from 'googleapis';
+import { drive, drive_v3 } from '@googleapis/drive';
+import { OAuth2Client } from 'google-auth-library';
 import { Readable } from 'node:stream';
 import { decryptSecret } from './crypto';
 
@@ -64,7 +65,7 @@ export class GoogleDriveProvider implements DriveAdapter {
   private authClient(connection: { refreshTokenCiphertext: string | null; status?: string }) {
     if (connection.status && connection.status !== 'ACTIVE')
       throw new Error('Drive connection is not active.');
-    const auth = new google.auth.OAuth2(
+    const auth = new OAuth2Client(
       process.env.GOOGLE_CLIENT_ID,
       process.env.GOOGLE_CLIENT_SECRET,
       process.env.GOOGLE_DRIVE_REDIRECT_URI,
@@ -77,7 +78,7 @@ export class GoogleDriveProvider implements DriveAdapter {
     return auth;
   }
   private client(connection: { refreshTokenCiphertext: string | null }): drive_v3.Drive {
-    return google.drive({ version: 'v3', auth: this.authClient(connection) });
+    return drive({ version: 'v3', auth: this.authClient(connection) });
   }
   async listChildren(
     connection: { refreshTokenCiphertext: string | null },
@@ -159,9 +160,7 @@ export class GoogleDriveProvider implements DriveAdapter {
     try {
       signal?.throwIfAborted();
       const auth = this.authClient(connection);
-      const metadata = await google
-        .drive({ version: 'v3', auth })
-        .files.get({ fileId, fields: 'thumbnailLink' }, { signal });
+      const metadata = await drive({ version: 'v3', auth }).files.get({ fileId, fields: 'thumbnailLink' }, { signal });
       signal?.throwIfAborted();
       if (!metadata.data.thumbnailLink)
         throw new DriveRequestError(404, 'Drive thumbnail is unavailable.');

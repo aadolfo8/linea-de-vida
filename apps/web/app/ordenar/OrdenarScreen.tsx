@@ -1,6 +1,6 @@
 'use client';
 
-import { useReducedMotion } from 'motion/react';
+import { useReducedMotion } from '../../lib/use-reduced-motion';
 import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from 'react';
 import { activeDriveConnection, api, type Session } from '../../lib/api';

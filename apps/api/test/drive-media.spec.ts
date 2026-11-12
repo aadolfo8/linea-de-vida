@@ -7,16 +7,14 @@ const transport = vi.hoisted(() => ({
   request: vi.fn(),
   credentials: vi.fn(),
 }));
-vi.mock('googleapis', () => ({
-  google: {
-    auth: {
-      OAuth2: class {
-        setCredentials = transport.credentials;
-        request = transport.request;
-      },
-    },
-    drive: () => ({ files: { get: transport.get, list: transport.list } }),
+vi.mock('google-auth-library', () => ({
+  OAuth2Client: class {
+    setCredentials = transport.credentials;
+    request = transport.request;
   },
+}));
+vi.mock('@googleapis/drive', () => ({
+  drive: () => ({ files: { get: transport.get, list: transport.list } }),
 }));
 
 import { GoogleDriveProvider } from '../src/drive';

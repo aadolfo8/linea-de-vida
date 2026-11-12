@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 type CursorState = 'photo' | 'route' | 'action';
 
@@ -15,15 +15,16 @@ export function clampCursorPosition(x: number, y: number, width: number, height:
   };
 }
 
+const cursorLabel: Record<CursorState, string> = { photo: 'Ver', route: 'Ir', action: 'Abrir' };
+
 function isCursorState(value: string | undefined): value is CursorState {
   return value === 'photo' || value === 'route' || value === 'action';
 }
 
 export function ContextCursor() {
   const [enabled, setEnabled] = useState(false);
-  const [visible, setVisible] = useState(false);
-  const [state, setState] = useState<CursorState>('action');
-  const [position, setPosition] = useState({ x: 0, y: 0 });
+  const element = useRef<HTMLSpanElement>(null);
+  const label = useRef<HTMLSpanElement>(null);
 
   useEffect(() => {
     const query = window.matchMedia('(pointer: fine) and (prefers-reduced-motion: no-preference)');
@@ -35,7 +36,13 @@ export function ContextCursor() {
 
   useEffect(() => {
     if (!enabled) return;
-    const hide = () => setVisible(false);
+    // The cursor follows the pointer by writing straight to the DOM: no React render per move.
+    let shown: CursorState | null = null;
+    const hide = () => {
+      if (shown === null) return;
+      shown = null;
+      element.current?.classList.remove('context-cursor--visible');
+    };
     const leave = (event: PointerEvent) => {
       const related =
         event.relatedTarget instanceof Element
@@ -47,15 +54,23 @@ export function ContextCursor() {
       const target =
         event.target instanceof Element ? event.target.closest<HTMLElement>('[data-cursor]') : null;
       const nextState = target?.dataset.cursor;
-      if (!isCursorState(nextState)) {
+      const node = element.current;
+      if (!node || !isCursorState(nextState)) {
         hide();
         return;
       }
-      setState(nextState);
-      setPosition(
-        clampCursorPosition(event.clientX, event.clientY, window.innerWidth, window.innerHeight),
+      if (nextState !== shown) {
+        node.className = `context-cursor context-cursor--${nextState} context-cursor--visible`;
+        if (label.current) label.current.textContent = cursorLabel[nextState];
+        shown = nextState;
+      }
+      const { x, y } = clampCursorPosition(
+        event.clientX,
+        event.clientY,
+        window.innerWidth,
+        window.innerHeight,
       );
-      setVisible(true);
+      node.style.transform = `translate3d(${x - expandedCursorSize / 2}px, ${y - expandedCursorSize / 2}px, 0)`;
     };
     window.addEventListener('pointermove', move, { passive: true });
     window.addEventListener('scroll', hide, { passive: true });
@@ -72,13 +87,12 @@ export function ContextCursor() {
   if (!enabled) return null;
   return (
     <span
+      ref={element}
       aria-hidden="true"
-      className={`context-cursor context-cursor--${state}${visible ? ' context-cursor--visible' : ''}`}
-      style={{
-        transform: `translate3d(${position.x - expandedCursorSize / 2}px, ${position.y - expandedCursorSize / 2}px, 0)`,
-      }}
+      className="context-cursor context-cursor--action"
+      style={{ transform: `translate3d(${-expandedCursorSize / 2}px, ${-expandedCursorSize / 2}px, 0)` }}
     >
-      <span>{state === 'photo' ? 'Ver' : state === 'route' ? 'Ir' : 'Abrir'}</span>
+      <span ref={label}>{cursorLabel.action}</span>
     </span>
   );
 }

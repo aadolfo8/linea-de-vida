@@ -1,7 +1,7 @@
 'use client';
 
 import { Minus, Plus, X } from 'lucide-react';
-import { useReducedMotion } from 'motion/react';
+import { useReducedMotion } from '../../lib/use-reduced-motion';
 import {
   useCallback,
   useEffect,
