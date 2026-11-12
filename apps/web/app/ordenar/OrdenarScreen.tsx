@@ -4,7 +4,6 @@ import { useReducedMotion } from '../../lib/use-reduced-motion';
 import Link from 'next/link';
 import { useMemo, useRef, useState } from 'react';
 import { activeDriveConnection, api, type Session } from '../../lib/api';
-import { orderingApi } from '../../lib/ordering/client';
 import { notifyArchiveIndexUpdated } from '../../lib/archive-index-events';
 import { emptyCopy, headline, pileCopy } from '../../lib/ordering/copy';
 import { draftFromStored, draftToPayload } from '../../lib/ordering/dates';
@@ -23,6 +22,7 @@ import { QuickMode, type QuickResult } from './QuickMode';
 import { Sidebar } from './Sidebar';
 import { usePhotoSelection } from './use-photo-selection';
 import { useTreeExpansion } from './use-tree-expansion';
+import { FolderDateDialog } from './FolderDateDialog';
 import { useOrderingActions } from './use-ordering-actions';
 import { useOrderingData } from './use-ordering-data';
 import './ordenar.css';
@@ -310,28 +310,11 @@ export function OrdenarScreen({ session }: { session: Session }) {
         />
       )}
       {dialog === 'folder' && folder && folderId && (
-        <DateSheet
-          title={`Fecha para «${folder.name}»`}
-          subtitle="Se aplica a todas sus fotos. Si alguna la corriges luego a mano, tu corrección manda."
-          previewUrls={[]}
-          extraPhotos={0}
-          initial={
-            (folderRule && draftFromStored(folderRule.dateValue, folderRule.precision)) || {
-              year: lastYear.current,
-              month: null,
-              day: null,
-            }
-          }
-          applyText="Poner fecha a la carpeta"
-          folder={{
-            initial: {
-              includeSubfolders:
-                folderRule?.includeSubfolders ?? location?.includeSubfolders ?? true,
-              overrideCameraDates: folderRule?.overrideCameraDates ?? false,
-            },
-            loadPreview: (draft, options) =>
-              orderingApi.previewFolderDate(folderId, { ...draftToPayload(draft), ...options }),
-          }}
+        <FolderDateDialog
+          folder={folder}
+          folderRule={folderRule}
+          defaultIncludeSubfolders={location?.includeSubfolders ?? true}
+          fallbackYear={lastYear.current}
           onApply={(draft, options) => {
             lastYear.current = draft.year;
             setDialog(null);
