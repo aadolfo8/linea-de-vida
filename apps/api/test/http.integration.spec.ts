@@ -5,6 +5,9 @@ import cookieParser from 'cookie-parser';
 import request from 'supertest';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AppController } from '../src/app.controller';
+import { AuthController } from '../src/auth.controller';
+import { SourcesController } from '../src/sources.controller';
+import { TimelineController } from '../src/timeline.controller';
 import { CsrfGuard, SessionGuard } from '../src/auth';
 import { DriveAdapter, MemoryDriveProvider } from '../src/drive';
 import { GoogleOAuthClient, OAuthStateService } from '../src/oauth';
@@ -198,7 +201,7 @@ describe('Phase 1 HTTP contracts', () => {
   ) {
     app = await (
       await Test.createTestingModule({
-        controllers: [AppController],
+        controllers: [AppController, AuthController, SourcesController, TimelineController],
         providers: [
           { provide: PrismaService, useValue: prisma },
           { provide: SyncService, useValue: sync },

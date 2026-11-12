@@ -1,5 +1,8 @@
 import { Module } from '@nestjs/common';
 import { AppController } from './app.controller';
+import { AuthController } from './auth.controller';
+import { SourcesController } from './sources.controller';
+import { TimelineController } from './timeline.controller';
 import { OrderingController } from './ordering.controller';
 import { CoversController } from './covers.controller';
 import { CoversService } from './covers.service';
@@ -17,7 +20,14 @@ import { FolderDateRuleService } from './folder-date-rule.service';
 import { OrderingService } from './ordering.service';
 import { PhotoVisibilityService } from './photo-visibility.service';
 @Module({
-  controllers: [AppController, OrderingController, CoversController],
+  controllers: [
+    AppController,
+    AuthController,
+    SourcesController,
+    TimelineController,
+    OrderingController,
+    CoversController,
+  ],
   providers: [
     PrismaService,
     PhotoDateResolver,

@@ -3,7 +3,7 @@ import { INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import { afterEach, describe, expect, it } from 'vitest';
-import { AppController } from '../src/app.controller';
+import { TimelineController } from '../src/timeline.controller';
 import { CsrfGuard, SessionGuard } from '../src/auth';
 import { DriveAdapter, MemoryDriveProvider } from '../src/drive';
 import { GoogleOAuthClient, OAuthStateService } from '../src/oauth';
@@ -110,7 +110,7 @@ describe('GET /v1/timeline/years/:year/month-previews', () => {
   async function createApp(userId = 'owner') {
     app = await (
       await Test.createTestingModule({
-        controllers: [AppController],
+        controllers: [TimelineController],
         providers: [
           { provide: PrismaService, useValue: prisma },
           { provide: SyncService, useValue: {} },

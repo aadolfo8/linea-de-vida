@@ -1,8 +1,7 @@
 import { ConflictException, NotFoundException } from '@nestjs/common';
 import { describe, expect, it, vi } from 'vitest';
-import { AppController } from '../src/app.controller';
-import { FolderDateRuleService } from '../src/folder-date-rule.service';
-import { PhotoVisibilityService } from '../src/photo-visibility.service';
+import { SourcesController } from '../src/sources.controller';
+import { TimelineController } from '../src/timeline.controller';
 
 function controllerFixture() {
   const photos = [
@@ -150,18 +149,9 @@ function controllerFixture() {
     $transaction: async (operation: any) =>
       Array.isArray(operation) ? Promise.all(operation) : operation(prisma),
   };
-  const controller = new AppController(
-    prisma,
-    {} as any,
-    {} as any,
-    {} as any,
-    {} as any,
-    {} as any,
-    {} as any,
-    new FolderDateRuleService(prisma),
-    new PhotoVisibilityService(prisma),
-  );
-  return { controller, prisma, photos, exclusions, updates };
+  const controller = new TimelineController(prisma, {} as any, {} as any);
+  const sources = new SourcesController(prisma, {} as any, {} as any, {} as any);
+  return { controller, sources, prisma, photos, exclusions, updates };
 }
 
 describe('indexed archive management', () => {
@@ -175,7 +165,7 @@ describe('indexed archive management', () => {
         sourceName: 'Family archive',
       },
     });
-    await expect(fixture.controller.removeSource('owner', 'source')).resolves.toBeUndefined();
+    await expect(fixture.sources.removeSource('owner', 'source')).resolves.toBeUndefined();
     expect(fixture.prisma.photoFile.deleteMany).toHaveBeenCalledWith({
       where: { userId: 'owner', sourceId: 'source' },
     });
@@ -196,7 +186,7 @@ describe('indexed archive management', () => {
   it('does not remove a source while a sync is queued or running', async () => {
     const fixture = controllerFixture();
     fixture.prisma.syncRun.findFirst.mockResolvedValueOnce({ id: 'active-run' });
-    await expect(fixture.controller.removeSource('owner', 'source')).rejects.toBeInstanceOf(
+    await expect(fixture.sources.removeSource('owner', 'source')).rejects.toBeInstanceOf(
       ConflictException,
     );
     expect(fixture.prisma.photo.deleteMany).not.toHaveBeenCalled();
@@ -206,7 +196,7 @@ describe('indexed archive management', () => {
 
   it('does not disclose or remove another user’s source', async () => {
     const fixture = controllerFixture();
-    await expect(fixture.controller.removeSource('other', 'source')).rejects.toBeInstanceOf(
+    await expect(fixture.sources.removeSource('other', 'source')).rejects.toBeInstanceOf(
       NotFoundException,
     );
     expect(fixture.prisma.photo.deleteMany).not.toHaveBeenCalled();
@@ -249,17 +239,7 @@ describe('temporal timeline contracts', () => {
     };
     return {
       prisma,
-      controller: new AppController(
-        prisma,
-        {} as any,
-        {} as any,
-        {} as any,
-        {} as any,
-        {} as any,
-        {} as any,
-        {} as any,
-        {} as any,
-      ),
+      controller: new TimelineController(prisma, {} as any, {} as any),
     };
   }
 

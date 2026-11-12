@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { AppController } from '../src/app.controller';
+import { TimelineController } from '../src/timeline.controller';
 import { PHOTO_BATCH_LIMIT } from '../src/photo-ids';
 import { PhotoVisibilityService } from '../src/photo-visibility.service';
 import { MemoryPrisma } from './support/memory-prisma';
@@ -135,7 +135,7 @@ describe('hidden photos leave every visible listing', () => {
     const none = {} as any;
     return {
       prisma,
-      controller: new AppController(prisma, none, none, none, none, none, none, none, none) as any,
+      controller: new TimelineController(prisma, none, none) as any,
     };
   };
 

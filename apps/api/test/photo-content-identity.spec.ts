@@ -1,7 +1,7 @@
 import { Readable } from 'node:stream';
 import { describe, expect, it } from 'vitest';
 import { PhotoDateResolver } from '../src/date-resolver';
-import { AppController } from '../src/app.controller';
+import { SourcesController } from '../src/sources.controller';
 import { DriveAdapter, DriveItem } from '../src/drive';
 import { SyncService } from '../src/sync.service';
 import { MemoryPrisma } from './support/memory-prisma';
@@ -599,17 +599,7 @@ describe('photo content identity', () => {
     await a.sync('source-b', 'root-b', { 'root-b': [image('x2', 'xxx')] });
     for (const id of ['source-a', 'source-b'])
       a.memory.rows('photoSource').push({ id, userId: 'owner' });
-    const controller = new AppController(
-      a.memory as any,
-      {} as any,
-      {} as any,
-      {} as any,
-      {} as any,
-      {} as any,
-      {} as any,
-      {} as any,
-      {} as any,
-    );
+    const controller = new SourcesController(a.memory as any, {} as any, {} as any, {} as any);
 
     await controller.removeSource('owner', 'source-a');
 
