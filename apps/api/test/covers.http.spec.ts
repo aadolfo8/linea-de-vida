@@ -2,7 +2,7 @@ import 'reflect-metadata';
 import { INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
-import { afterAll, afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, describe, expect, it } from 'vitest';
 import { CsrfGuard, SessionGuard } from '../src/auth';
 import { CoversController } from '../src/covers.controller';
 import { CoversService } from '../src/covers.service';
