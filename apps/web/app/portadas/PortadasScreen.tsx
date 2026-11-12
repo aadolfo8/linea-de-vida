@@ -1,48 +1,31 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { ApiError, activeDriveConnection, type Session } from '../../lib/api';
-import { notifyArchiveIndexUpdated } from '../../lib/archive-index-events';
-import { coversApi } from '../../lib/covers/client';
+import { useEffect, useMemo, useState } from 'react';
+import { activeDriveConnection, type Session } from '../../lib/api';
 import {
-  DEFAULT_LIMITS,
   UNKNOWN_MONTH_SCOPE,
   YEAR_SCOPE,
   monthScope,
-  moveChoice,
   previewPhotos,
-  sameOrder,
   sameScope,
-  scopeKey,
   scopeTitle,
-  toggleChoice,
   type CoverScope,
 } from '../../lib/covers/model';
-import { apiErrorCopy } from '../../lib/sources/errors';
 import { DriveBanner } from '../components/DriveBanner';
 import { SkyPage } from '../components/SkyPage';
 import { ToastHost } from '../components/ToastHost';
-import { useToast } from '../../lib/use-toast';
-import { photoCountLabel, type TimelinePhoto } from '../components/timeline-model';
+import { photoCountLabel } from '../components/timeline-model';
 import { GridSkeleton, LoadMore } from '../ordenar/PhotoGrid';
 import { CandidateGrid, ChosenStrip } from './CoverParts';
 import { DroppedNotice, UnsavedGuard, YearSidebar } from './PortadasParts';
 import { CoverPreview } from './CoverPreview';
+import { useCoverEditor } from './use-cover-editor';
 import { useCandidates, useYearData, useYears } from './use-covers-data';
 import '../ordenar/ordenar.css';
 import './portadas.css';
 
-type Toast = {
-  key: number;
-  message: string;
-  tone: 'ok' | 'error';
-  link?: { href: string; label: string };
-  undo?: () => Promise<void>;
-};
 type Target = { year: number; scope: CoverScope };
-
-const TOAST_MS = 9000;
 
 /** Portadas: choose, in order, the photos that stand for each year, month and "Sin mes" group. */
 export function PortadasScreen({ session }: { session: Session }) {
@@ -51,13 +34,7 @@ export function PortadasScreen({ session }: { session: Session }) {
   const [scope, setScope] = useState<CoverScope>(YEAR_SCOPE);
   const yearData = useYearData(year);
   const candidates = useCandidates(year, scope);
-  const [draft, setDraft] = useState<string[]>([]);
-  const [busy, setBusy] = useState(false);
   const [pending, setPending] = useState<Target | null>(null);
-  const { toast, show, dismiss } = useToast<Omit<Toast, 'key'>>(TOAST_MS);
-  const [announcement, setAnnouncement] = useState('');
-  const known = useRef(new Map<string, TimelinePhoto>());
-  const focusRequest = useRef<{ id: string; act: string; index: number } | null>(null);
 
   // The newest year with photos opens first.
   useEffect(() => {
@@ -66,36 +43,10 @@ export function PortadasScreen({ session }: { session: Session }) {
 
   const data =
     yearData.status === 'ready' && yearData.data?.covers.year === year ? yearData.data : null;
-  const limits = data?.covers.limits ?? DEFAULT_LIMITS;
-  const limit = limits[scope.kind];
-  const saved = data?.covers.items.find((item) => sameScope(item, scope));
-  const savedIds = useMemo(() => saved?.photos.map((photo) => photo.id) ?? [], [saved]);
-  const dropped = saved?.dropped ?? [];
-  const scopeId = scopeKey(scope);
 
-  // A different cover (or fresh data after saving) starts from what is saved.
-  useEffect(() => {
-    if (!data) return;
-    const current = data.covers.items.find((item) => sameScope(item, scope));
-    for (const photo of current?.photos ?? []) known.current.set(photo.id, photo);
-    setDraft(current?.photos.map((photo) => photo.id) ?? []);
-    // `scope` is identified by its key.
-  }, [data, scopeId]);
-
-  const dirty = data !== null && !sameOrder(draft, savedIds);
-  const canSave = data !== null && !busy && (dirty || dropped.length > 0);
-  const hasChoice = savedIds.length > 0 || dropped.length > 0;
-
-  useEffect(() => {
-    if (!dirty) return;
-    const warn = (event: BeforeUnloadEvent) => event.preventDefault();
-    window.addEventListener('beforeunload', warn);
-    return () => window.removeEventListener('beforeunload', warn);
-  }, [dirty]);
-
-  const chosenPhotos = draft
-    .map((id) => known.current.get(id))
-    .filter((photo): photo is TimelinePhoto => Boolean(photo));
+  const editor = useCoverEditor({ year, scope, data, reload: yearData.reload });
+  const { draft, setDraft, busy, dirty, limit, dropped, hasChoice, canSave, chosenPhotos } = editor;
+  const { toast, dismiss, announcement, onToggle, onMove, onRemove, save, reset } = editor;
 
   const automatic = useMemo(() => {
     if (!data) return [];
@@ -106,129 +57,6 @@ export function PortadasScreen({ session }: { session: Session }) {
     return group?.previews ?? [];
   }, [data, scope]);
   const shown = previewPhotos(chosenPhotos, automatic, limit);
-
-  // Keyboard focus follows a moved or removed photo instead of falling back to the page.
-  useEffect(() => {
-    const request = focusRequest.current;
-    focusRequest.current = null;
-    if (!request) return;
-    const items = document.querySelectorAll<HTMLElement>('.cov-strip li');
-    if (request.act === 'remove') {
-      const next = items[Math.min(request.index, items.length - 1)];
-      (
-        next?.querySelector<HTMLElement>('[data-act="remove"]') ??
-        document.querySelector<HTMLElement>('.cov-grid button')
-      )?.focus();
-      return;
-    }
-    const item = document.querySelector<HTMLElement>(`[data-chosen-id="${request.id}"]`);
-    const button =
-      item?.querySelector<HTMLButtonElement>(`[data-act="${request.act}"]:not(:disabled)`) ??
-      item?.querySelector<HTMLButtonElement>('button:not(:disabled)');
-    button?.focus();
-  }, [draft]);
-
-  const onToggle = (photo: TimelinePhoto) => {
-    const result = toggleChoice(draft, photo.id, limit);
-    if (result.blocked) {
-      setAnnouncement(`La portada ya tiene ${limit} fotos. Quita una para añadir otra.`);
-      return;
-    }
-    known.current.set(photo.id, photo);
-    setDraft(result.ids);
-    setAnnouncement(
-      result.ids.includes(photo.id)
-        ? `Foto añadida en el puesto ${result.ids.length}. ${result.ids.length} de ${limit}.`
-        : `Foto quitada. ${result.ids.length} de ${limit}.`,
-    );
-  };
-  const onMove = (id: string, delta: -1 | 1) => {
-    focusRequest.current = { id, act: delta < 0 ? 'earlier' : 'later', index: 0 };
-    const next = moveChoice(draft, id, delta);
-    setDraft(next);
-    setAnnouncement(`Foto movida al puesto ${next.indexOf(id) + 1} de ${next.length}.`);
-  };
-  const onRemove = (id: string) => {
-    focusRequest.current = { id, act: 'remove', index: draft.indexOf(id) };
-    const next = draft.filter((other) => other !== id);
-    setDraft(next);
-    setAnnouncement(`Foto quitada. ${next.length} de ${limit}.`);
-  };
-
-  const failure = async (error: unknown, fallback: string) => {
-    show({
-      tone: 'error',
-      message:
-        error instanceof ApiError && error.code === 'COVER_PHOTOS_REJECTED'
-          ? 'Alguna foto ya no puede estar en esta portada. Hemos recargado las portadas; revisa tu elección.'
-          : apiErrorCopy(error, fallback),
-    });
-    if (error instanceof ApiError && error.code === 'COVER_PHOTOS_REJECTED')
-      await yearData.reload();
-  };
-
-  const save = async (): Promise<boolean> => {
-    if (year === null || !canSave) return false;
-    setBusy(true);
-    try {
-      await coversApi.save(year, scope, draft);
-      notifyArchiveIndexUpdated();
-      await yearData.reload();
-      show({
-        tone: 'ok',
-        message: draft.length
-          ? `Portada guardada: ${photoCountLabel(draft.length)} elegidas.`
-          : 'Portada vuelta a automática.',
-        link: { href: `/timeline/${year}`, label: 'Verla en la cronología' },
-      });
-      setAnnouncement('Portada guardada.');
-      return true;
-    } catch (error) {
-      await failure(
-        error,
-        'No se pudo guardar la portada. Tu elección sigue aquí; inténtalo de nuevo.',
-      );
-      return false;
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const reset = async () => {
-    if (year === null || busy) return;
-    const previous = savedIds;
-    const target = { year, scope };
-    setBusy(true);
-    try {
-      await coversApi.reset(year, scope);
-      notifyArchiveIndexUpdated();
-      await yearData.reload();
-      show({
-        tone: 'ok',
-        message: 'La portada vuelve a ser automática.',
-        undo: previous.length
-          ? async () => {
-              setBusy(true);
-              try {
-                await coversApi.save(target.year, target.scope, previous);
-                notifyArchiveIndexUpdated();
-                await yearData.reload();
-                setAnnouncement('Portada recuperada.');
-              } catch (error) {
-                await failure(error, 'No se pudo recuperar la portada.');
-              } finally {
-                setBusy(false);
-              }
-            }
-          : undefined,
-      });
-      setAnnouncement('La portada vuelve a ser automática.');
-    } catch (error) {
-      await failure(error, 'No se pudo volver a la portada automática. Inténtalo de nuevo.');
-    } finally {
-      setBusy(false);
-    }
-  };
 
   const apply = (target: Target) => {
     setPending(null);
