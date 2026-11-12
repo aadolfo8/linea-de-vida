@@ -2,7 +2,7 @@
 
 import { useReducedMotion } from '../../lib/use-reduced-motion';
 import Link from 'next/link';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { activeDriveConnection, api, type Session } from '../../lib/api';
 import { orderingApi } from '../../lib/ordering/client';
 import { notifyArchiveIndexUpdated } from '../../lib/archive-index-events';
@@ -10,7 +10,7 @@ import { emptyCopy, headline, pileCopy } from '../../lib/ordering/copy';
 import { draftFromStored, draftToPayload } from '../../lib/ordering/dates';
 import { photoCountLabel } from '../components/timeline-model';
 import { withManualDate } from '../../lib/ordering/results';
-import { findFolder, initialExpanded, pathToFolder } from '../../lib/ordering/tree';
+import { findFolder } from '../../lib/ordering/tree';
 import type { DateDraft, OrderingPhoto, Pile } from '../../lib/ordering/types';
 import { thumbnailVariantUrl } from '../../lib/media';
 import { DriveBanner } from '../components/DriveBanner';
@@ -22,6 +22,7 @@ import { ActionBar, FolderBar, Peek, SuggestionBanner } from './Panels';
 import { QuickMode, type QuickResult } from './QuickMode';
 import { Sidebar } from './Sidebar';
 import { usePhotoSelection } from './use-photo-selection';
+import { useTreeExpansion } from './use-tree-expansion';
 import { useOrderingActions } from './use-ordering-actions';
 import { useOrderingData } from './use-ordering-data';
 import './ordenar.css';
@@ -35,9 +36,7 @@ export function OrdenarScreen({ session }: { session: Session }) {
   const { location, list, piles, pile, tree, folder, source, suggestions } = data;
   const [dialog, setDialog] = useState<Dialog>(null);
   const [peekId, setPeekId] = useState<string | null>(null);
-  const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
   const lastYear = useRef<number | null>(null);
-  const expandedFor = useRef<string | null>(null);
 
   const folderId = location?.folderId ?? null;
   const items = list.items;
@@ -57,19 +56,7 @@ export function OrdenarScreen({ session }: { session: Session }) {
   const { selected, clearSelection, selectingRest } = selection;
   const actions = useOrderingActions(data, selection.removeSelected);
 
-  // The tree opens its top level and the way to the selected folder.
-  useEffect(() => {
-    if (!tree) return;
-    if (expandedFor.current !== tree.sourceId) {
-      expandedFor.current = tree.sourceId;
-      setExpanded(initialExpanded(tree.items, folderId));
-      return;
-    }
-    if (folderId) {
-      const path = pathToFolder(tree.items, folderId).slice(0, -1);
-      if (path.length) setExpanded((current) => new Set([...current, ...path]));
-    }
-  }, [tree, folderId]);
+  const { expanded, toggleFolder } = useTreeExpansion(tree, folderId);
 
   const onTile = selection.onTile;
 
@@ -167,14 +154,7 @@ export function OrdenarScreen({ session }: { session: Session }) {
           tree={tree}
           folderId={folderId}
           expanded={expanded}
-          onToggleFolder={(id, open) =>
-            setExpanded((current) => {
-              const next = new Set(current);
-              if (open) next.add(id);
-              else next.delete(id);
-              return next;
-            })
-          }
+          onToggleFolder={toggleFolder}
           onFolder={(id) => data.patchLocation({ folderId: id })}
         />
         <section className="ord-content" aria-label="Fotos de la vista">
