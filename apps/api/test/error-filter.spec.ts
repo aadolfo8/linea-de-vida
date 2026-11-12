@@ -4,7 +4,7 @@ import { ErrorFilter } from '../src/error-filter';
 
 const run = (error: unknown) => {
   const json = vi.fn();
-  const status = vi.fn((_code: number) => ({ json }));
+  const status = vi.fn<(code: number) => { json: typeof json }>(() => ({ json }));
   const response = { headersSent: false, locals: { requestId: 'req-1' }, status };
   new ErrorFilter().catch(error, { switchToHttp: () => ({ getResponse: () => response }) } as any);
   return { status: status.mock.calls[0]?.[0], body: json.mock.calls[0]?.[0] };
