@@ -15,10 +15,12 @@ import {
 import { api } from '../../lib/api';
 import { mediaUrl, thumbnailVariantUrl } from '../../lib/media';
 import './photo-viewer.css';
+import { ArrowIcon, freshShown, ViewerImage, type Shown } from './viewer-image';
+import { ViewerNotes, ViewerStrip } from './viewer-chrome';
+import { focusableSelector, gap, isEditable, readStage, trapTab } from './viewer-dom';
 import {
   photoDateLabel,
   photoPrecisionLabel,
-  wrappedFocusIndex,
   type TimelinePhoto,
   type TimelinePhotoPage,
 } from './timeline-model';
@@ -41,9 +43,6 @@ import {
   type View,
 } from './viewer-zoom';
 
-const focusableSelector =
-  'button:not(:disabled), a[href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"]), [contenteditable="true"]';
-
 const EASE = 'cubic-bezier(.22,1,.36,1)';
 /** Chrome fades away after this long without pointer or keyboard activity. */
 const IDLE_DELAY = 2600;
@@ -54,17 +53,6 @@ const DISMISS_DISTANCE = 110;
 const TAP_SLOP = 8;
 const DOUBLE_TAP_WINDOW = 320;
 const ORIGINAL_MIME = /^image\/(jpeg|png|webp|gif)$/i;
-
-const isEditable = (target: EventTarget | null) =>
-  target instanceof HTMLInputElement ||
-  target instanceof HTMLTextAreaElement ||
-  target instanceof HTMLSelectElement ||
-  (target instanceof HTMLElement && target.isContentEditable);
-
-const readStage = (): Size =>
-  typeof window === 'undefined'
-    ? { width: 1280, height: 800 }
-    : { width: window.innerWidth, height: window.innerHeight };
 
 /** Where the viewer grows from and shrinks back to: the tile the photo was opened from. */
 export type ViewerSource = {
@@ -86,9 +74,6 @@ type Gesture = {
   moved: boolean;
   onStage: boolean;
 };
-
-const gap = (a: { x: number; y: number }, b: { x: number; y: number }) =>
-  Math.hypot(a.x - b.x, a.y - b.y);
 
 export function TimelinePhotoViewer({
   photos,
@@ -662,19 +647,7 @@ export function TimelinePhotoViewer({
   const keyDown = (event: KeyboardEvent<HTMLElement>) => {
     poke(true);
     if (event.key === 'Tab') {
-      const focusable = [
-        ...(dialog.current?.querySelectorAll<HTMLElement>(focusableSelector) ?? []),
-      ].filter((element) => element.tabIndex >= 0);
-      const currentIndex = focusable.indexOf(document.activeElement as HTMLElement);
-      const atBoundary = event.shiftKey
-        ? currentIndex <= 0
-        : currentIndex === -1 || currentIndex === focusable.length - 1;
-      if (atBoundary) {
-        event.preventDefault();
-        const nextIndex = wrappedFocusIndex(currentIndex, focusable.length, event.shiftKey);
-        if (nextIndex >= 0) focusable[nextIndex]!.focus();
-        else dialog.current?.focus();
-      }
+      trapTab(event, dialog.current);
       return;
     }
     if (isEditable(event.target) || event.ctrlKey || event.metaKey || event.altKey) return;
@@ -851,154 +824,25 @@ export function TimelinePhotoViewer({
           <ArrowIcon direction="right" />
         </button>
 
-        <div className="pv-notes">
-          {shown!.status === 'loading' && (
-            <p className="pv-note" role="status" aria-live="polite">
-              {shown!.variant === 'original'
-                ? 'Cargando fotografía en alta calidad…'
-                : 'Cargando fotografía…'}
-            </p>
-          )}
-          {shown!.status === 'ready' && shown!.fallback && (
-            <p className="pv-note" role="status" aria-live="polite">
-              El original no se pudo cargar; se muestra la miniatura.
-            </p>
-          )}
-          {shown!.status === 'error' && (
-            <div className="pv-note" role="alert">
-              <p>No se pudo cargar la fotografía.</p>
-              <button
-                type="button"
-                onClick={() => updateShown({ status: 'loading', retry: shown!.retry + 1 })}
-              >
-                Reintentar miniatura
-              </button>
-            </div>
-          )}
-          {isDownloadOnly && (
-            <p className="pv-note pv-ui" {...keepVisible}>
-              <span>Este formato se muestra con una vista previa.</span>
-              <a href={mediaUrl(api, `/v1/photos/${selected.id}/content`)}>Descargar original</a>
-            </p>
-          )}
-          {loadingMore && (
-            <p className="pv-note" role="status" aria-live="polite">
-              Cargando más fotografías…
-            </p>
-          )}
-          {loadMoreError && (
-            <p className="pv-note pv-ui" {...keepVisible}>
-              <button type="button" onClick={() => void fetchNextPage()}>
-                Reintentar carga
-              </button>
-            </p>
-          )}
-        </div>
+        <ViewerNotes
+          shown={shown!}
+          photo={selected}
+          isDownloadOnly={isDownloadOnly}
+          loadingMore={loadingMore}
+          loadMoreError={loadMoreError}
+          keepVisible={keepVisible}
+          onRetryImage={() => updateShown({ status: 'loading', retry: shown!.retry + 1 })}
+          onRetryMore={() => void fetchNextPage()}
+        />
 
-        <nav ref={strip} className="pv-strip pv-ui" aria-label="Fotos" {...keepVisible}>
-          {loadedPhotos.map((photo, photoIndex) => (
-            <button
-              key={photo.id}
-              type="button"
-              aria-label={`Foto ${photoIndex + 1}: ${photoDateLabel(photo)}`}
-              aria-current={photoIndex === index ? 'true' : undefined}
-              tabIndex={photoIndex === index ? 0 : -1}
-              onClick={() => select(photoIndex, photoIndex > index ? 1 : -1)}
-            >
-              {/* eslint-disable-next-line @next/next/no-img-element -- Private media URLs rely on the browser's session cookies. */}
-              <img
-                src={thumbnailVariantUrl(api, photo.thumbnailUrl, 640)}
-                alt=""
-                width={photo.dimensions?.width}
-                height={photo.dimensions?.height}
-                loading="lazy"
-                decoding="async"
-                draggable={false}
-              />
-            </button>
-          ))}
-        </nav>
+        <ViewerStrip
+          stripRef={strip}
+          photos={loadedPhotos}
+          index={index}
+          keepVisible={keepVisible}
+          onSelect={select}
+        />
       </section>
     </div>
-  );
-}
-
-function ArrowIcon({ direction }: { direction: 'left' | 'right' }) {
-  return (
-    <svg viewBox="0 0 24 24" aria-hidden="true">
-      <path d={direction === 'left' ? 'M15 5l-7 7 7 7' : 'M9 5l7 7-7 7'} />
-    </svg>
-  );
-}
-
-/** What the viewer is currently trying to show for the open photo. */
-type Shown = {
-  id: string;
-  variant: 'thumbnail' | 'original';
-  status: 'loading' | 'ready' | 'error';
-  /** Bumped to remount the image when the thumbnail is retried. */
-  retry: number;
-  /** The original failed and the thumbnail stands in for it. */
-  fallback: boolean;
-};
-
-const freshShown = (photo: TimelinePhoto): Shown => ({
-  id: photo.id,
-  variant: ORIGINAL_MIME.test(photo.mimeType) ? 'original' : 'thumbnail',
-  status: 'loading',
-  retry: 0,
-  fallback: false,
-});
-
-/**
- * The photo itself: the thumbnail first, then the original on top once it has loaded. The
- * parent owns the loading, fallback and retry state so its notices stay outside the zoomed frame.
- */
-function ViewerImage({
-  photo,
-  shown,
-  onLoad,
-  onError,
-}: {
-  photo: TimelinePhoto;
-  shown: Shown;
-  onLoad: (width: number, height: number) => void;
-  onError: () => void;
-}) {
-  const thumbnailSrc = thumbnailVariantUrl(api, photo.thumbnailUrl, 1280);
-  const src =
-    shown.variant === 'original' ? mediaUrl(api, `/v1/photos/${photo.id}/content`) : thumbnailSrc;
-
-  return (
-    <>
-      {shown.variant === 'original' && shown.status === 'loading' && (
-        <>
-          {/* Keep the small preview visible until the full image is ready. */}
-          {/* eslint-disable-next-line @next/next/no-img-element -- Private media URLs rely on the browser's session cookies. */}
-          <img
-            className="pv-under"
-            src={thumbnailSrc}
-            alt=""
-            aria-hidden="true"
-            loading="eager"
-            draggable={false}
-          />
-        </>
-      )}
-      {/* eslint-disable-next-line @next/next/no-img-element -- Private media URLs rely on the browser's session cookies. */}
-      <img
-        key={`${photo.id}-${shown.variant}-${shown.retry}`}
-        className="pv-img"
-        src={src}
-        alt={photo.fileName}
-        data-source={shown.variant}
-        data-ready={shown.status === 'ready'}
-        draggable={false}
-        onLoad={(event) =>
-          onLoad(event.currentTarget.naturalWidth, event.currentTarget.naturalHeight)
-        }
-        onError={onError}
-      />
-    </>
   );
 }
