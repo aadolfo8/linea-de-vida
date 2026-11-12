@@ -18,22 +18,7 @@ describe('settings API interactions', () => {
     expect(settingsEndpoint.createSource).toBe('/photo-sources');
     expect(settingsEndpoint.sync('source')).toBe('/photo-sources/source/sync-runs');
     expect(settingsEndpoint.run('run')).toBe('/sync-runs/run');
-    expect(settingsEndpoint.issues('run')).toBe('/sync-runs/run/issues?limit=30');
     expect(settingsEndpoint.disconnect('connection')).toBe('/oauth-connections/connection');
-    expect(
-      settingsEndpoint.sourcePhotos('source/id', {
-        query: 'summer trip',
-        folderId: 'folder/id',
-        classification: 'MANUAL',
-        cursor: 'opaque token',
-      }),
-    ).toBe(
-      '/photo-sources/source%2Fid/photos?limit=30&q=summer+trip&folderId=folder%2Fid&classification=MANUAL&cursor=opaque+token',
-    );
-    expect(settingsEndpoint.photoExclusions()).toBe('/photo-exclusions?limit=30');
-    expect(settingsEndpoint.restorePhotoExclusion('exclusion/id')).toBe(
-      '/photo-exclusions/exclusion%2Fid',
-    );
   });
 });
 

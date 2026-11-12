@@ -143,18 +143,10 @@ describe('hidden photos leave every visible listing', () => {
     const { prisma, controller: app } = makeController();
     await app.years('owner');
     await app.yearSummary('owner', '2020');
-    await app.months('owner', '2020');
     await app.monthPreviews('owner', '2020');
-    await app.days('owner', '2020', '3');
-    await app.undated('owner');
     await app.monthPhotos('owner', '2020', '3');
     await app.unknownMonthPhotos('owner', '2020');
     await app.photos('owner', '2020', undefined, undefined, 'YEAR');
-    await app.indexedFolders('owner', 'source');
-    await app.indexedFolderPhotos('owner', 'folder');
-    await app.classificationSummary('owner', 'source');
-    await app.pendingPhotos('owner', 'source');
-    await app.searchSourcePhotos('owner', 'source');
 
     expect(prisma.$queryRawUnsafe.mock.calls.length).toBeGreaterThan(0);
     for (const [sql] of prisma.$queryRawUnsafe.mock.calls)

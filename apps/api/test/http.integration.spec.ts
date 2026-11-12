@@ -293,28 +293,6 @@ describe('Phase 1 HTTP contracts', () => {
       });
   });
 
-  it('exposes bounded batch removal with CSRF enforcement and neutral absent results', async () => {
-    await createApp('owner', { csrf: true });
-    await request(app.getHttpServer())
-      .post('/v1/photo-removals')
-      .set('Origin', 'http://attacker.example.test')
-      .send({ photoIds: ['unknown'] })
-      .expect(403);
-    await request(app.getHttpServer())
-      .post('/v1/photo-removals')
-      .set('Origin', 'http://localhost:3000')
-      .send({ photoIds: [] })
-      .expect(400);
-    await request(app.getHttpServer())
-      .post('/v1/photo-removals')
-      .set('Origin', 'http://localhost:3000')
-      .send({ photoIds: ['unknown'] })
-      .expect(200)
-      .expect(({ body }) =>
-        expect(body).toEqual({ results: [{ id: 'unknown', status: 'ABSENT' }] }),
-      );
-  });
-
   it('accepts Takeout only as an explicit owned source type', async () => {
     await createApp();
     await request(app.getHttpServer())
@@ -375,30 +353,6 @@ describe('Phase 1 HTTP contracts', () => {
       .expect(200)
       .expect(({ body }) => expect(body.items[0].year).toBe(2023));
     await request(app.getHttpServer()).get('/v1/timeline/years?cursor=invalid').expect(400);
-  });
-
-  it('returns month and day aggregates including explicit partial-date groups', async () => {
-    await createApp();
-    await request(app.getHttpServer())
-      .get('/v1/timeline/years/2024/months?limit=1')
-      .expect(200)
-      .expect(({ body }) => {
-        expect(body.items[0]).toMatchObject({ month: 3, kind: 'MONTH', photoCount: 2 });
-        expect(body.nextCursor).toBeTruthy();
-      });
-    await request(app.getHttpServer())
-      .get('/v1/timeline/years/2024/months/3/days?limit=10')
-      .expect(200)
-      .expect(({ body }) =>
-        expect(body.items.at(-1)).toMatchObject({
-          day: null,
-          label: 'Día sin concretar',
-          kind: 'MONTH',
-        }),
-      );
-    await request(app.getHttpServer())
-      .get('/v1/timeline/years/2024/months?cursor=eyJzY29wZSI6InllYXJzIiwib2Zmc2V0IjoxfQ')
-      .expect(400);
   });
 
   it('validates each photo granularity and keeps unknown dates accessible', async () => {
@@ -656,7 +610,7 @@ describe('Phase 1 HTTP contracts', () => {
         const callback = await client.get(`${path}/callback?state=${state}&code=code`).expect(302);
         if (flow === 'drive') {
           const location = new URL(callback.headers.location);
-          expect(location.pathname).toBe('/settings');
+          expect(location.pathname).toBe('/ajustes');
           expect(location.searchParams.get('oauth')).toBe('drive-connected');
         }
         expect(sources.map(({ id, status }) => [id, status])).toEqual([
@@ -684,7 +638,7 @@ describe('Phase 1 HTTP contracts', () => {
         .expect(302);
       if (flow === 'drive') {
         const location = new URL(denied.headers.location);
-        expect(location.pathname).toBe('/settings');
+        expect(location.pathname).toBe('/ajustes');
         expect(location.searchParams.get('oauth')).toBe('drive-denied');
       }
       expect(updates).not.toHaveBeenCalled();
@@ -814,23 +768,5 @@ describe('Phase 1 HTTP contracts', () => {
       effectiveDatePrecision: 'DAY',
       override: null,
     });
-  });
-
-  it('edits an owned batch idempotently and denies horizontal photo access', async () => {
-    await createApp();
-    const body = { photoIds: ['photo-owner', 'photo-owner-2'], year: 2024, precision: 'YEAR' };
-    await request(app.getHttpServer())
-      .put('/v1/photos/manual-date-overrides')
-      .send(body)
-      .expect(200);
-    await request(app.getHttpServer())
-      .put('/v1/photos/manual-date-overrides')
-      .send(body)
-      .expect(200)
-      .expect(({ body }) => expect(body.items).toHaveLength(2));
-    await request(app.getHttpServer())
-      .put('/v1/photos/manual-date-overrides')
-      .send({ photoIds: ['photo-other'], year: 2024, precision: 'YEAR' })
-      .expect(404);
   });
 });
