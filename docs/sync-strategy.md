@@ -68,3 +68,7 @@ El backend calcula `effectiveDateValue` y `effectiveDatePrecision` a partir del 
 - Prueba de repetición del mismo trabajo sin duplicados.
 - Pruebas de checkpoint, reintentos transitorios, exclusión por fuente, reconciliación segura y movimiento por `driveFileId`.
 - Prueba de autorización: un usuario no obtiene ni media ni estado de otra persona.
+
+## Measured cost (RF-8)
+
+`apps/api/test/sync-benchmark.spec.ts` (opt-in, needs a real PostgreSQL) indexes 2000 photos in pages of 100 with the in-memory Drive. On a local PostgreSQL 16: the first scan took about 2.6 s (≈6 queries per photo) and a rescan of unchanged files about 3.1 s (≈8 per photo), i.e. roughly 1.5 ms per photo, so 50 000 photos is a matter of a couple of minutes, not hours. Batching the per-photo work (the original RF-8 idea) would remove queries but is unsafe while a page's items run concurrently and can share a content key, so it is not planned. Real scans are bounded by Drive's API latency, not by PostgreSQL.
