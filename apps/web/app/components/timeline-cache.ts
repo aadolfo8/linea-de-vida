@@ -1,6 +1,6 @@
 import { apiJson } from '../../lib/api';
 import { subscribeArchiveIndexUpdated } from '../../lib/archive-index-events';
-import { queryClient, SESSION_KEY } from '../../lib/query-client';
+import { queryClient } from '../../lib/query-client';
 import {
   collectTimelineYears,
   type TimelineMonth,
@@ -25,6 +25,18 @@ const keys = {
 
 /** Bumped when the archive changes so a page already in flight cannot merge into the new cache. */
 let archiveRevision = 0;
+
+/** Query families that depend on the archive index; session and source lists are not among them. */
+const ARCHIVE_KEYS = new Set([
+  'years',
+  'year',
+  'month-previews',
+  'gallery',
+  'gallery-page',
+  'cover-years',
+  'cover-year',
+  'cover-candidates',
+]);
 
 /** Fetches through the shared cache; an answer that outlives an archive change is not kept. */
 async function load<T>(queryKey: readonly unknown[], queryFn: () => Promise<T>) {
@@ -97,7 +109,7 @@ export function invalidateTimelineCache() {
   // Requests in flight are left to finish for their callers; they drop their own result (above).
   queryClient.removeQueries({
     predicate: (query) =>
-      query.queryKey[0] !== SESSION_KEY[0] && query.state.fetchStatus !== 'fetching',
+      ARCHIVE_KEYS.has(String(query.queryKey[0])) && query.state.fetchStatus !== 'fetching',
   });
 }
 
