@@ -4,6 +4,7 @@ import {
   DateSource,
   FolderDateRule,
   FolderDateRuleScope,
+  PhotoExclusion,
   PhotoStatus,
   Prisma,
   SyncIssueCode,
@@ -221,6 +222,7 @@ export class SyncService {
         seenFolders: [],
       };
     }
+    const seen = new Set(checkpoint.seenFolders);
     const maxFolders = Math.max(100, Number(process.env.SYNC_MAX_PENDING_FOLDERS ?? 10_000));
     const counts = {
       found: run.foundCount,
@@ -246,6 +248,17 @@ export class SyncService {
         driveFolderId,
       });
     };
+    // Legacy tombstones of the page being indexed, loaded with one query instead of one per photo.
+    let pageExclusions = new Map<string, PhotoExclusion[]>();
+    const loadExclusions = async (items: DriveItem[]) => {
+      pageExclusions = new Map();
+      if (!items.length) return;
+      const rows = await this.prisma.photoExclusion.findMany({
+        where: { userId: run.source.userId, driveFileId: { in: items.map((item) => item.id) } },
+      });
+      for (const row of rows)
+        pageExclusions.set(row.driveFileId, [...(pageExclusions.get(row.driveFileId) ?? []), row]);
+    };
     const index = async (
       item: DriveItem,
       folder: FolderWork,
@@ -259,9 +272,7 @@ export class SyncService {
     ) => {
       const userId = run.source.userId;
       const key = contentKeyFor(item);
-      const exclusions = await this.prisma.photoExclusion.findMany({
-        where: { userId, driveFileId: item.id },
-      });
+      const exclusions = pageExclusions.get(item.id) ?? [];
       // A legacy tombstone (a photo removed before soft hide existed) comes back as a hidden photo
       // carrying its saved manual date; a restored one comes back visible. Either way it is spent.
       const excluded = exclusions.find((entry) => !entry.restoredAt) ?? exclusions[0];
@@ -470,7 +481,7 @@ export class SyncService {
     try {
       while (checkpoint.pendingFolders.length) {
         const folder = checkpoint.pendingFolders[0]!;
-        if (!folder.cursor && !folder.takeout && checkpoint.seenFolders.includes(folder.id)) {
+        if (!folder.cursor && !folder.takeout && seen.has(folder.id)) {
           checkpoint.pendingFolders.shift();
           continue;
         }
@@ -602,8 +613,9 @@ export class SyncService {
         );
         const images = page.items.filter(isImage);
         counts.found += images.length;
+        await loadExclusions(images);
         for (const child of page.items.filter(isFolder)) {
-          if (!checkpoint.seenFolders.includes(child.id))
+          if (!seen.has(child.id))
             checkpoint.pendingFolders.push({
               id: child.id,
               path: [...folder.path, child.name],
@@ -646,6 +658,7 @@ export class SyncService {
         if (page.nextCursor) folder.cursor = page.nextCursor;
         else {
           checkpoint.seenFolders.push(folder.id);
+          seen.add(folder.id);
           checkpoint.pendingFolders.shift();
         }
         await this.persist(run.id, checkpoint, counts);
