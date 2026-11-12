@@ -2,7 +2,7 @@
 
 import { useReducedMotion } from '../../lib/use-reduced-motion';
 import Link from 'next/link';
-import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { activeDriveConnection, api, type Session } from '../../lib/api';
 import { orderingApi } from '../../lib/ordering/client';
 import { notifyArchiveIndexUpdated } from '../../lib/archive-index-events';
@@ -10,13 +10,6 @@ import { emptyCopy, headline, pileCopy } from '../../lib/ordering/copy';
 import { draftFromStored, draftToPayload } from '../../lib/ordering/dates';
 import { photoCountLabel } from '../components/timeline-model';
 import { withManualDate } from '../../lib/ordering/results';
-import {
-  addAll,
-  allSelected,
-  removeAll,
-  selectRange,
-  toggleId,
-} from '../../lib/ordering/selection';
 import { findFolder, initialExpanded, pathToFolder } from '../../lib/ordering/tree';
 import type { DateDraft, OrderingPhoto, Pile } from '../../lib/ordering/types';
 import { thumbnailVariantUrl } from '../../lib/media';
@@ -28,41 +21,41 @@ import { GridSkeleton, LoadMore, PhotoGrid } from './PhotoGrid';
 import { ActionBar, FolderBar, Peek, SuggestionBanner } from './Panels';
 import { QuickMode, type QuickResult } from './QuickMode';
 import { Sidebar } from './Sidebar';
+import { usePhotoSelection } from './use-photo-selection';
 import { useOrderingActions } from './use-ordering-actions';
 import { useOrderingData } from './use-ordering-data';
 import './ordenar.css';
 
 type Dialog = 'date' | 'folder' | 'quick' | null;
-const NO_SELECTION: ReadonlySet<string> = new Set();
 
 /** Ordenar: put dates on photos in piles, by folder or in batches. */
 export function OrdenarScreen({ session }: { session: Session }) {
   const reduced = useReducedMotion() ?? false;
   const data = useOrderingData({ reduced });
   const { location, list, piles, pile, tree, folder, source, suggestions } = data;
-  const [selected, setSelected] = useState<ReadonlySet<string>>(NO_SELECTION);
-  const [selectingRest, setSelectingRest] = useState<number | null>(null);
   const [dialog, setDialog] = useState<Dialog>(null);
   const [peekId, setPeekId] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
-  const anchor = useRef<string | null>(null);
   const lastYear = useRef<number | null>(null);
   const expandedFor = useRef<string | null>(null);
-
-  const onChanged = useCallback((ids: readonly string[]) => {
-    setSelected((current) => removeAll(current, ids));
-  }, []);
-  const actions = useOrderingActions(data, onChanged);
 
   const folderId = location?.folderId ?? null;
   const items = list.items;
   const ids = useMemo(() => items.map((item) => item.id), [items]);
 
-  // A different view starts with nothing selected.
-  useEffect(() => {
-    setSelected(NO_SELECTION);
-    anchor.current = null;
-  }, [data.scopeKey, pile]);
+  const selection = usePhotoSelection({
+    ids,
+    viewKey: `${data.scopeKey}|${pile}`,
+    blocked: dialog !== null || peekId !== null,
+    fetchRemainingIds: data.fetchRemainingIds,
+    onSelectFailed: () =>
+      actions.show({
+        tone: 'error',
+        message: 'No se pudieron seleccionar todas las fotos del montón. Inténtalo de nuevo.',
+      }),
+  });
+  const { selected, clearSelection, selectingRest } = selection;
+  const actions = useOrderingActions(data, selection.removeSelected);
 
   // The tree opens its top level and the way to the selected folder.
   useEffect(() => {
@@ -78,48 +71,12 @@ export function OrdenarScreen({ session }: { session: Session }) {
     }
   }, [tree, folderId]);
 
-  // Escape drops the selection (dialogs take it first).
-  useEffect(() => {
-    if (!selected.size || dialog || peekId) return;
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape' || event.defaultPrevented) return;
-      setSelected(NO_SELECTION);
-      anchor.current = null;
-    };
-    document.addEventListener('keydown', onKeyDown);
-    return () => document.removeEventListener('keydown', onKeyDown);
-  }, [selected.size, dialog, peekId]);
+  const onTile = selection.onTile;
 
-  const onTile = (id: string, event: MouseEvent) => {
-    const from = anchor.current;
-    if (event.shiftKey && from) setSelected((current) => selectRange(current, ids, from, id));
-    else setSelected((current) => toggleId(current, id));
-    anchor.current = id;
-  };
-
-  const everyLoadedSelected = allSelected(selected, ids);
-  const selectAll = () => {
-    if (everyLoadedSelected) {
-      setSelected(NO_SELECTION);
-      return;
-    }
-    setSelected((current) => addAll(current, ids));
-  };
+  const everyLoadedSelected = selection.everyLoadedSelected;
+  const selectAll = selection.selectAll;
+  const selectWholePile = selection.selectWholePile;
   const pileTotal = pile && piles ? piles[pile] : 0;
-  const selectWholePile = async () => {
-    setSelectingRest(0);
-    try {
-      const rest = await data.fetchRemainingIds(setSelectingRest);
-      setSelected((current) => addAll(current, [...ids, ...rest]));
-    } catch {
-      actions.show({
-        tone: 'error',
-        message: 'No se pudieron seleccionar todas las fotos del montón. Inténtalo de nuevo.',
-      });
-    } finally {
-      setSelectingRest(null);
-    }
-  };
 
   const selectedPhotos = useMemo(
     () =>
@@ -349,7 +306,7 @@ export function OrdenarScreen({ session }: { session: Session }) {
           onDate={() => setDialog('date')}
           onClear={() => void actions.clearDates([...selected])}
           onToggleHidden={() => void actions.setHidden([...selected], !hiddenPile)}
-          onCancel={() => setSelected(NO_SELECTION)}
+          onCancel={clearSelection}
         />
       )}
 
