@@ -2,6 +2,7 @@ import {
   GoneException,
   Inject,
   Injectable,
+  Optional,
   BadRequestException,
   NotFoundException,
   ServiceUnavailableException,
@@ -134,9 +135,11 @@ export class MediaProxyService {
   private readonly resizeQueue: (() => void)[] = [];
 
   constructor(
-    private readonly prisma: PrismaService,
-    private readonly drive: DriveAdapter,
-    @Inject(ThumbnailStore) private readonly store: ThumbnailStore = new ThumbnailStore(),
+    @Inject(PrismaService) private readonly prisma: PrismaService,
+    @Inject(DriveAdapter) private readonly drive: DriveAdapter,
+    @Optional()
+    @Inject(ThumbnailStore)
+    private readonly store: ThumbnailStore = new ThumbnailStore(),
   ) {}
 
   private async limitedResize<T>(work: () => Promise<T>): Promise<T> {
