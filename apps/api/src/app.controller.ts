@@ -22,7 +22,7 @@ import {
 import { PhotoSourceStatus } from '@prisma/client';
 import { Request, Response } from 'express';
 import { decryptSecret, encryptSecret } from './crypto';
-import { CsrfGuard, CurrentUserId, SessionGuard } from './auth';
+import { CsrfGuard, CurrentUserId, SessionGuard, sessionUserId, setSessionCookie } from './auth';
 import { PrismaService } from './prisma.service';
 import { SyncService } from './sync.service';
 import { SyncScheduler } from './sync-scheduler';
@@ -160,12 +160,7 @@ export class AppController {
       update: {},
       create: { id, email: 'development@local.invalid', displayName: 'Development archive' },
     });
-    response.cookie('lv_session', id, {
-      httpOnly: true,
-      signed: true,
-      sameSite: 'lax',
-      secure: false,
-    });
+    setSessionCookie(response, id);
   }
   @UseGuards(CsrfGuard)
   @Post('auth/logout')
@@ -291,12 +286,7 @@ export class AppController {
       return user;
     });
     response.clearCookie('lv_login_state');
-    response.cookie('lv_session', user.id, {
-      httpOnly: true,
-      signed: true,
-      sameSite: 'lax',
-      secure: process.env.NODE_ENV === 'production',
-    });
+    setSessionCookie(response, user.id);
     response.redirect(process.env.WEB_ORIGIN ?? 'http://localhost:3000');
   }
   @UseGuards(SessionGuard) @Get('me') async me(@CurrentUserId() userId: string) {
@@ -356,7 +346,7 @@ export class AppController {
     @Query('error') error: string | undefined,
     @Res() response: Response,
   ) {
-    const userId = request.signedCookies?.lv_session;
+    const userId = sessionUserId(request);
     if (!userId || !state || (!code && !error) || request.signedCookies?.lv_drive_state !== state)
       throw new BadRequestException({
         code: 'INVALID_OAUTH_STATE',
