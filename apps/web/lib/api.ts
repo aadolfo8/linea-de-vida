@@ -1,4 +1,5 @@
-export const api = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001/v1';
+/** Same origin by default: Next forwards `/v1` to the API in development and the proxy does in production. */
+export const api = process.env.NEXT_PUBLIC_API_URL ?? '/v1';
 
 export async function apiCall(path: string, init?: RequestInit) {
   return fetch(`${api}${path}`, { credentials: 'include', ...init });

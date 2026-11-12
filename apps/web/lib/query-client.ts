@@ -1,4 +1,5 @@
-import { QueryClient } from '@tanstack/react-query';
+import { QueryCache, QueryClient } from '@tanstack/react-query';
+import { signOutIfExpired } from './api';
 
 /** How long fetched archive data counts as fresh, and how long it stays in memory unused. */
 export const ARCHIVE_STALE_MS = 5 * 60 * 1000;
@@ -8,7 +9,12 @@ export const ARCHIVE_STALE_MS = 5 * 60 * 1000;
  * dropped together when the archive index changes (see `archive-index-events`).
  */
 export const queryClient = new QueryClient({
+  // The one place where an expired session sends the person back to the start.
+  queryCache: new QueryCache({ onError: signOutIfExpired }),
   defaultOptions: {
     queries: { staleTime: ARCHIVE_STALE_MS, gcTime: ARCHIVE_STALE_MS, retry: false },
   },
 });
+
+/** Key of the signed-in session; archive changes do not invalidate it. */
+export const SESSION_KEY = ['me'] as const;
