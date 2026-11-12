@@ -18,6 +18,7 @@ import './photo-viewer.css';
 import { ArrowIcon, freshShown, ViewerImage, type Shown } from './viewer-image';
 import { ViewerNotes, ViewerStrip } from './viewer-chrome';
 import { useIdleChrome } from './use-idle-chrome';
+import { EASE, useViewerZoom } from './use-viewer-zoom';
 import { focusableSelector, gap, isEditable, readStage, trapTab } from './viewer-dom';
 import {
   photoDateLabel,
@@ -30,7 +31,6 @@ import {
   IDENTITY,
   KEY_PAN_STEP,
   KEY_ZOOM_STEP,
-  clampView,
   doubleTapScale,
   fitSize,
   flipTransform,
@@ -39,12 +39,10 @@ import {
   stageBox,
   wheelScale,
   zoomAround,
-  type Size,
   type StageBox,
   type View,
 } from './viewer-zoom';
 
-const EASE = 'cubic-bezier(.22,1,.36,1)';
 const OPEN_DURATION = 520;
 const CLOSE_DURATION = 380;
 const SWIPE_DISTANCE = 70;
@@ -107,7 +105,6 @@ export function TimelinePhotoViewer({
   const [measured, setMeasured] = useState<{ id: string; width: number; height: number } | null>(
     null,
   );
-  const [zoomPercent, setZoomPercent] = useState(100);
   const [dragging, setDragging] = useState(false);
   const [closing, setClosing] = useState(false);
 
@@ -120,10 +117,6 @@ export function TimelinePhotoViewer({
   const toolsEl = useRef<HTMLDivElement>(null);
   const closeButton = useRef<HTMLButtonElement>(null);
   const loadingMoreRef = useRef(false);
-  const viewRef = useRef<View>(IDENTITY);
-  const stageRef = useRef<StageBox>(stage);
-  const fitRef = useRef<Size>({ width: 1, height: 1 });
-  const naturalRef = useRef<Size | null>(null);
   const direction = useRef<-1 | 0 | 1>(0);
   const pointers = useRef(new Map<number, { x: number; y: number }>());
   const gesture = useRef<Gesture | null>(null);
@@ -140,6 +133,9 @@ export function TimelinePhotoViewer({
     onCloseRef.current = onClose;
     onPhotoChangeRef.current = onPhotoChange;
   });
+
+  const { zoomPercent, viewRef, stageRef, fitRef, naturalRef, writeView, zoomTo, panBy, pointOf } =
+    useViewerZoom(frame, reduceMotion, stage);
 
   const selected = loadedPhotos[index];
   const [shownState, setShownState] = useState<Shown | null>(null);
@@ -165,20 +161,6 @@ export function TimelinePhotoViewer({
   useEffect(() => {
     if (selected && selected.id !== openedOn.current) onPhotoChangeRef.current?.(selected.id);
   }, [selected]);
-
-  const writeView = useCallback(
-    (next: View, animate = false) => {
-      const clamped = clampView(next, fitRef.current, stageRef.current);
-      viewRef.current = clamped;
-      const element = frame.current;
-      if (element) {
-        element.style.transition = animate && !reduceMotion ? `transform .35s ${EASE}` : 'none';
-        element.style.transform = `translate3d(${clamped.x}px,${clamped.y}px,0) scale(${clamped.scale})`;
-      }
-      setZoomPercent(Math.round(clamped.scale * 100));
-    },
-    [reduceMotion],
-  );
 
   // A new fit (resize, or the real size of the photo arriving) re-clamps the current view.
   useLayoutEffect(() => {
@@ -443,28 +425,6 @@ export function TimelinePhotoViewer({
     );
     animation.finished.then(finish, finish);
   }, [reduceMotion]);
-
-  const pointOf = (clientX: number, clientY: number) => ({
-    x: clientX - stageRef.current.width / 2,
-    y: clientY - (stageRef.current.top + stageRef.current.height / 2),
-  });
-
-  const zoomTo = useCallback(
-    (scale: number, point = { x: 0, y: 0 }, animate = true) => {
-      writeView(
-        zoomAround(viewRef.current, scale, point, fitRef.current, stageRef.current),
-        animate,
-      );
-    },
-    [writeView],
-  );
-  const panBy = useCallback(
-    (x: number, y: number) => {
-      const view = viewRef.current;
-      writeView({ ...view, x: view.x + x, y: view.y + y }, true);
-    },
-    [writeView],
-  );
 
   // Wheel and trackpad pinch zoom around the pointer; React's wheel listener is passive.
   useEffect(() => {
