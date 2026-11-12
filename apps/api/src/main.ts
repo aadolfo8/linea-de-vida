@@ -4,6 +4,7 @@ import { NestFactory } from '@nestjs/core';
 import cookieParser from 'cookie-parser';
 import express from 'express';
 import { AppModule } from './app.module';
+import { ErrorFilter } from './error-filter';
 import { SyncScheduler } from './sync-scheduler';
 import {
   createRateLimitMiddleware,
@@ -24,6 +25,7 @@ async function bootstrap() {
   app.use(requestIdMiddleware);
   app.use(createRateLimitMiddleware(config));
   app.use(securityHeadersMiddleware);
+  app.useGlobalFilters(new ErrorFilter());
   app.useGlobalPipes(new ValidationPipe({ transform: true, whitelist: true }));
   app.enableCors({
     origin: (
