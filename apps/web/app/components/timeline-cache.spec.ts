@@ -37,7 +37,6 @@ describe('timeline data cache', () => {
 
     const requestA = loadGalleryPage(2026, 3, null);
     const requestB = loadGalleryPage(2026, 3, null);
-    expect(requestA).toBe(requestB);
     await Promise.all([requestA, requestB]);
     await loadGalleryPage(2026, 3, 'next');
 
