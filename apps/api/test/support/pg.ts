@@ -13,7 +13,7 @@ export const pgClient = () =>
  * owner, created from scratch. Deleting the users first cascades away anything a previous test
  * left, so every test starts clean and different specs never touch each other's rows.
  */
-export async function resetUsers(prisma: PrismaClient, prefix: string) {
+export async function resetUsers(prisma: PrismaClient, prefix: string, withSource = true) {
   const owner = `${prefix}-owner`;
   const other = `${prefix}-other`;
   const sourceId = `${prefix}-source`;
@@ -23,16 +23,17 @@ export async function resetUsers(prisma: PrismaClient, prefix: string) {
   const connection = await prisma.oAuthConnection.create({
     data: { userId: owner, provider: 'google', googleAccountId: prefix, grantedScopes: [] },
   });
-  await prisma.photoSource.create({
-    data: {
-      id: sourceId,
-      userId: owner,
-      oauthConnectionId: connection.id,
-      driveFolderId: 'root',
-      name: 'Archive',
-      type: 'GENERIC',
-    },
-  });
+  if (withSource)
+    await prisma.photoSource.create({
+      data: {
+        id: sourceId,
+        userId: owner,
+        oauthConnectionId: connection.id,
+        driveFolderId: 'root',
+        name: 'Archive',
+        type: 'GENERIC',
+      },
+    });
   return { owner, other, sourceId };
 }
 
