@@ -14,6 +14,7 @@ import { SyncScheduler } from './sync-scheduler';
 import { GoogleOAuthClient, GoogleOAuthProvider, OAuthStateService } from './oauth';
 import { ManualDateService } from './manual-date.service';
 import { MediaProxyService } from './media-proxy.service';
+import { ThumbnailStore } from './thumbnail-store';
 import { RetentionService } from './retention.service';
 import { TakeoutMatcher, TakeoutMetadataParser } from './takeout';
 import { FolderDateRuleService } from './folder-date-rule.service';
@@ -38,6 +39,7 @@ import { PhotoVisibilityService } from './photo-visibility.service';
     PhotoVisibilityService,
     OrderingService,
     CoversService,
+    { provide: ThumbnailStore, useFactory: () => new ThumbnailStore() },
     MediaProxyService,
     RetentionService,
     SyncService,
