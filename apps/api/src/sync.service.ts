@@ -318,10 +318,14 @@ export class SyncService {
           const file = await tx.photoFile.findUnique({
             where: { userId_driveFileId: { userId, driveFileId: item.id } },
           });
-          const byKey = await tx.photo.findUnique({
-            where: { userId_contentKey: { userId, contentKey: key } },
-            include: { override: true },
-          });
+          // The photo with this content is only needed when the file is new or its content moved;
+          // the common re-scan of an unchanged file skips the lookup.
+          const loadByKey = () =>
+            tx.photo.findUnique({
+              where: { userId_contentKey: { userId, contentKey: key } },
+              include: { override: true },
+            });
+          let byKey = file ? null : await loadByKey();
           let existing = file
             ? await tx.photo.findUnique({
                 where: { id: file.photoId },
@@ -330,6 +334,7 @@ export class SyncService {
             : byKey;
           let detachedFrom: string | null = null;
           if (existing && file && existing.contentKey !== key) {
+            byKey = await loadByKey();
             const siblings = isProvisionalContentKey(existing.contentKey)
               ? 0
               : await tx.photoFile.count({
