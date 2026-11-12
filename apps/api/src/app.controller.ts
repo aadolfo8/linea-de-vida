@@ -630,24 +630,16 @@ export class AppController {
     @Query('cursor') cursor?: string,
     @Query('limit') rawLimit?: string,
   ) {
-    const rows = await this.prisma.$queryRawUnsafe<
-      { firstYear: number | null; lastYear: number | null }[]
-    >(
-      `SELECT MIN(EXTRACT(YEAR FROM "effectiveDateValue")::int) AS "firstYear",
-              MAX(EXTRACT(YEAR FROM "effectiveDateValue")::int) AS "lastYear"
-       FROM "Photo" WHERE "userId" = $1 AND status = 'ACTIVE' AND "hiddenAt" IS NULL AND "effectiveDateValue" IS NOT NULL`,
-      userId,
-    );
-    const firstYear = rows[0]?.firstYear;
-    const lastYear = rows[0]?.lastYear;
-    if (!firstYear || !lastYear)
-      return { firstYear: null, lastYear: null, latestYear: null, items: [] };
+    // One pass over the owner's photos: the count per year also gives the first and last year.
     const counts = await this.prisma.$queryRawUnsafe<{ year: number; photoCount: bigint }[]>(
       `SELECT EXTRACT(YEAR FROM "effectiveDateValue")::int AS year, COUNT(*)::bigint AS "photoCount"
        FROM "Photo" WHERE "userId" = $1 AND status = 'ACTIVE' AND "hiddenAt" IS NULL AND "effectiveDateValue" IS NOT NULL
        GROUP BY 1`,
       userId,
     );
+    if (!counts.length) return { firstYear: null, lastYear: null, latestYear: null, items: [] };
+    const firstYear = Math.min(...counts.map((row) => row.year));
+    const lastYear = Math.max(...counts.map((row) => row.year));
     const byYear = new Map(counts.map((row) => [row.year, Number(row.photoCount)]));
     const { limit, offset } = this.page(cursor, rawLimit, 'years');
     const items = Array.from({ length: lastYear - firstYear + 1 }, (_, index) => {

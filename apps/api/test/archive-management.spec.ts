@@ -265,12 +265,10 @@ describe('temporal timeline contracts', () => {
 
   it('returns the complete year range, including empty years, without querying photos', async () => {
     const { controller, prisma } = timelineController();
-    prisma.$queryRawUnsafe
-      .mockResolvedValueOnce([{ firstYear: 2020, lastYear: 2022 }])
-      .mockResolvedValueOnce([
-        { year: 2020, photoCount: BigInt(2) },
-        { year: 2022, photoCount: BigInt(1) },
-      ]);
+    prisma.$queryRawUnsafe.mockResolvedValueOnce([
+      { year: 2020, photoCount: BigInt(2) },
+      { year: 2022, photoCount: BigInt(1) },
+    ]);
     await expect(controller.years('owner')).resolves.toEqual({
       firstYear: 2020,
       lastYear: 2022,
