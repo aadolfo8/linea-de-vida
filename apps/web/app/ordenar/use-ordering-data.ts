@@ -47,15 +47,10 @@ const LEAVE_MS = 320;
  */
 export function useOrderingData({ reduced }: { reduced: boolean }) {
   const [location, setLocation] = useState<OrderLocation | null>(null);
-  const [piles, setPiles] = useState<PileCounts | null>(null);
-  const [folder, setFolder] = useState<FolderDetail | null>(null);
-  const [folderFailed, setFolderFailed] = useState(false);
-  const [pilesFailed, setPilesFailed] = useState(false);
   const [list, setList] = useState<ListState>(EMPTY_LIST);
   const [leaving, setLeaving] = useState<ReadonlySet<string>>(new Set());
   const [countsVersion, setCountsVersion] = useState(0);
   const [listVersion, setListVersion] = useState(0);
-  const [folderVersion, setFolderVersion] = useState(0);
   const catalog = useRef(new Map<string, OrderingPhoto>());
   /** Callers of `refreshCounts` waiting for the one piles request the counts effect makes. */
   const pilesWaiters = useRef<Array<(counts: PileCounts | null) => void>>([]);
@@ -122,61 +117,53 @@ export function useOrderingData({ reduced }: { reduced: boolean }) {
   );
   const tree: FolderTree | null = treeQuery.isError ? null : (treeQuery.data ?? null);
 
+  // The counts follow the view and are read again whenever something changed them.
+  const pilesQuery = useQuery(
+    {
+      queryKey: ['ordering-piles', scopeKey, countsVersion],
+      queryFn: () => orderingApi.piles(scope),
+      enabled: ready,
+      placeholderData: keepPreviousData,
+      staleTime: 0,
+      gcTime: 0,
+    },
+    queryClient,
+  );
+  const pilesFailed = pilesQuery.isError;
+  const piles: PileCounts | null = pilesQuery.isError ? null : (pilesQuery.data ?? null);
+  // Answers every `refreshCounts` caller once the request of the current view settles, and opens
+  // the first pile with work when the address named none (unless the person picked one meanwhile).
+  const settledPiles = pilesQuery.isPlaceholderData ? null : pilesQuery.data;
   useEffect(() => {
-    if (!ready) return;
-    let cancelled = false;
-    setPilesFailed(false);
-    const settleWaiters = (value: PileCounts | null) => {
-      for (const waiter of pilesWaiters.current.splice(0)) waiter(value);
-    };
-    orderingApi
-      .piles(scope)
-      .then((value) => {
-        if (cancelled) return;
-        setPiles(value);
-        setPilesFailed(false);
-        // A view with no pile in the address opens the first pile that has work, unless the
-        // person picked one while the counts were loading.
-        setLocation((current) =>
-          current && !current.pile ? { ...current, pile: defaultPile(value) } : current,
-        );
-        settleWaiters(value);
-      })
-      .catch((error: unknown) => {
-        signOutIfExpired(error);
-        if (cancelled) return;
-        setPiles(null);
-        setPilesFailed(true);
-        settleWaiters(null);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [ready, scope, countsVersion]);
+    const settled = pilesQuery.isError || settledPiles !== undefined;
+    if (!ready || !settled || pilesQuery.isFetching || pilesQuery.isPlaceholderData) return;
+    if (settledPiles)
+      setLocation((current) =>
+        current && !current.pile ? { ...current, pile: defaultPile(settledPiles) } : current,
+      );
+    for (const waiter of pilesWaiters.current.splice(0)) waiter(settledPiles ?? null);
+    // A new result is a new update time, whether it succeeded or failed.
+  }, [pilesQuery.dataUpdatedAt, pilesQuery.errorUpdatedAt]);
 
+  const folderQuery = useQuery(
+    {
+      queryKey: ['ordering-folder', folderId, countsVersion],
+      queryFn: () => orderingApi.folder(folderId!),
+      enabled: ready && folderId !== null,
+      placeholderData: keepPreviousData,
+      staleTime: 0,
+      gcTime: 0,
+    },
+    queryClient,
+  );
+  const folderGone = folderQuery.error instanceof ApiError && folderQuery.error.status === 404;
+  // A folder that no longer exists is dropped from the view instead of showing nothing.
   useEffect(() => {
-    setFolderFailed(false);
-    if (!ready || !folderId) {
-      setFolder(null);
-      return;
-    }
-    let cancelled = false;
-    orderingApi
-      .folder(folderId)
-      .then((value) => !cancelled && setFolder(value))
-      .catch((error: unknown) => {
-        signOutIfExpired(error);
-        if (cancelled || isUnauthenticated(error)) return;
-        if (error instanceof ApiError && error.status === 404) {
-          // A folder that no longer exists is dropped from the view instead of showing nothing.
-          setFolder(null);
-          patchLocation({ folderId: null });
-        } else setFolderFailed(true);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [ready, folderId, countsVersion, folderVersion, patchLocation]);
+    if (folderGone) patchLocation({ folderId: null });
+  }, [folderGone, patchLocation]);
+  const folder: FolderDetail | null =
+    folderId && !folderQuery.isError ? (folderQuery.data ?? null) : null;
+  const folderFailed = folderQuery.isError && !folderGone && !isUnauthenticated(folderQuery.error);
 
   const suggestionsQuery = useQuery(
     {
@@ -294,7 +281,7 @@ export function useOrderingData({ reduced }: { reduced: boolean }) {
       }),
     [],
   );
-  const reloadFolder = useCallback(() => setFolderVersion((value) => value + 1), []);
+  const reloadFolder = useCallback(() => void folderQuery.refetch(), [folderQuery]);
   const reloadSources = useCallback(() => void sourcesQuery.refetch(), [sourcesQuery]);
 
   /** Photos that changed pile fly out of the view; with reduced motion they just disappear. */
