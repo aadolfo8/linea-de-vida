@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useId, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { ApiError, activeDriveConnection, type Session } from '../../lib/api';
 import { notifyArchiveIndexUpdated } from '../../lib/archive-index-events';
 import { coversApi } from '../../lib/covers/client';
@@ -9,15 +9,12 @@ import {
   DEFAULT_LIMITS,
   UNKNOWN_MONTH_SCOPE,
   YEAR_SCOPE,
-  coverStatus,
-  dropReasonCopy,
   monthScope,
   moveChoice,
   previewPhotos,
   sameOrder,
   sameScope,
   scopeKey,
-  scopeName,
   scopeTitle,
   toggleChoice,
   type CoverScope,
@@ -30,6 +27,7 @@ import { useToast } from '../../lib/use-toast';
 import { photoCountLabel, type TimelinePhoto } from '../components/timeline-model';
 import { GridSkeleton, LoadMore } from '../ordenar/PhotoGrid';
 import { CandidateGrid, ChosenStrip } from './CoverParts';
+import { DroppedNotice, UnsavedGuard, YearSidebar } from './PortadasParts';
 import { CoverPreview } from './CoverPreview';
 import { useCandidates, useYearData, useYears } from './use-covers-data';
 import '../ordenar/ordenar.css';
@@ -60,7 +58,6 @@ export function PortadasScreen({ session }: { session: Session }) {
   const [announcement, setAnnouncement] = useState('');
   const known = useRef(new Map<string, TimelinePhoto>());
   const focusRequest = useRef<{ id: string; act: string; index: number } | null>(null);
-  const yearSelectId = useId();
 
   // The newest year with photos opens first.
   useEffect(() => {
@@ -290,41 +287,14 @@ export function PortadasScreen({ session }: { session: Session }) {
       );
     return (
       <div className="ord-desk">
-        <aside className="ord-side" aria-label="Años y portadas">
-          <div className="ord-source">
-            <label className="sp-label" htmlFor={yearSelectId}>
-              Año
-            </label>
-            <select
-              id={yearSelectId}
-              value={year ?? ''}
-              onChange={(event) => goTo({ year: Number(event.target.value), scope: YEAR_SCOPE })}
-            >
-              {years.years.map((value) => (
-                <option key={value} value={value}>
-                  {value}
-                </option>
-              ))}
-            </select>
-          </div>
-          <nav aria-label={`Portadas de ${year ?? ''}`} className="ord-piles">
-            <h2 className="sp-label">Portadas de {year}</h2>
-            {scopes.map((target) => (
-              <button
-                key={scopeKey(target)}
-                type="button"
-                className="ord-pile cov-scope"
-                aria-current={sameScope(target, scope) ? 'true' : undefined}
-                onClick={() => year !== null && goTo({ year, scope: target })}
-              >
-                <b>{scopeName(target)}</b>
-                <span>
-                  {coverStatus(data?.covers.items.find((item) => sameScope(item, target)))}
-                </span>
-              </button>
-            ))}
-          </nav>
-        </aside>
+        <YearSidebar
+          years={years.years}
+          year={year}
+          scopes={scopes}
+          scope={scope}
+          items={data?.covers.items}
+          onChange={goTo}
+        />
 
         <section className="ord-content" aria-label={year ? scopeTitle(scope, year) : 'Portada'}>
           {year !== null && (
@@ -350,45 +320,17 @@ export function PortadasScreen({ session }: { session: Session }) {
           {yearData.status === 'loading' && <GridSkeleton />}
 
           {pending && (
-            <div className="cov-guard" role="alertdialog" aria-label="Cambios sin guardar">
-              <p>Tienes cambios sin guardar en esta portada.</p>
-              <div>
-                <button
-                  type="button"
-                  className="sp-btn primary"
-                  disabled={busy}
-                  onClick={() => void save().then((ok) => ok && apply(pending))}
-                >
-                  Guardar y cambiar
-                </button>
-                <button
-                  type="button"
-                  className="sp-btn"
-                  disabled={busy}
-                  onClick={() => apply(pending)}
-                >
-                  Descartar y cambiar
-                </button>
-                <button type="button" className="sp-btn ghost" onClick={() => setPending(null)}>
-                  Seguir editando
-                </button>
-              </div>
-            </div>
+            <UnsavedGuard
+              busy={busy}
+              onSave={() => void save().then((ok) => ok && apply(pending))}
+              onDiscard={() => apply(pending)}
+              onKeepEditing={() => setPending(null)}
+            />
           )}
 
           {data && (
             <>
-              {dropped.length > 0 && (
-                <div className="sp-alert cov-missing" role="status">
-                  <b>
-                    {dropped.length === 1
-                      ? 'Una foto elegida ya no está en esta portada.'
-                      : `${dropped.length} fotos elegidas ya no están en esta portada.`}
-                  </b>{' '}
-                  {[...new Set(dropped.map((item) => dropReasonCopy[item.reason]))].join('; ')}.
-                  Mientras tanto la portada se completa sola; elige otra y guarda para sustituirla.
-                </div>
-              )}
+              <DroppedNotice dropped={dropped} />
 
               <div className="cov-stage">
                 <div>
