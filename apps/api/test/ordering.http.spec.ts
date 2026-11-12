@@ -2,39 +2,40 @@ import 'reflect-metadata';
 import { INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, describe, expect, it } from 'vitest';
 import { CsrfGuard, SessionGuard } from '../src/auth';
 import { FolderDateRuleService } from '../src/folder-date-rule.service';
 import { ManualDateService } from '../src/manual-date.service';
 import { OrderingController } from '../src/ordering.controller';
 import { OrderingService } from '../src/ordering.service';
 import { PhotoVisibilityService } from '../src/photo-visibility.service';
-import { MemoryPrisma } from './support/memory-prisma';
+import { dropUsers, pgClient, pgUrl, photoRow, resetUsers } from './support/pg';
 
 const ORIGIN = 'http://localhost:3000';
+const P = 'od';
+const OWNER = `${P}-owner`;
+const OTHER = `${P}-other`;
+const SOURCE = `${P}-source`;
+const OTHER_SOURCE = `${P}-other-source`;
+const prisma = pgClient();
+/** The seeded photos in creation order: p1, p2, then the other user's. */
+const photoAt = (index: number) =>
+  prisma.photo.findUniqueOrThrow({ where: { id: ['p1', 'p2', 'foreign'][index]! } });
 
 async function createApp() {
-  const memory = new MemoryPrisma();
-  for (const [id, userId] of [
-    ['p1', 'owner'],
-    ['p2', 'owner'],
-    ['foreign', 'other'],
-  ])
-    memory.rows('photo').push({
-      id,
-      userId,
-      sourceId: 'source',
-      fileName: `${id}.jpg`,
-      folderId: id === 'p1' ? 'root' : 'child',
-      status: 'ACTIVE',
-      hiddenAt: null,
-      detectedDate: null,
-      detectedPrecision: 'UNKNOWN',
-      detectedSource: 'NONE',
-      effectiveDateValue: null,
-      effectiveDatePrecision: 'UNKNOWN',
-      effectiveDateSource: 'NONE',
-    });
+  await resetUsers(prisma, P);
+  await prisma.photoSource.create({
+    data: {
+      id: OTHER_SOURCE,
+      userId: OTHER,
+      oauthConnectionId: (
+        await prisma.oAuthConnection.findFirstOrThrow({ where: { userId: OWNER } })
+      ).id,
+      driveFolderId: 'other-root',
+      name: 'Theirs',
+      type: 'GENERIC',
+    },
+  });
   const folder = (
     id: string,
     userId: string,
@@ -46,28 +47,35 @@ async function createApp() {
     userId,
     sourceId,
     parentId,
+    driveFolderId: `drive-${id}`,
     name,
     path: parentId ? ['Root', name] : [name],
-    status: 'ACTIVE',
   });
-  memory
-    .rows('indexedFolder')
-    .push(
-      folder('root', 'owner', 'source', null, 'Root'),
-      folder('child', 'owner', 'source', 'root', 'Child'),
-      folder('foreign-folder', 'other', 'other-source', null, 'Theirs'),
-    );
-  memory
-    .rows('photoSource')
-    .push({ id: 'source', userId: 'owner' }, { id: 'other-source', userId: 'other' });
+  await prisma.indexedFolder.create({ data: folder('root', OWNER, SOURCE, null, 'Root') });
+  await prisma.indexedFolder.create({ data: folder('child', OWNER, SOURCE, 'root', 'Child') });
+  await prisma.indexedFolder.create({
+    data: folder('foreign-folder', OTHER, OTHER_SOURCE, null, 'Theirs'),
+  });
+  for (const [id, userId] of [
+    ['p1', OWNER],
+    ['p2', OWNER],
+    ['foreign', OTHER],
+  ] as const)
+    await prisma.photo.create({
+      data: photoRow(P, id, {
+        userId,
+        sourceId: userId === OWNER ? SOURCE : OTHER_SOURCE,
+        folderId: id === 'p1' ? 'root' : 'child',
+      }),
+    });
   const app = (
     await Test.createTestingModule({
       controllers: [OrderingController],
       providers: [
-        { provide: PhotoVisibilityService, useValue: new PhotoVisibilityService(memory as any) },
-        { provide: ManualDateService, useValue: new ManualDateService(memory as any) },
-        { provide: FolderDateRuleService, useValue: new FolderDateRuleService(memory as any) },
-        { provide: OrderingService, useValue: new OrderingService(memory as any) },
+        { provide: PhotoVisibilityService, useValue: new PhotoVisibilityService(prisma as any) },
+        { provide: ManualDateService, useValue: new ManualDateService(prisma as any) },
+        { provide: FolderDateRuleService, useValue: new FolderDateRuleService(prisma as any) },
+        { provide: OrderingService, useValue: new OrderingService(prisma as any) },
       ],
     })
       // The real session guard needs a signed cookie; the tests only need the user it resolves.
@@ -84,16 +92,20 @@ async function createApp() {
       .compile()
   ).createNestApplication();
   await app.init();
-  return { app, memory };
+  return { app };
 }
 
-describe('Ordenar HTTP contracts', () => {
+describe.skipIf(!pgUrl)('Ordenar HTTP contracts (PostgreSQL)', () => {
   let app: INestApplication | undefined;
   afterEach(async () => {
     await app?.close();
     app = undefined;
   });
-  const call = (method: 'get' | 'post' | 'put' | 'delete', path: string, user = 'owner') =>
+  afterAll(async () => {
+    await dropUsers(prisma, P);
+    await prisma.$disconnect();
+  });
+  const call = (method: 'get' | 'post' | 'put' | 'delete', path: string, user = OWNER) =>
     request(app!.getHttpServer())[method](path).set('x-test-user', user).set('Origin', ORIGIN);
 
   it('hides and unhides owned photos with per-photo results', async () => {
@@ -112,14 +124,14 @@ describe('Ordenar HTTP contracts', () => {
           changedCount: 1,
         }),
       );
-    expect(created.memory.rows('photo')[0].hiddenAt).toBeInstanceOf(Date);
-    expect(created.memory.rows('photo')[2].hiddenAt).toBeNull();
+    expect((await photoAt(0)).hiddenAt).toBeInstanceOf(Date);
+    expect((await photoAt(2)).hiddenAt).toBeNull();
 
     await call('post', '/v1/photos/unhide')
       .send({ photoIds: ['p1'] })
       .expect(200)
       .expect(({ body }) => expect(body.results).toEqual([{ id: 'p1', status: 'VISIBLE' }]));
-    expect(created.memory.rows('photo')[0].hiddenAt).toBeNull();
+    expect((await photoAt(0)).hiddenAt).toBeNull();
   });
 
   it('requires a session, an allowed origin and a valid body', async () => {
@@ -131,7 +143,7 @@ describe('Ordenar HTTP contracts', () => {
       .expect(403);
     await request(app.getHttpServer())
       .post('/v1/photos/hide')
-      .set('x-test-user', 'owner')
+      .set('x-test-user', OWNER)
       .set('Origin', 'http://attacker.example.test')
       .send({ photoIds: ['p1'] })
       .expect(403);
@@ -155,7 +167,7 @@ describe('Ordenar HTTP contracts', () => {
           updatedCount: 2,
         }),
       );
-    expect(created.memory.rows('photo')[0]).toMatchObject({
+    expect(await photoAt(0)).toMatchObject({
       effectiveDateSource: 'MANUAL',
       effectiveDatePrecision: 'DAY',
     });
@@ -171,8 +183,8 @@ describe('Ordenar HTTP contracts', () => {
           clearedCount: 1,
         }),
       );
-    expect(created.memory.rows('photo')[0].effectiveDateSource).toBe('NONE');
-    expect(created.memory.rows('photo')[1].effectiveDateSource).toBe('MANUAL');
+    expect((await photoAt(0)).effectiveDateSource).toBe('NONE');
+    expect((await photoAt(1)).effectiveDateSource).toBe('MANUAL');
   });
 
   it('validates batch dates and enforces CSRF', async () => {
@@ -183,7 +195,7 @@ describe('Ordenar HTTP contracts', () => {
     await call('put', '/v1/photos/dates').send({ year: 2014, precision: 'YEAR' }).expect(400);
     await request(app.getHttpServer())
       .put('/v1/photos/dates')
-      .set('x-test-user', 'owner')
+      .set('x-test-user', OWNER)
       .set('Origin', 'http://attacker.example.test')
       .send({ photoIds: ['p1'], year: 2014, precision: 'YEAR' })
       .expect(403);
@@ -218,11 +230,11 @@ describe('Ordenar HTTP contracts', () => {
           affectedCount: 1,
         }),
       );
-    expect(created.memory.rows('photo')[0]).toMatchObject({
+    expect(await photoAt(0)).toMatchObject({
       effectiveDateSource: 'FOLDER_RULE',
       effectiveDatePrecision: 'DAY',
     });
-    expect(created.memory.rows('photo')[1].effectiveDateSource).toBe('NONE');
+    expect((await photoAt(1)).effectiveDateSource).toBe('NONE');
     // Defaults: include subfolders, keep camera dates.
     await call('put', '/v1/indexed-folders/root/date')
       .send({ year: 2008, precision: 'YEAR' })
@@ -230,11 +242,11 @@ describe('Ordenar HTTP contracts', () => {
       .expect(({ body }) =>
         expect(body.rule).toMatchObject({ scope: 'FALLBACK_DESCENDANTS', includeSubfolders: true }),
       );
-    expect(created.memory.rows('photo')[1].effectiveDateSource).toBe('FOLDER_RULE');
+    expect((await photoAt(1)).effectiveDateSource).toBe('FOLDER_RULE');
     await call('delete', '/v1/indexed-folders/root/date')
       .expect(200)
       .expect(({ body }) => expect(body).toEqual({ affectedCount: 2 }));
-    expect(created.memory.rows('photo')[0].effectiveDateSource).toBe('NONE');
+    expect((await photoAt(0)).effectiveDateSource).toBe('NONE');
   });
 
   it('rejects invalid folder dates and never touches another user folder', async () => {
@@ -272,7 +284,7 @@ describe('Ordenar HTTP contracts', () => {
         });
         expect(body.nextCursor).toEqual(expect.any(String));
       });
-    await call('get', '/v1/photo-sources/source/folder-tree')
+    await call('get', `/v1/photo-sources/${SOURCE}/folder-tree`)
       .expect(200)
       .expect(({ body }) => {
         expect(body.items[0]).toMatchObject({ name: 'Root', subtreePhotoCount: 2 });
@@ -290,8 +302,8 @@ describe('Ordenar HTTP contracts', () => {
 
   it('keeps the read routes owner-scoped and validates their query', async () => {
     app = (await createApp()).app;
-    await call('get', '/v1/ordering/piles?sourceId=other-source').expect(404);
-    await call('get', '/v1/photo-sources/other-source/folder-tree').expect(404);
+    await call('get', `/v1/ordering/piles?sourceId=${OTHER_SOURCE}`).expect(404);
+    await call('get', `/v1/photo-sources/${OTHER_SOURCE}/folder-tree`).expect(404);
     await call('get', '/v1/indexed-folders/foreign-folder').expect(404);
     await call('get', '/v1/ordering/piles?includeSubfolders=maybe').expect(400);
     await call('get', '/v1/ordering/photos').expect(400);
@@ -302,7 +314,10 @@ describe('Ordenar HTTP contracts', () => {
   it('lists and accepts filename suggestions', async () => {
     const created = await createApp();
     app = created.app;
-    created.memory.rows('photo')[0].fileName = 'IMG-20190812-WA0001.jpg';
+    await prisma.photo.update({
+      where: { id: 'p1' },
+      data: { fileName: 'IMG-20190812-WA0001.jpg' },
+    });
     await call('get', '/v1/ordering/filename-suggestions')
       .expect(200)
       .expect(({ body }) => {
@@ -313,7 +328,7 @@ describe('Ordenar HTTP contracts', () => {
       .send({ kinds: ['whatsapp'] })
       .expect(200)
       .expect(({ body }) => expect(body).toEqual({ appliedCount: 1 }));
-    expect(created.memory.rows('photo')[0]).toMatchObject({
+    expect(await photoAt(0)).toMatchObject({
       detectedSource: 'FILENAME',
       effectiveDateSource: 'FILENAME',
     });
@@ -322,7 +337,7 @@ describe('Ordenar HTTP contracts', () => {
       .expect(400);
     await request(app.getHttpServer())
       .post('/v1/ordering/filename-suggestions/accept')
-      .set('x-test-user', 'owner')
+      .set('x-test-user', OWNER)
       .set('Origin', 'http://attacker.example.test')
       .send({})
       .expect(403);
