@@ -3,8 +3,6 @@
   "private": true,
   "scripts": {
     "dev": "node ../../scripts/with-local-env.cjs node ./node_modules/@nestjs/cli/bin/nest.js start --watch",
-    "worker": "node ../../scripts/with-local-env.cjs node ./node_modules/tsx/dist/cli.mjs src/worker.ts",
-    "retention:purge": "node ../../scripts/with-local-env.cjs node ./node_modules/tsx/dist/cli.mjs src/retention.ts",
     "build": "node ../../scripts/with-local-env.cjs node ./node_modules/prisma/build/index.js generate && nest build",
     "lint": "eslint \"src/**/*.ts\" \"test/**/*.ts\"",
     "typecheck": "tsc --noEmit",
@@ -17,7 +15,6 @@
     "@nestjs/core": "^11.0.1",
     "@nestjs/platform-express": "^11.0.1",
     "@prisma/client": "^6.4.1",
-    "bullmq": "^5.40.0",
     "class-transformer": "^0.5.1",
     "class-validator": "^0.14.2",
     "cookie-parser": "^1.4.7",
@@ -25,7 +22,6 @@
     "@googleapis/drive": "^10.0.0",
     "@googleapis/oauth2": "^1.0.7",
     "google-auth-library": "^9.15.1",
-    "ioredis": "^5.5.0",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1",
     "sharp": "^0.35.5"

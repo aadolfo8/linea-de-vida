@@ -7,6 +7,7 @@ import { PrismaService } from './prisma.service';
 import { DriveAdapter, GoogleDriveProvider, MemoryDriveProvider } from './drive';
 import { PhotoDateResolver } from './date-resolver';
 import { SyncService } from './sync.service';
+import { SyncScheduler } from './sync-scheduler';
 import { GoogleOAuthClient, GoogleOAuthProvider, OAuthStateService } from './oauth';
 import { ManualDateService } from './manual-date.service';
 import { MediaProxyService } from './media-proxy.service';
@@ -30,6 +31,7 @@ import { PhotoVisibilityService } from './photo-visibility.service';
     MediaProxyService,
     RetentionService,
     SyncService,
+    SyncScheduler,
     OAuthStateService,
     { provide: GoogleOAuthClient, useClass: GoogleOAuthProvider },
     {

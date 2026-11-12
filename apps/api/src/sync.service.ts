@@ -1,4 +1,4 @@
-import { Inject, Injectable, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
+import { Inject, Injectable, NotFoundException } from '@nestjs/common';
 import {
   DatePrecision,
   DateSource,
@@ -12,8 +12,6 @@ import {
   SyncRunStatus,
   TakeoutMatchStatus,
 } from '@prisma/client';
-import { JobsOptions, Queue } from 'bullmq';
-import IORedis from 'ioredis';
 import { DriveAdapter, DriveItem, DriveRequestError, isFolder, isImage } from './drive';
 import { PhotoDateResolver } from './date-resolver';
 import { PrismaService } from './prisma.service';
@@ -23,20 +21,6 @@ import { photoDimensions } from './photo-dimensions';
 import { contentKeyFor, isProvisionalContentKey, parseSizeBytes } from './photo-identity';
 import { applicableRule, inheritsToSubfolders } from './folder-rule-scope';
 import { isUniqueViolation, mergePhotos, refreshPhotos } from './photo-catalog';
-
-const jobOptions: JobsOptions = {
-  attempts: 3,
-  backoff: { type: 'exponential', delay: 1_000, jitter: 0.25 },
-  removeOnComplete: true,
-  removeOnFail: true,
-};
-
-/** Creates a BullMQ-safe, deterministic identifier for one source sync run. */
-export const syncJobId = (sourceId: string, runId: string) => {
-  const source = Buffer.from(sourceId).toString('base64url');
-  const run = Buffer.from(runId).toString('base64url');
-  return `sync-s${source.length}-${source}r${run.length}-${run}`;
-};
 
 type TakeoutCandidate = { fileName: string; metadata: TakeoutMetadata };
 type FolderWork = {
@@ -79,46 +63,6 @@ async function folderRuleFor(
 
 @Injectable()
 export class SyncService {
-  private producer?: Queue;
-  private producerConnection?: IORedis;
-  private closing?: Promise<void>;
-
-  private queue() {
-    if (this.closing) throw new Error('Sync producer is shutting down.');
-    if (!this.producer) {
-      const connection = new IORedis(process.env.REDIS_URL ?? 'redis://localhost:6379', {
-        maxRetriesPerRequest: 1,
-      });
-      this.producerConnection = connection;
-      connection.on('error', () =>
-        console.error(JSON.stringify({ event: 'sync_producer_redis_error' })),
-      );
-      try {
-        this.producer = new Queue('photo-sync', { connection });
-        this.producer.on('error', () =>
-          console.error(JSON.stringify({ event: 'sync_producer_error' })),
-        );
-      } catch (error) {
-        connection.disconnect();
-        this.producerConnection = undefined;
-        throw error;
-      }
-    }
-    return this.producer;
-  }
-
-  onModuleDestroy() {
-    this.closing ??= (async () => {
-      try {
-        await this.producer?.close();
-      } finally {
-        // BullMQ does not own an externally supplied Redis client.
-        this.producerConnection?.disconnect();
-      }
-    })();
-    return this.closing;
-  }
-
   constructor(
     @Inject(PrismaService)
     private readonly prisma: PrismaService,
@@ -152,18 +96,6 @@ export class SyncService {
         });
         if (!run) throw new Error('Could not create a sync run.');
       }
-    }
-    try {
-      await this.queue().add(
-        'scan',
-        { syncRunId: run.id },
-        { ...jobOptions, jobId: syncJobId(source.id, run.id) },
-      );
-    } catch {
-      throw new ServiceUnavailableException({
-        code: 'SYNC_ENQUEUE_FAILED',
-        message: 'The sync could not be queued. Please try again.',
-      });
     }
     return run;
   }
@@ -792,12 +724,5 @@ export class SyncService {
         await this.prisma.syncRun.update({ where: { id: run.id }, data: { status: 'FAILED' } });
       if (transient) throw error;
     }
-  }
-
-  async failExhausted(syncRunId: string) {
-    await this.prisma.syncRun.updateMany({
-      where: { id: syncRunId, status: 'RUNNING' },
-      data: { status: 'FAILED' },
-    });
   }
 }

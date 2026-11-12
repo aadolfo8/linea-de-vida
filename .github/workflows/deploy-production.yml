@@ -23,7 +23,7 @@ jobs:
           set -euo pipefail
           compose_file=docker-compose.production.yml
           if [[ ! -f "$compose_file" ]]; then
-            echo "::error title=Production deployment is not configured::Missing $compose_file. Add a production Compose configuration that defines every long-running application service, its image or build configuration, persistent storage, and a healthcheck for each service before enabling deployment. The current docker-compose.yml only starts local PostgreSQL and Redis dependencies."
+            echo "::error title=Production deployment is not configured::Missing $compose_file. Add a production Compose configuration that defines every long-running application service, its image or build configuration, persistent storage, and a healthcheck for each service before enabling deployment. The current docker-compose.yml only starts the local PostgreSQL dependency."
             exit 1
           fi
 

@@ -1,12 +1,12 @@
 # Línea de vida — referencia técnica
 
-Una vertical slice local para explorar fotografías seleccionadas de Google Drive por fecha, sin clasificación de contenido. El repositorio contiene una web editorial, una API NestJS, PostgreSQL, Redis y un worker BullMQ independiente.
+Una vertical slice local para explorar fotografías seleccionadas de Google Drive por fecha, sin clasificación de contenido. El repositorio contiene una web editorial, una API NestJS, PostgreSQL; la API ejecuta las sincronizaciones con un planificador en proceso.
 
 ## Inicio rápido
 
 1. Copia `.env.example` a `.env` y completa `SESSION_SECRET` y `TOKEN_ENCRYPTION_KEY` con valores locales seguros.
-2. PostgreSQL se publica en el puerto host `5433` por defecto (y mantiene `5432` dentro de Docker). Si necesitas otro puerto host, ajusta `POSTGRES_HOST_PORT` y el puerto de `DATABASE_URL` al mismo valor en `.env`; después ejecuta `docker compose up -d` para PostgreSQL y Redis (solo dependencias).
-3. Ejecuta `pnpm install`, `pnpm --filter @linea-de-vida/api prisma:deploy`, `pnpm dev` y, en otra terminal, `pnpm dev:worker`. Los scripts locales cargan exclusivamente el archivo `.env` de la raíz y reemplazan las variables heredadas con el mismo nombre; no exportes `DATABASE_URL` ni otras variables locales manualmente. Así API, worker y Prisma usan la misma base local.
+2. PostgreSQL se publica en el puerto host `5433` por defecto (y mantiene `5432` dentro de Docker). Si necesitas otro puerto host, ajusta `POSTGRES_HOST_PORT` y el puerto de `DATABASE_URL` al mismo valor en `.env`; después ejecuta `docker compose up -d` para PostgreSQL (solo dependencias).
+3. Ejecuta `pnpm install`, `pnpm --filter @linea-de-vida/api prisma:deploy`, y `pnpm dev`. Los scripts locales cargan exclusivamente el archivo `.env` de la raíz y reemplazan las variables heredadas con el mismo nombre; no exportes `DATABASE_URL` ni otras variables locales manualmente. Así API y Prisma usan la misma base local.
 4. Abre `http://localhost:3000`. Sin credenciales Google, usa **Entrar en desarrollo**: crea una sesión local; nunca finge autorización de Drive.
 
 ## Arquitectura y contrato
@@ -15,8 +15,8 @@ Una vertical slice local para explorar fotografías seleccionadas de Google Driv
 | ------------------ | -------------------------------------------------------------------------------------- |
 | `apps/web`         | Next.js App Router; onboarding, fuente, organización y la cronología «Cielo nocturno». |
 | `apps/api`         | Sesión, autorización por `userId`, recursos REST, OAuth y proxy de medios.             |
-| `apps/api` worker  | Consume `photo-sync`; explora exclusivamente la carpeta fuente y descendientes.        |
-| PostgreSQL / Redis | Estado persistente / cola BullMQ.                                                      |
+| `SyncScheduler`    | En la API: consume los `SyncRun` en cola; explora exclusivamente la carpeta fuente.    |
+| PostgreSQL         | Estado persistente y cola de sincronización (`SyncRun`).                               |
 
 La API nunca entrega tokens Google ni URLs de Drive al navegador. Las rutas de thumbnail y contenido comprueban primero que la foto sea del usuario de sesión.
 
@@ -32,16 +32,16 @@ Antes de producción, confirma los requisitos actuales de audiencia, pantalla de
 
 ## Producción: configuración y despliegue
 
-La API falla al arrancar en producción si faltan secretos, si son débiles o de ejemplo, si los orígenes/redirect URI no usan HTTPS o si falta la protección de métricas. No expongas PostgreSQL ni Redis a Internet: son dependencias privadas de API/worker.
+La API falla al arrancar en producción si faltan secretos, si son débiles o de ejemplo, si los orígenes/redirect URI no usan HTTPS o si falta la protección de métricas. No expongas PostgreSQL a Internet: es una dependencia privada de la API.
 
-1. Define `NODE_ENV=production`, `DATABASE_URL`, `REDIS_URL`, `API_ORIGIN`, `ALLOWED_WEB_ORIGINS`, `SESSION_SECRET` (32+ caracteres aleatorios), `TOKEN_ENCRYPTION_KEY` (base64 de exactamente 32 bytes), los cuatro valores OAuth Google y `METRICS_TOKEN` (32+ caracteres aleatorios).
+1. Define `NODE_ENV=production`, `DATABASE_URL`, `API_ORIGIN`, `ALLOWED_WEB_ORIGINS`, `SESSION_SECRET` (32+ caracteres aleatorios), `TOKEN_ENCRYPTION_KEY` (base64 de exactamente 32 bytes), los cuatro valores OAuth Google y `METRICS_TOKEN` (32+ caracteres aleatorios).
 2. Registra en Google exactamente las URI HTTPS de callback y el origen web permitido. Conserva los secretos en un gestor de secretos; nunca en la imagen, repositorio o logs.
-3. Ejecuta `pnpm install --frozen-lockfile`, `pnpm --filter @linea-de-vida/api prisma:deploy`, inicia API y worker como procesos separados y publica ambos orígenes detrás de un proxy TLS que preserve `X-Forwarded-Proto`.
+3. Ejecuta `pnpm install --frozen-lockfile`, `pnpm --filter @linea-de-vida/api prisma:deploy`, inicia la API y la web y publica ambos orígenes detrás de un proxy TLS que preserve `X-Forwarded-Proto`.
 4. Comprueba `GET /v1/health`, `GET /v1/readiness` y `GET /v1/metrics` (este último con `Authorization: Bearer $METRICS_TOKEN` desde red interna). El endpoint de métricas no responde sin token.
 
 `ALLOWED_WEB_ORIGINS` es una lista separada por comas. CORS acepta exclusivamente esos orígenes con credenciales; las mutaciones autenticadas vuelven a comprobar `Origin`. Los callbacks OAuth son GET de redirección y se protegen con cookie `httpOnly` temporal, `state` criptográfico de un solo uso y PKCE; no dependen de `Origin`, que los navegadores no envían de forma fiable durante la redirección.
 
-El límite de solicitudes usa Redis como contador compartido y separa OAuth de autorización, callbacks OAuth, sesión, timeline, medios, mutaciones y otras respuestas JSON. La identidad es la sesión firmada o, para tráfico anónimo, la IP. Si Redis no está disponible, la API mantiene un límite local acotado por proceso y vuelve a usar Redis automáticamente cuando se recupera; el fallback preserva disponibilidad, pero no coordina contadores entre réplicas durante la incidencia.
+El límite de solicitudes usa un contador en memoria del proceso (una sola réplica de API) y separa OAuth de autorización, callbacks OAuth, sesión, timeline, medios, mutaciones y otras respuestas JSON. La identidad es la sesión firmada o, para tráfico anónimo, la IP. Si algún día hay más de una réplica de API, los contadores dejan de compartirse y habría que volver a un almacén compartido.
 
 ## Retención, logs y backup
 

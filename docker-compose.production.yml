@@ -16,20 +16,6 @@ services:
       start_period: 10s
     networks: [app]
 
-  redis:
-    image: redis:7-alpine
-    restart: unless-stopped
-    command: ['redis-server', '--appendonly', 'yes']
-    volumes:
-      - redis-data:/data
-    healthcheck:
-      test: ['CMD', 'redis-cli', 'ping']
-      interval: 10s
-      timeout: 5s
-      retries: 10
-      start_period: 5s
-    networks: [app]
-
   migrate:
     build:
       context: .
@@ -62,8 +48,6 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-      redis:
-        condition: service_healthy
       migrate:
         condition: service_completed_successfully
     healthcheck:
@@ -82,34 +66,6 @@ services:
       app:
       proxy:
         aliases: [linea-api]
-
-  worker:
-    build:
-      context: .
-      target: runtime
-    restart: unless-stopped
-    env_file: .env
-    command: ['node', 'apps/api/dist/src/worker.js']
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-      migrate:
-        condition: service_completed_successfully
-    healthcheck:
-      test:
-        [
-          'CMD',
-          'node',
-          '-e',
-          "const fs = require('node:fs'); const { isWorkerHeartbeatHealthy, WORKER_HEALTH_FILE } = require('/app/apps/api/dist/src/worker-health.js'); let heartbeat; try { heartbeat = fs.readFileSync(WORKER_HEALTH_FILE, 'utf8'); } catch { process.exit(1); } process.exit(isWorkerHeartbeatHealthy(heartbeat, Date.now(), 1) ? 0 : 1)",
-        ]
-      interval: 10s
-      timeout: 5s
-      retries: 3
-      start_period: 20s
-    networks: [app]
 
   web:
     build:
@@ -144,4 +100,3 @@ networks:
 
 volumes:
   postgres-data:
-  redis-data:

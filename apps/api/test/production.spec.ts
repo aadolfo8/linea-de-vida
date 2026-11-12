@@ -2,12 +2,10 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   createMemoryRateLimitStore,
   createRateLimitMiddleware,
-  createResilientRateLimitStore,
   isAllowedOrigin,
   loadRuntimeConfig,
   requestIdMiddleware,
   securityHeadersMiddleware,
-  type RateLimitStore,
 } from '../src/production';
 import { CsrfGuard } from '../src/auth';
 
@@ -18,7 +16,6 @@ const productionEnv = {
   SESSION_SECRET: 'a'.repeat(32),
   TOKEN_ENCRYPTION_KEY: Buffer.alloc(32, 1).toString('base64'),
   DATABASE_URL: 'postgresql://user:credential-value@db.internal.test/app',
-  REDIS_URL: 'rediss://redis.internal.test',
   GOOGLE_CLIENT_ID: 'client-id',
   GOOGLE_CLIENT_SECRET: 'client-secret',
   GOOGLE_LOGIN_REDIRECT_URI: 'https://api.example.test/v1/auth/google/callback',
@@ -139,48 +136,6 @@ describe('production controls', () => {
     expect(response.setHeader).toHaveBeenCalledWith('Retry-After', expect.any(String));
     expect(response.json).toHaveBeenCalledWith(
       expect.objectContaining({ code: 'RATE_LIMITED', requestId: 'oauth-request-id' }),
-    );
-  });
-
-  it('rate limits with a bounded per-process fallback and returns to Redis when it recovers', async () => {
-    const redisError = new Error("Stream isn't writeable and enableOfflineQueue options is false");
-    const primary: RateLimitStore = {
-      increment: vi
-        .fn()
-        .mockRejectedValueOnce(redisError)
-        .mockRejectedValueOnce(redisError)
-        .mockResolvedValueOnce({ count: 1, retryAfterMs: 60_000 }),
-    };
-    const middleware = createRateLimitMiddleware(
-      loadRuntimeConfig({ RATE_LIMIT_MUTATION_MAX: '1' }),
-      createResilientRateLimitStore(primary),
-    );
-    const response: any = {
-      locals: { requestId: 'fallback-request-id' },
-      setHeader: vi.fn(),
-      status: vi.fn().mockReturnThis(),
-      json: vi.fn(),
-    };
-    const request: any = {
-      method: 'POST',
-      originalUrl: '/v1/photo-sources',
-      signedCookies: { lv_session: 'user-1' },
-      ip: '127.0.0.1',
-    };
-    const next = vi.fn();
-
-    await middleware(request, response, next);
-    await middleware(request, response, next);
-    await middleware(request, response, next);
-
-    expect(primary.increment).toHaveBeenCalledTimes(3);
-    expect(primary.increment).toHaveBeenCalledWith('rate:mutation:user-1', 60_000);
-    expect(next).toHaveBeenCalledTimes(2);
-    expect(response.status).toHaveBeenCalledTimes(1);
-    expect(response.status).toHaveBeenCalledWith(429);
-    expect(response.setHeader).toHaveBeenCalledWith('Retry-After', expect.any(String));
-    expect(response.json).toHaveBeenCalledWith(
-      expect.objectContaining({ code: 'RATE_LIMITED', requestId: 'fallback-request-id' }),
     );
   });
 

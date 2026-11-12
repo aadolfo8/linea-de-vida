@@ -9,7 +9,6 @@
 ![React 19](https://img.shields.io/badge/React-19-0b0f1a?style=flat-square&logo=react&logoColor=cfe0ff)
 ![NestJS](https://img.shields.io/badge/NestJS-11-0b0f1a?style=flat-square&logo=nestjs&logoColor=cfe0ff)
 ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-Prisma-0b0f1a?style=flat-square&logo=postgresql&logoColor=cfe0ff)
-![Redis](https://img.shields.io/badge/Redis-BullMQ-0b0f1a?style=flat-square&logo=redis&logoColor=cfe0ff)
 ![TypeScript](https://img.shields.io/badge/TypeScript-5-0b0f1a?style=flat-square&logo=typescript&logoColor=cfe0ff)
 
 **solo lectura · solo las carpetas que eliges · sin IA**<br>
@@ -127,7 +126,7 @@ duplica: **la identidad de una foto es su contenido**, no el archivo.
 - **Iniciar sesión no es dar acceso a Drive.** Son dos pasos separados; el permiso de Drive
   se pide aparte, con consentimiento incremental, `state` de un solo uso y PKCE.
 - **Los tokens nunca llegan al navegador.** El refresh token se guarda cifrado y solo la
-  API y el worker pueden descifrarlo.
+  API puede descifrarlo.
 - **Un proxy de medios autenticado.** Antes de pedir nada a Drive comprueba que la foto, la
   fuente y la conexión son tuyas. Un id de foto nunca es autorización suficiente.
 - **Logs sin datos.** Se registran evento, método, estado y duración; nunca tokens, cookies,
@@ -142,15 +141,12 @@ flowchart LR
     U([Navegador]) --> W["apps/web<br/>Next.js"]
     W -- "REST + cookie de sesión" --> A["apps/api<br/>NestJS"]
     A --> P[("PostgreSQL<br/>Prisma")]
-    A -- "encola photo-sync" --> R[("Redis<br/>BullMQ")]
-    R --> K["Worker"]
-    K --> P
     A -- "proxy de medios" --> G[["Google Drive<br/>solo lectura"]]
-    K -- "escaneo con checkpoints" --> G
+    A -- "SyncScheduler: escaneo con checkpoints" --> G
 ```
 
-- **Sincronizar no bloquea.** `POST /sync-runs` encola y responde `202`; el worker recorre
-  la carpeta página a página, guarda un checkpoint tras cada una y puede reanudar.
+- **Sincronizar no bloquea.** `POST /sync-runs` crea un `SyncRun` en Postgres y responde `202`; el
+  `SyncScheduler` de la API lo toma y recorre la carpeta página a página, guarda un checkpoint tras cada una y puede reanudar.
 - **Progreso honesto.** Se muestran fotos encontradas y procesadas, nunca un porcentaje que
   Drive no puede respaldar.
 - **Borrar con cuidado.** Una foto solo pasa a `MISSING` cuando un escaneo **completo y
@@ -163,7 +159,7 @@ flowchart LR
 | -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **NestJS separado de Next.js**   | Los secretos de Google, el cifrado y la autorización por recurso viven fuera del navegador y del servidor de la web. La web solo habla REST con una cookie.                     |
 | **PostgreSQL + Prisma**          | Fotos, copias, carpetas, correcciones y portadas son relacionales. La fecha efectiva es una proyección transaccional de detección o corrección, con índices para la cronología. |
-| **BullMQ + Redis**               | Un escaneo de miles de fotos no cabe en una petición HTTP. Cola con `jobId` por fuente para que no haya dos sincronizaciones a la vez sobre lo mismo.                           |
+| **`SyncRun` como cola**          | Un escaneo de miles de fotos no cabe en una petición HTTP. La fila `SyncRun` es el trabajo (con checkpoint y reintentos) y un planificador en la API la toma con `SKIP LOCKED`. Sin Redis ni proceso aparte. |
 | **Identidad por contenido**      | `md5:<hash>:<tamaño>` único por usuario. La misma foto en dos carpetas o en dos exportaciones de Takeout es una foto con dos copias, no dos fotos.                              |
 | **`DriveAdapter` propio**        | Google no se filtra al dominio, y `MemoryDriveProvider` permite tests y desarrollo sin una cuenta real.                                                                         |
 | **Un motor de cielo propio**     | Scroll convertido en una pista con inercia, `translate3d` y canvas de estrellas a ~30 fps. Con `prefers-reduced-motion` todo navega sin zoom ni animación.                      |
@@ -173,13 +169,13 @@ flowchart LR
 
 ```
 apps/
-  api/                   NestJS · Prisma · BullMQ · Vitest
+  api/                   NestJS · Prisma · Vitest
     src/date-resolver.ts   EXIF → Drive → Takeout → nombre → carpeta
     src/filename-date.ts   patrones de fecha en nombres de archivo
     src/sync.service.ts    escaneo con checkpoints y reconciliación
     src/takeout.ts         emparejado de fotos con sus JSON
     src/media-proxy.service.ts   miniaturas y originales autorizados
-    src/worker.ts          consumidor de la cola photo-sync
+    src/sync-scheduler.ts  toma los SyncRun en cola, reintenta y purga
     prisma/                esquema y migraciones
   web/                   Next.js App Router · React 19 · Tailwind
     app/timeline/          las tres profundidades del cielo
@@ -202,16 +198,15 @@ Requisitos: Node.js, pnpm 9 y Docker.
 # 1. Variables de entorno (rellena SESSION_SECRET y TOKEN_ENCRYPTION_KEY)
 cp .env.example .env
 
-# 2. PostgreSQL (puerto 5433) y Redis
+# 2. PostgreSQL (puerto 5433)
 docker compose up -d
 
 # 3. Dependencias y migraciones
 pnpm install
 pnpm --filter @linea-de-vida/api prisma:deploy
 
-# 4. Web + API, y el worker en otra terminal
+# 4. Web + API (la API ejecuta también las sincronizaciones)
 pnpm dev
-pnpm dev:worker
 ```
 
 Abre **http://localhost:3000**. Para conectar Google Drive de verdad necesitas un cliente

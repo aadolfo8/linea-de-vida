@@ -2,27 +2,26 @@
 
 ## Decisión
 
-Se adopta un monorepo **pnpm** con `apps/web` y `apps/api`. La web usará Next.js App Router, TypeScript y Tailwind; la API será NestJS REST con TypeScript. La persistencia será PostgreSQL mediante Prisma. Docker Compose levantará PostgreSQL y Redis. No se crean aún paquetes, dependencias ni código.
+Se adopta un monorepo **pnpm** con `apps/web` y `apps/api`. La web usará Next.js App Router, TypeScript y Tailwind; la API será NestJS REST con TypeScript. La persistencia será PostgreSQL mediante Prisma. Docker Compose levantará PostgreSQL. No se crean aún paquetes, dependencias ni código.
 
 | Área                | Responsabilidad                               | Decisión y justificación                                                                             |
 | ------------------- | --------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
 | `apps/web`          | Experiencia temporal y sesión de navegador    | Next.js App Router facilita rutas de UI; Tailwind mantiene un sistema visual pequeño y consistente.  |
 | `apps/api`          | Dominio, autorización, OAuth, Drive y proxies | NestJS concentra secretos y autorización por recurso fuera del navegador.                            |
 | PostgreSQL + Prisma | Estado normalizado y consultas de timeline    | Integridad relacional, índices explícitos y migraciones tipadas.                                     |
-| Redis               | Transporte/estado de trabajos                 | Base de BullMQ cuando se introduzca.                                                                 |
-| BullMQ              | Sincronizaciones asíncronas                   | Se introduce desde la vertical slice con un worker local: una sincronización no puede bloquear HTTP. |
+| `SyncScheduler`     | Sincronizaciones asíncronas                   | Planificador en el proceso de la API: toma `SyncRun` en `QUEUED` con `FOR UPDATE SKIP LOCKED`, reintenta con backoff y reanuda por checkpoint. |
 
 ## Límites y flujo
 
 ```text
 Navegador ──cookies de sesión──> Web ──REST──> API ──> PostgreSQL
                                        │            │
-                                       │            └──> Redis <──> worker BullMQ local
+                                       │            └──> SyncScheduler (en proceso)
                                        │                              │
                                        └── Drive Adapter ──> Google Drive API
 ```
 
-La API es la única que llama a Google: cifra y descifra el refresh token, intercambia códigos OAuth y ejecuta el adaptador. La web nunca recibe tokens Google ni enlaces de medios de Drive como contrato estable. El worker procesa una fuente autorizada y persiste el resultado; HTTP crea una solicitud de sincronización y devuelve el recurso `SyncRun`.
+La API es la única que llama a Google: cifra y descifra el refresh token, intercambia códigos OAuth y ejecuta el adaptador. La web nunca recibe tokens Google ni enlaces de medios de Drive como contrato estable. El `SyncScheduler` procesa una fuente autorizada y persiste el resultado; HTTP crea una solicitud de sincronización y devuelve el recurso `SyncRun`.
 
 ## Módulos de API
 
@@ -41,7 +40,7 @@ La API es la única que llama a Google: cifra y descifra el refresh token, inter
 
 La autenticación de la aplicación y la autorización de Drive son etapas separadas. Iniciar sesión identifica al usuario; solo «Vincular Drive» inicia consentimiento incremental para `https://www.googleapis.com/auth/drive.readonly`. El flujo servidor usa `state` criptográficamente aleatorio, URI de redirección registrada, intercambio de código en backend y `access_type=offline`; Google recomienda autorización incremental con `include_granted_scopes=true` y comprobar los scopes concedidos. [OAuth web](https://developers.google.com/identity/protocols/oauth2/web-server)
 
-- El refresh token se cifra en reposo con una clave gestionada fuera de la base de datos (KMS/secret manager en producción; clave de desarrollo separada). Solo API/worker pueden descifrarlo.
+- El refresh token se cifra en reposo con una clave gestionada fuera de la base de datos (KMS/secret manager en producción; clave de desarrollo separada). Solo la API puede descifrarlo.
 - La sesión se representa con cookie `httpOnly`, `Secure` en HTTPS y `SameSite=Lax` como valor inicial. La API aplica protección CSRF a mutaciones y valida `Origin`/`Referer` cuando corresponda.
 - No se registra el token, código OAuth, cabecera `Authorization` ni URL firmada completa.
 - Desvincular revoca el token ante Google, invalida la conexión local y elimina las credenciales cifradas. Si Google falla, la conexión queda `REVOCATION_PENDING` y se reintenta sin conservar acceso para nuevas operaciones.
@@ -73,6 +72,6 @@ Las escrituras son idempotentes mediante la clave `(userId, driveFileId)` y el i
 ## Verificación de diseño
 
 - [ ] El árbol pnpm se crea con los dos paquetes al iniciar implementación.
-- [ ] Docker Compose solo describe PostgreSQL y Redis.
-- [ ] El worker local se ejecuta fuera del proceso HTTP desde la vertical slice.
+- [ ] Docker Compose solo describe PostgreSQL.
+- [ ] Las sincronizaciones se ejecutan en el planificador de la API, sin bloquear el event loop.
 - [ ] Ningún contrato REST devuelve token Google.
