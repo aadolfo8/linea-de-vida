@@ -17,6 +17,7 @@ import { mediaUrl, thumbnailVariantUrl } from '../../lib/media';
 import './photo-viewer.css';
 import { ArrowIcon, freshShown, ViewerImage, type Shown } from './viewer-image';
 import { ViewerNotes, ViewerStrip } from './viewer-chrome';
+import { useIdleChrome } from './use-idle-chrome';
 import { focusableSelector, gap, isEditable, readStage, trapTab } from './viewer-dom';
 import {
   photoDateLabel,
@@ -44,8 +45,6 @@ import {
 } from './viewer-zoom';
 
 const EASE = 'cubic-bezier(.22,1,.36,1)';
-/** Chrome fades away after this long without pointer or keyboard activity. */
-const IDLE_DELAY = 2600;
 const OPEN_DURATION = 520;
 const CLOSE_DURATION = 380;
 const SWIPE_DISTANCE = 70;
@@ -110,7 +109,6 @@ export function TimelinePhotoViewer({
   );
   const [zoomPercent, setZoomPercent] = useState(100);
   const [dragging, setDragging] = useState(false);
-  const [idle, setIdle] = useState(false);
   const [closing, setClosing] = useState(false);
 
   const backdrop = useRef<HTMLDivElement>(null);
@@ -132,9 +130,6 @@ export function TimelinePhotoViewer({
   const lastTap = useRef<{ time: number; x: number; y: number } | null>(null);
   const touchToggledAt = useRef(0);
   const closingRef = useRef(false);
-  const idleTimer = useRef(0);
-  const overChrome = useRef(false);
-  const keyboardInput = useRef(false);
   const preloaded = useRef(new Set<string>());
   const currentId = useRef<string | undefined>(undefined);
   const sourceRef = useRef(source);
@@ -224,25 +219,7 @@ export function TimelinePhotoViewer({
     };
   }, [measureStage]);
 
-  // Idle chrome: it fades after a still moment, but never from under a keyboard user.
-  const poke = useCallback((keyboard = false) => {
-    keyboardInput.current = keyboard;
-    setIdle(false);
-    window.clearTimeout(idleTimer.current);
-    idleTimer.current = window.setTimeout(() => {
-      const active = document.activeElement;
-      const focusInChrome =
-        active instanceof HTMLElement &&
-        active !== dialog.current &&
-        dialog.current?.contains(active);
-      if (overChrome.current || (keyboardInput.current && focusInChrome)) return;
-      setIdle(true);
-    }, IDLE_DELAY);
-  }, []);
-  useEffect(() => {
-    poke();
-    return () => window.clearTimeout(idleTimer.current);
-  }, [poke]);
+  const { idle, poke, overChrome } = useIdleChrome(dialog);
 
   useEffect(() => {
     const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
