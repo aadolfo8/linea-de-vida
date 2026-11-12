@@ -22,7 +22,7 @@ import {
 import { apiErrorCopy } from '../../lib/sources/errors';
 import { DriveBanner } from '../components/DriveBanner';
 import { SkyPage } from '../components/SkyPage';
-import { SkyToast } from '../components/SkyToast';
+import { ToastHost } from '../components/ToastHost';
 import { useToast } from '../../lib/use-toast';
 import { photoCountLabel, type TimelinePhoto } from '../components/timeline-model';
 import { GridSkeleton, LoadMore } from '../ordenar/PhotoGrid';
@@ -431,25 +431,7 @@ export function PortadasScreen({ session }: { session: Session }) {
         </div>
       )}
 
-      {toast && (
-        <SkyToast
-          key={toast.key}
-          message={toast.message}
-          tone={toast.tone}
-          link={toast.link}
-          busy={busy}
-          onUndo={
-            toast.undo
-              ? () => {
-                  const undo = toast.undo;
-                  dismiss();
-                  void undo?.();
-                }
-              : undefined
-          }
-          onDismiss={dismiss}
-        />
-      )}
+      <ToastHost toast={toast} busy={busy} onDismiss={dismiss} />
       <p className="sp-sr" role="status" aria-live="polite">
         {announcement}
       </p>

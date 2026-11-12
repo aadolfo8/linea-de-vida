@@ -22,7 +22,7 @@ import type { DateDraft, OrderingPhoto, Pile } from '../../lib/ordering/types';
 import { thumbnailVariantUrl } from '../../lib/media';
 import { DriveBanner } from '../components/DriveBanner';
 import { SkyPage } from '../components/SkyPage';
-import { SkyToast } from '../components/SkyToast';
+import { ToastHost } from '../components/ToastHost';
 import { DateSheet } from './DateSheet';
 import { GridSkeleton, LoadMore, PhotoGrid } from './PhotoGrid';
 import { ActionBar, FolderBar, Peek, SuggestionBanner } from './Panels';
@@ -319,7 +319,6 @@ export function OrdenarScreen({ session }: { session: Session }) {
     );
   };
 
-  const toast = actions.toast;
   return (
     <SkyPage name={session.user.displayName} mainId="ordenar-main">
       <div className="sp-head">
@@ -354,34 +353,7 @@ export function OrdenarScreen({ session }: { session: Session }) {
         />
       )}
 
-      {toast && (
-        <SkyToast
-          key={toast.key}
-          message={toast.message}
-          tone={toast.tone}
-          link={toast.link}
-          busy={actions.busy}
-          onUndo={
-            toast.undo
-              ? () => {
-                  const undo = toast.undo;
-                  actions.dismiss();
-                  void undo?.();
-                }
-              : undefined
-          }
-          onRetry={
-            toast.retry
-              ? () => {
-                  const retry = toast.retry;
-                  actions.dismiss();
-                  void retry?.();
-                }
-              : undefined
-          }
-          onDismiss={actions.dismiss}
-        />
-      )}
+      <ToastHost toast={actions.toast} busy={actions.busy} onDismiss={actions.dismiss} />
       <p className="sp-sr" role="status" aria-live="polite">
         {actions.announcement}
       </p>
