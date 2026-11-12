@@ -23,6 +23,8 @@ import { Sidebar } from './Sidebar';
 import { usePhotoSelection } from './use-photo-selection';
 import { useTreeExpansion } from './use-tree-expansion';
 import { FolderDateDialog } from './FolderDateDialog';
+import { SelectionTools } from './SelectionTools';
+import { RetryAlert } from '../components/RetryAlert';
 import { useOrderingActions } from './use-ordering-actions';
 import { useOrderingData } from './use-ordering-data';
 import './ordenar.css';
@@ -121,14 +123,7 @@ export function OrdenarScreen({ session }: { session: Session }) {
     if (data.sources.status === 'loading' || !location)
       return <p className="ord-hint">Cargando tu archivo…</p>;
     if (data.sources.status === 'error')
-      return (
-        <div role="alert" className="sp-alert">
-          No se pudo cargar tu archivo.{' '}
-          <button type="button" className="sp-btn" onClick={data.reloadSources}>
-            Reintentar
-          </button>
-        </div>
-      );
+      return <RetryAlert message="No se pudo cargar tu archivo." onRetry={data.reloadSources} />;
     if (!source)
       return (
         <div className="sp-empty">
@@ -166,25 +161,15 @@ export function OrdenarScreen({ session }: { session: Session }) {
                 {piles && pile ? ` ${photoCountLabel(piles[pile])}.` : ''}
               </p>
             </div>
-            <div className="ord-tools">
-              {items.length > 0 && (
-                <button type="button" className="sp-btn ghost" onClick={selectAll}>
-                  {everyLoadedSelected ? 'Quitar selección' : 'Seleccionar todas'}
-                </button>
-              )}
-              {list.nextCursor && pileTotal > ids.length && (
-                <button
-                  type="button"
-                  className="sp-btn ghost"
-                  disabled={selectingRest !== null}
-                  onClick={() => void selectWholePile()}
-                >
-                  {selectingRest === null
-                    ? `Seleccionar las ${pileTotal.toLocaleString('es-ES')} del montón`
-                    : `Seleccionando… ${selectingRest.toLocaleString('es-ES')}`}
-                </button>
-              )}
-            </div>
+            <SelectionTools
+              loadedCount={items.length}
+              allLoadedSelected={everyLoadedSelected}
+              onSelectAll={selectAll}
+              canSelectRest={Boolean(list.nextCursor) && pileTotal > ids.length}
+              pileTotal={pileTotal}
+              selectingRest={selectingRest}
+              onSelectRest={() => void selectWholePile()}
+            />
           </div>
 
           {folder && folderId && (
@@ -203,12 +188,7 @@ export function OrdenarScreen({ session }: { session: Session }) {
             />
           )}
           {data.folderFailed && (
-            <div role="alert" className="sp-alert">
-              No se pudo cargar esta carpeta.{' '}
-              <button type="button" className="sp-btn" onClick={data.reloadFolder}>
-                Reintentar
-              </button>
-            </div>
+            <RetryAlert message="No se pudo cargar esta carpeta." onRetry={data.reloadFolder} />
           )}
           {suggestions && suggestions.totalCount > 0 && (
             <SuggestionBanner
@@ -226,12 +206,10 @@ export function OrdenarScreen({ session }: { session: Session }) {
 
           {list.status === 'loading' && <GridSkeleton />}
           {list.status === 'error' && (
-            <div role="alert" className="sp-alert">
-              No se pudieron cargar las fotos. Tu archivo sigue intacto.{' '}
-              <button type="button" className="sp-btn" onClick={data.reloadList}>
-                Reintentar
-              </button>
-            </div>
+            <RetryAlert
+              message="No se pudieron cargar las fotos. Tu archivo sigue intacto."
+              onRetry={data.reloadList}
+            />
           )}
           {list.status === 'ready' && items.length === 0 && empty && (
             <div className="sp-empty">

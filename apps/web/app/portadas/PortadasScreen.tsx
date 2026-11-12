@@ -18,6 +18,7 @@ import { ToastHost } from '../components/ToastHost';
 import { photoCountLabel } from '../components/timeline-model';
 import { GridSkeleton, LoadMore } from '../ordenar/PhotoGrid';
 import { CandidateGrid, ChosenStrip } from './CoverParts';
+import { RetryAlert } from '../components/RetryAlert';
 import { DroppedNotice, UnsavedGuard, YearSidebar } from './PortadasParts';
 import { CoverPreview } from './CoverPreview';
 import { useCoverEditor } from './use-cover-editor';
@@ -93,14 +94,7 @@ export function PortadasScreen({ session }: { session: Session }) {
   const body = () => {
     if (years.status === 'loading') return <p className="ord-hint">Cargando tu archivo…</p>;
     if (years.status === 'error')
-      return (
-        <div role="alert" className="sp-alert">
-          No se pudo cargar tu archivo.{' '}
-          <button type="button" className="sp-btn" onClick={years.reload}>
-            Reintentar
-          </button>
-        </div>
-      );
+      return <RetryAlert message="No se pudo cargar tu archivo." onRetry={years.reload} />;
     if (!years.years.length)
       return (
         <div className="sp-empty">
@@ -138,12 +132,10 @@ export function PortadasScreen({ session }: { session: Session }) {
           )}
 
           {yearData.status === 'error' && (
-            <div role="alert" className="sp-alert">
-              No se pudieron cargar las portadas de este año.{' '}
-              <button type="button" className="sp-btn" onClick={() => void yearData.reload()}>
-                Reintentar
-              </button>
-            </div>
+            <RetryAlert
+              message="No se pudieron cargar las portadas de este año."
+              onRetry={() => void yearData.reload()}
+            />
           )}
           {yearData.status === 'loading' && <GridSkeleton />}
 
@@ -194,12 +186,10 @@ export function PortadasScreen({ session }: { session: Session }) {
               <h3 className="sp-label cov-pick">Elige las fotos</h3>
               {candidates.status === 'loading' && <GridSkeleton />}
               {candidates.status === 'error' && (
-                <div role="alert" className="sp-alert">
-                  No se pudieron cargar las fotos. Tu archivo sigue intacto.{' '}
-                  <button type="button" className="sp-btn" onClick={candidates.reload}>
-                    Reintentar
-                  </button>
-                </div>
+                <RetryAlert
+                  message="No se pudieron cargar las fotos. Tu archivo sigue intacto."
+                  onRetry={candidates.reload}
+                />
               )}
               {candidates.status === 'ready' && candidates.items.length === 0 && (
                 <div className="sp-empty">
