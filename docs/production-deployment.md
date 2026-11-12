@@ -51,3 +51,7 @@ Verify from a machine outside the VPS:
 curl --fail --head "https://linea-de-vida.hidan.es"
 curl --fail --head "https://linea-de-vida.hidan.es/v1/health"
 ```
+
+## Thumbnail storage
+
+The API keeps resized thumbnails (`?width=640|1280`) on the `thumbnail-data` volume, mounted at `THUMBNAIL_DIR` (`/var/lib/linea/thumbs`). Files are named after the photo's `contentKey`, so a changed photo never serves a stale image, and responses carry an `ETag` with `Cache-Control: immutable`. `THUMBNAIL_MAX_MB` (default 2048) caps the volume; the least recently used files are evicted past it. Without `THUMBNAIL_DIR` the store is off and thumbnails are generated per request.
