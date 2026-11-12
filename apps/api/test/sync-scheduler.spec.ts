@@ -111,6 +111,14 @@ describe('SyncScheduler', () => {
     });
   });
 
+  it('reports itself alive only while the loop keeps ticking', async () => {
+    expect(scheduler.isAlive()).toBe(false);
+    const at = new Date('2026-11-12T10:00:00Z');
+    await scheduler.tick(at);
+    expect(scheduler.isAlive(at.getTime() + 30_000)).toBe(true);
+    expect(scheduler.isAlive(at.getTime() + 61_000)).toBe(false);
+  });
+
   it('purges old sync metadata once a day at 04:00 UTC', async () => {
     await scheduler.tick(new Date('2026-11-12T03:59:00Z'));
     expect(retention.purge).not.toHaveBeenCalled();

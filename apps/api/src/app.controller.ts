@@ -3,6 +3,7 @@ import {
   Body,
   ConflictException,
   Controller,
+  Optional,
   Get,
   Delete,
   HttpCode,
@@ -24,6 +25,7 @@ import { decryptSecret, encryptSecret } from './crypto';
 import { CsrfGuard, CurrentUserId, SessionGuard } from './auth';
 import { PrismaService } from './prisma.service';
 import { SyncService } from './sync.service';
+import { SyncScheduler } from './sync-scheduler';
 import { DriveAdapter } from './drive';
 import { MediaProxyService } from './media-proxy.service';
 import { DRIVE_SCOPE, GOOGLE_LOGIN_SCOPES, GoogleOAuthClient, OAuthStateService } from './oauth';
@@ -48,6 +50,7 @@ export class AppController {
     @Inject(MediaProxyService) private readonly media: MediaProxyService,
     @Inject(FolderDateRuleService) private readonly folderDates: FolderDateRuleService,
     @Inject(PhotoVisibilityService) private readonly visibility: PhotoVisibilityService,
+    @Optional() @Inject(SyncScheduler) private readonly scheduler?: SyncScheduler,
   ) {}
   private loginRedirectUri() {
     return (
@@ -118,13 +121,20 @@ export class AppController {
   @Get('readiness') async readiness() {
     try {
       await this.prisma.$queryRawUnsafe('SELECT 1');
-      return { status: 'ready' };
     } catch {
       throw new ServiceUnavailableException({
         code: 'NOT_READY',
         message: 'Dependencies are unavailable.',
       });
     }
+    // The scheduler runs syncs in this process: a loop that stopped ticking means queued syncs
+    // would wait forever, so the container must be reported unhealthy.
+    if (this.scheduler?.started && !this.scheduler.isAlive())
+      throw new ServiceUnavailableException({
+        code: 'SCHEDULER_STALLED',
+        message: 'The sync scheduler is not running.',
+      });
+    return { status: 'ready' };
   }
   @Get('metrics') metrics(@Req() request: Request, @Res() response: Response) {
     const token = loadRuntimeConfig().metricsToken;

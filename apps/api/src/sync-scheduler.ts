@@ -29,6 +29,15 @@ export class SyncScheduler implements OnApplicationShutdown {
   /** Last time the loop completed a pass; `/readiness` reports it. */
   lastTickAt: Date | null = null;
 
+  get started() {
+    return this.timer !== undefined;
+  }
+
+  /** False when the loop has not completed a pass for a minute (it ticks every 2 s). */
+  isAlive(now = Date.now()) {
+    return this.lastTickAt !== null && now - this.lastTickAt.getTime() < 60_000;
+  }
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly sync: SyncService,
