@@ -1,5 +1,6 @@
 import { createBrowserRouter, Navigate, Outlet } from 'react-router';
 import { ContextCursor } from './components/ContextCursor';
+import { UpdatePrompt } from './components/UpdatePrompt';
 
 /** Every screen is its own chunk: the heavy sky engine is only downloaded where it is used. */
 const screen = (load: () => Promise<{ default: React.ComponentType }>) => async () => ({
@@ -11,6 +12,7 @@ function Root() {
     <>
       <Outlet />
       <ContextCursor />
+      <UpdatePrompt />
     </>
   );
 }

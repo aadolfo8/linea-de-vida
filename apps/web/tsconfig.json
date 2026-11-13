@@ -6,7 +6,7 @@
     "noEmit": true,
     "module": "esnext",
     "moduleResolution": "bundler",
-    "types": ["vite/client"],
+    "types": ["vite/client", "vite-plugin-pwa/react"],
     "jsx": "react-jsx",
     "esModuleInterop": true,
     "incremental": true,

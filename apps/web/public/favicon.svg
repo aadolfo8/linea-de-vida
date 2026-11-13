@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <title>Línea de vida</title>
+  <rect width="512" height="512" fill="#05070d" />
+  <!-- A line of life: a thread of stars rising through time. -->
+  <polyline
+    points="150,332 226,262 292,296 362,196"
+    fill="none"
+    stroke="#cfe0ff"
+    stroke-opacity="0.55"
+    stroke-width="6"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  />
+  <g fill="#cfe0ff">
+    <circle cx="150" cy="332" r="16" />
+    <circle cx="226" cy="262" r="12" />
+    <circle cx="292" cy="296" r="12" />
+    <circle cx="362" cy="196" r="22" />
+  </g>
+  <circle cx="362" cy="196" r="38" fill="#cfe0ff" fill-opacity="0.16" />
+</svg>
