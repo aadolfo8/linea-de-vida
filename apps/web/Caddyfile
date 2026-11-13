@@ -1,0 +1,33 @@
+# Serves the static build (`dist/`) of the web app inside the production image. The shared proxy
+# in /srv/proxy still routes `/v1/*` to the API and every other path to this container on :3000.
+{
+	admin off
+	auto_https off
+}
+
+:3000 {
+	root * /srv
+	encode zstd gzip
+
+	header X-Content-Type-Options nosniff
+	# Hashed build files never change; everything else (index.html, sw.js, the manifest) is
+	# revalidated so a new version shows up at once. The matchers are disjoint on purpose: Caddy
+	# runs `header` blocks by specificity, not in file order.
+	# `file` keeps a missing asset (a 404) from being cached as immutable.
+	@hashed {
+		path /assets/*
+		file
+	}
+	header @hashed Cache-Control "public, max-age=31536000, immutable"
+	@unhashed not path /assets/*
+	header @unhashed Cache-Control "no-cache"
+
+	# Client-side routes have no file: they get the app shell. A missing hashed asset stays a 404.
+	@spa {
+		not path /assets/*
+		not file
+	}
+	rewrite @spa /index.html
+
+	file_server
+}
