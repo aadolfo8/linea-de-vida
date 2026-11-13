@@ -44,7 +44,7 @@ Photos are shown unfiltered. The viewer is the one place that goes to pure black
 
 ### Type
 
-Loaded with `next/font/google` in `app/fonts.ts`.
+Self-hosted variable fonts from `@fontsource-variable/*`, imported in `app/fonts.css`.
 
 | Token           | Face         | Role                                                                           |
 | --------------- | ------------ | ------------------------------------------------------------------------------ |

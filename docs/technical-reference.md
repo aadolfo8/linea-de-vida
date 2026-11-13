@@ -11,12 +11,12 @@ Una vertical slice local para explorar fotografías seleccionadas de Google Driv
 
 ## Arquitectura y contrato
 
-| Proceso         | Responsabilidad                                                                        |
-| --------------- | -------------------------------------------------------------------------------------- |
-| `apps/web`      | Next.js App Router; onboarding, fuente, organización y la cronología «Cielo nocturno». |
-| `apps/api`      | Sesión, autorización por `userId`, recursos REST, OAuth y proxy de medios.             |
-| `SyncScheduler` | En la API: consume los `SyncRun` en cola; explora exclusivamente la carpeta fuente.    |
-| PostgreSQL      | Estado persistente y cola de sincronización (`SyncRun`).                               |
+| Proceso         | Responsabilidad                                                                                                  |
+| --------------- | ---------------------------------------------------------------------------------------------------------------- |
+| `apps/web`      | React + Vite (PWA estática) con React Router; onboarding, fuente, organización y la cronología «Cielo nocturno». |
+| `apps/api`      | Sesión, autorización por `userId`, recursos REST, OAuth y proxy de medios.                                       |
+| `SyncScheduler` | En la API: consume los `SyncRun` en cola; explora exclusivamente la carpeta fuente.                              |
+| PostgreSQL      | Estado persistente y cola de sincronización (`SyncRun`).                                                         |
 
 La API nunca entrega tokens Google ni URLs de Drive al navegador. Las rutas de thumbnail y contenido comprueban primero que la foto sea del usuario de sesión.
 

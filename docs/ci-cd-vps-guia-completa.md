@@ -22,7 +22,7 @@ En producción, Docker Compose mantiene estos servicios:
 | `migrate`     | Aplicar migraciones Prisma una vez por despliegue | No                  |
 | API NestJS    | Autenticación, Google Drive, timeline y datos     | No                  |
 | Worker BullMQ | Procesamiento asíncrono de carpetas y fotos       | No                  |
-| Web Next.js   | Interfaz de usuario                               | No                  |
+| Web estática  | Interfaz de usuario (React + Vite, vía Caddy)     | No                  |
 
 Delante de ellos hay un **proxy inverso compartido (Caddy)** que vive en `/srv/proxy`, fuera de este repositorio. Es el único proceso del VPS que publica los puertos 80 y 443, gestiona HTTPS automáticamente y sirve también a otras aplicaciones del mismo servidor. La app está publicada en `https://linea-de-vida.hidan.es`.
 
@@ -34,7 +34,7 @@ flowchart LR
     DNS --> VPS[IP pública del VPS]
     VPS --> N[Caddy compartido: 80 y 443]
     N -->|/v1/* via red proxy| API[API NestJS: linea-api:3001]
-    N -->|resto de rutas via red proxy| WEB[Next.js: linea-web:3000]
+    N -->|resto de rutas via red proxy| WEB[Web estática: linea-web:3000]
     API --> DB[(PostgreSQL)]
     API --> R[(Redis)]
     API --> G[Google Drive API]
@@ -59,7 +59,7 @@ La CI responde preguntas como estas:
 - ¿Hay errores detectables por ESLint?
 - ¿TypeScript puede validar los tipos?
 - ¿Los tests pasan?
-- ¿Next.js y NestJS pueden generar artefactos de producción?
+- ¿La web (Vite) y NestJS pueden generar artefactos de producción?
 
 Una CI verde no garantiza que producción vaya a funcionar. Sí demuestra que el código supera un conjunto concreto y repetible de controles antes de desplegarse.
 
@@ -129,9 +129,9 @@ Elegimos Docker Compose porque:
 
 La contrapartida es que Docker consume recursos y añade una capa que hay que comprender. Además, la primera versión construía imágenes dentro del VPS, lo que puede cargar CPU y memoria durante el build.
 
-### 3.2 Un proxy inverso compartido en lugar de exponer Next.js y NestJS
+### 3.2 Un proxy inverso compartido en lugar de exponer la web y NestJS
 
-Podríamos publicar el puerto 3000 de Next.js y el 3001 de NestJS. No lo hicimos porque obligaría al navegador a conocer dos orígenes y expondría directamente procesos de aplicación.
+Podríamos publicar el puerto 3000 de la web y el 3001 de NestJS. No lo hicimos porque obligaría al navegador a conocer dos orígenes y expondría directamente procesos de aplicación.
 
 El proxy es un Caddy compartido que se gestiona en `/srv/proxy`, fuera de este repositorio. Centraliza:
 
@@ -139,7 +139,7 @@ El proxy es un Caddy compartido que se gestiona en `/srv/proxy`, fuera de este r
 - terminación TLS;
 - redirección de HTTP a HTTPS;
 - encaminamiento `/v1/*` hacia la API;
-- encaminamiento del resto hacia Next.js;
+- encaminamiento del resto hacia la web estática;
 - cabeceras `X-Forwarded-*` para que la API conozca protocolo, host e IP originales;
 - futura aplicación de límites, caché o cabeceras de seguridad.
 
@@ -152,7 +152,7 @@ Alternativas:
 | Nginx + Certbot propio | Control explícito de TLS y plantillas   | Fue la primera versión; choca en 80/443 con otras apps del VPS y exige bootstrap y renovación manuales |
 | Traefik                | Descubrimiento dinámico de contenedores | Más complejidad para una sola aplicación                                                               |
 | HAProxy                | Proxy muy potente y eficiente           | Menos cómodo para servir desafíos ACME y configuración web general                                     |
-| Exponer Next/Nest      | Configuración inicial mínima            | Peor aislamiento, CORS más complejo y sin terminación TLS centralizada                                 |
+| Exponer web/Nest       | Configuración inicial mínima            | Peor aislamiento, CORS más complejo y sin terminación TLS centralizada                                 |
 
 ### 3.3 GitHub Actions por SSH
 
@@ -178,7 +178,7 @@ La alternativa profesional para crecer sería usar PostgreSQL y Redis gestionado
 El repositorio contiene al menos dos aplicaciones:
 
 - `apps/api`: NestJS, Prisma, Google Drive y worker;
-- `apps/web`: Next.js.
+- `apps/web`: React + Vite (build estático, PWA).
 
 pnpm administra los workspaces. En la raíz, los scripts ejecutan operaciones recursivas:
 
@@ -299,11 +299,11 @@ pnpm build
 
 Esto genera:
 
-- Next.js bajo `apps/web/.next`;
+- la web estática bajo `apps/web/dist`;
 - NestJS bajo `apps/api/dist/src`;
 - Prisma Client para la API.
 
-`NEXT_PUBLIC_API_URL=/v1` se fija en build porque las variables `NEXT_PUBLIC_*` de Next.js se incorporan al JavaScript enviado al navegador. Usar `/v1` significa “mismo dominio que la página, ruta `/v1`”, evitando CORS y dominios distintos.
+`VITE_API_URL=/v1` se fija en build porque las variables `VITE_*` de Vite se incorporan al JavaScript enviado al navegador. Usar `/v1` significa “mismo dominio que la página, ruta `/v1`”, evitando CORS y dominios distintos.
 
 ### 6.3 Etapa `runtime`
 
@@ -312,7 +312,6 @@ La etapa actual hereda de `build`, cambia `NODE_ENV` a producción y deja los ar
 Mejora futura:
 
 - copiar únicamente artefactos y dependencias de producción;
-- usar `output: standalone` de Next.js;
 - crear imágenes específicas para API y web;
 - construir imágenes en GitHub y publicarlas en GHCR.
 
@@ -325,7 +324,7 @@ Todos los servicios pertenecen a la red `app`. Docker proporciona DNS interno po
 - `postgres:5432` resuelve PostgreSQL;
 - `redis:6379` resuelve Redis;
 - `api:3001` resuelve NestJS;
-- `web:3000` resuelve Next.js.
+- `web:3000` resuelve la web estática (Caddy).
 
 Estos nombres solo funcionan dentro de la red Docker. Desde Internet no se puede conectar directamente a ellos.
 
@@ -383,9 +382,9 @@ La diferencia entre health y readiness es conceptual:
 - **liveness/health:** el proceso está vivo;
 - **readiness:** está preparado para recibir tráfico.
 
-### 7.6 Web Next.js
+### 7.6 Web estática
 
-Compose establece `working_dir: /app/apps/web`, porque `next start` busca `.next` en el directorio actual. Arranca en `0.0.0.0:3000`, necesario para que el proxy lo alcance desde otro contenedor.
+La imagen `web` es `caddy:2-alpine` con el contenido de `apps/web/dist` y `apps/web/Caddyfile`. Escucha en el puerto 3000, que es el que el proxy compartido espera, y su healthcheck es un `wget` a `http://127.0.0.1:3000/`. Detalles en `production-deployment.md`.
 
 ### 7.7 Proxy inverso compartido (Caddy)
 
@@ -552,7 +551,7 @@ UFW quedó con política entrante restrictiva y únicamente estos puertos públi
 | 80/TCP  | HTTP y desafío ACME |
 | 443/TCP | HTTPS               |
 
-PostgreSQL, Redis, Next.js y NestJS no se abrieron. También se comprobó que Docker podía publicar 80 y 443 con un contenedor temporal.
+PostgreSQL, Redis, la web y NestJS no se abrieron. También se comprobó que Docker podía publicar 80 y 443 con un contenedor temporal.
 
 Si el proveedor ofrece un firewall externo, debe permitir los mismos puertos. UFW controla el sistema operativo; el firewall del proveedor puede bloquear el tráfico antes de que llegue al VPS.
 
@@ -781,6 +780,8 @@ Esta sección es especialmente valiosa: cada fallo revela una suposición incorr
 
 ### 14.5 Next.js no encontraba `.next`
 
+> Histórico: la web ya no usa Next.js (ahora es un build estático de Vite servido por Caddy), así que este problema no puede repetirse. Se conserva como lección.
+
 **Síntoma:** `Could not find a production build in the '.next' directory`.
 
 **Causa:** el build existía en `/app/apps/web/.next`, pero `next start` se ejecutaba desde `/app`.
@@ -875,7 +876,7 @@ Esta sección es especialmente valiosa: cada fallo revela una suposición incorr
 
 **Síntoma:** `/timeline` lanzaba `URL constructor: / is not a valid URL` tras cargar fotos reales.
 
-**Causa:** producción usa `NEXT_PUBLIC_API_URL=/v1`. El helper convertía esa URL en una base vacía y llamaba al constructor `URL` con `/` como base, algo inválido.
+**Causa:** producción usa `/v1` como URL de la API (entonces `NEXT_PUBLIC_API_URL`, hoy `VITE_API_URL`). El helper convertía esa URL en una base vacía y llamaba al constructor `URL` con `/` como base, algo inválido.
 
 **Solución:** distinguir orígenes absolutos de rutas same-origin y conservar correctamente `/v1/photos/...`.
 

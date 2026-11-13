@@ -2,14 +2,14 @@
 
 ## Decisión
 
-Se adopta un monorepo **pnpm** con `apps/web` y `apps/api`. La web usará Next.js App Router, TypeScript y Tailwind; la API será NestJS REST con TypeScript. La persistencia será PostgreSQL mediante Prisma. Docker Compose levantará PostgreSQL. No se crean aún paquetes, dependencias ni código.
+Se adopta un monorepo **pnpm** con `apps/web` y `apps/api`. La web usa React con Vite y React Router (un build estático, instalable como PWA; empezó en Next.js App Router), TypeScript y Tailwind; la API será NestJS REST con TypeScript. La persistencia será PostgreSQL mediante Prisma. Docker Compose levantará PostgreSQL. No se crean aún paquetes, dependencias ni código.
 
-| Área                | Responsabilidad                               | Decisión y justificación                                                                                                                       |
-| ------------------- | --------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
-| `apps/web`          | Experiencia temporal y sesión de navegador    | Next.js App Router facilita rutas de UI; Tailwind mantiene un sistema visual pequeño y consistente.                                            |
-| `apps/api`          | Dominio, autorización, OAuth, Drive y proxies | NestJS concentra secretos y autorización por recurso fuera del navegador.                                                                      |
-| PostgreSQL + Prisma | Estado normalizado y consultas de timeline    | Integridad relacional, índices explícitos y migraciones tipadas.                                                                               |
-| `SyncScheduler`     | Sincronizaciones asíncronas                   | Planificador en el proceso de la API: toma `SyncRun` en `QUEUED` con `FOR UPDATE SKIP LOCKED`, reintenta con backoff y reanuda por checkpoint. |
+| Área                | Responsabilidad                               | Decisión y justificación                                                                                                                         |
+| ------------------- | --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `apps/web`          | Experiencia temporal y sesión de navegador    | React Router resuelve las rutas de UI en el cliente y Vite genera archivos estáticos; Tailwind mantiene un sistema visual pequeño y consistente. |
+| `apps/api`          | Dominio, autorización, OAuth, Drive y proxies | NestJS concentra secretos y autorización por recurso fuera del navegador.                                                                        |
+| PostgreSQL + Prisma | Estado normalizado y consultas de timeline    | Integridad relacional, índices explícitos y migraciones tipadas.                                                                                 |
+| `SyncScheduler`     | Sincronizaciones asíncronas                   | Planificador en el proceso de la API: toma `SyncRun` en `QUEUED` con `FOR UPDATE SKIP LOCKED`, reintenta con backoff y reanuda por checkpoint.   |
 
 ## Límites y flujo
 

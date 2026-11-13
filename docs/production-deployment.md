@@ -1,6 +1,6 @@
 # Production deployment
 
-Production runs three long-lived services: PostgreSQL, the NestJS API (which also runs the sync scheduler) and the Next.js web application. The `migrate` service is a one-shot Prisma migration gate; the API starts only after it completes successfully.
+Production runs three long-lived services: PostgreSQL, the NestJS API (which also runs the sync scheduler) and the web application, a static build (React + Vite) served by a small Caddy image. The `migrate` service is a one-shot Prisma migration gate; the API starts only after it completes successfully.
 
 The app is served at `https://linea-de-vida.hidan.es`. Public traffic and HTTPS are handled by a shared Caddy reverse proxy that lives in `/srv/proxy` on the VPS, outside this repository.
 
@@ -32,6 +32,17 @@ The shared Caddy proxy reaches this stack through the external `proxy` network u
 Caddy routes `/v1/` to `linea-api:3001` and every other path to `linea-web:3000`, and obtains and renews TLS certificates automatically. Only `api` and `web` join the `proxy` network; PostgreSQL and migrate stay on the private `app` network. Do not give any other service these aliases, or the proxy could route traffic to the wrong container.
 
 The Caddy configuration is maintained in `/srv/proxy`, not in this repository.
+
+## Web application
+
+The web app is a single-page app built by Vite into static files (`apps/web/dist`). The `web` image is `caddy:2-alpine` with that build and `apps/web/Caddyfile`; it listens on `:3000`, so the alias `linea-web` and the shared proxy do not change.
+
+- The build takes the `VITE_API_URL` build arg (`/v1`, same origin as the page). It is baked into the JavaScript, so changing it needs a rebuild.
+- Paths with no file get `index.html` (client-side routes). `/assets/*` is hashed and cached as immutable; `index.html`, `sw.js` and `manifest.webmanifest` are always revalidated.
+- The app is an installable PWA. Its service worker caches only the app shell. `/v1/*` (API, photos, downloads) is never cached nor answered by the worker, so private photos do not outlive the session.
+- A new version is offered to the person ("Actualizar") instead of reloading by itself.
+- Icons are generated from `apps/web/public/favicon.svg` with `pnpm --filter @linea-de-vida/web icons`.
+- The web health check is `wget --spider http://127.0.0.1:3000/`.
 
 ## Deployment
 
