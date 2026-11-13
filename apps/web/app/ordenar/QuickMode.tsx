@@ -1,5 +1,3 @@
-'use client';
-
 import { useCallback, useEffect, useId, useRef, useState, type KeyboardEvent } from 'react';
 import { api, signOutIfExpired } from '../../lib/api';
 import { orderingApi } from '../../lib/ordering/client';
@@ -225,7 +223,6 @@ export function QuickMode({
                   backgroundImage: `url("${thumbnailVariantUrl(api, photo.thumbnailUrl, 640)}")`,
                 }}
               />
-              {/* eslint-disable-next-line @next/next/no-img-element -- private proxy URL */}
               <img
                 key={photo.id}
                 src={thumbnailVariantUrl(api, photo.thumbnailUrl, 1280)}

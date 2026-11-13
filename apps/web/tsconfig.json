@@ -6,23 +6,15 @@
     "noEmit": true,
     "module": "esnext",
     "moduleResolution": "bundler",
-    "baseUrl": ".",
-    "paths": {
-      "@/*": ["./*"]
-    },
-    "jsx": "preserve",
+    "types": ["vite/client"],
+    "jsx": "react-jsx",
     "esModuleInterop": true,
     "incremental": true,
-    "plugins": [
-      {
-        "name": "next"
-      }
-    ],
     "allowJs": true,
     "skipLibCheck": true,
     "resolveJsonModule": true,
     "isolatedModules": true
   },
-  "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],
-  "exclude": ["node_modules"]
+  "include": ["**/*.ts", "**/*.tsx"],
+  "exclude": ["node_modules", "dist", "dev-dist"]
 }

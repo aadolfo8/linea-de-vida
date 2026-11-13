@@ -1,7 +1,5 @@
-'use client';
-
 import { FolderOpen, Images } from 'lucide-react';
-import Link from 'next/link';
+import { Link } from '../../lib/link';
 import { useEffect, useRef, useState } from 'react';
 import { describeSource } from '../../lib/sources/sync';
 import { SOURCE_KIND } from '../../lib/sources/takeout';

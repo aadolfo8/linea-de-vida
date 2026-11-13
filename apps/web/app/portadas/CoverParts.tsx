@@ -1,5 +1,3 @@
-'use client';
-
 import { ArrowLeft, ArrowRight, X } from 'lucide-react';
 import { api } from '../../lib/api';
 import { thumbnailVariantUrl } from '../../lib/media';
@@ -34,7 +32,6 @@ export function CandidateGrid({
               }
               onClick={() => onToggle(photo)}
             >
-              {/* eslint-disable-next-line @next/next/no-img-element -- private proxy URLs, sized by the API */}
               <img
                 src={thumbnailVariantUrl(api, photo.thumbnailUrl, 640)}
                 alt=""
@@ -77,7 +74,6 @@ export function ChosenStrip({
       <ol className="cov-strip" aria-label="Fotos elegidas, en orden">
         {photos.map((photo, index) => (
           <li key={photo.id} data-chosen-id={photo.id}>
-            {/* eslint-disable-next-line @next/next/no-img-element -- private proxy URLs, sized by the API */}
             <img
               src={thumbnailVariantUrl(api, photo.thumbnailUrl, 640)}
               alt=""

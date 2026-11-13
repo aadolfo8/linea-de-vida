@@ -1,5 +1,3 @@
-'use client';
-
 import { ProtectedSurface } from '../components/ProtectedSurface';
 import { PortadasScreen } from './PortadasScreen';
 

@@ -1,5 +1,3 @@
-'use client';
-
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { previewSentence } from '../../lib/ordering/copy';
 import {
@@ -115,7 +113,6 @@ export function DateSheet({
         {previewUrls.length > 0 && (
           <div className="sp-preview" aria-hidden="true">
             {previewUrls.map((url) => (
-              // eslint-disable-next-line @next/next/no-img-element -- private proxy URLs
               <img key={url} src={url} alt="" />
             ))}
             {extraPhotos > 0 && <span>+{extraPhotos}</span>}

@@ -55,7 +55,6 @@ export function ViewerImage({
       {shown.variant === 'original' && shown.status === 'loading' && (
         <>
           {/* Keep the small preview visible until the full image is ready. */}
-          {/* eslint-disable-next-line @next/next/no-img-element -- Private media URLs rely on the browser's session cookies. */}
           <img
             className="pv-under"
             src={thumbnailSrc}
@@ -66,7 +65,6 @@ export function ViewerImage({
           />
         </>
       )}
-      {/* eslint-disable-next-line @next/next/no-img-element -- Private media URLs rely on the browser's session cookies. */}
       <img
         key={`${photo.id}-${shown.variant}-${shown.retry}`}
         className="pv-img"

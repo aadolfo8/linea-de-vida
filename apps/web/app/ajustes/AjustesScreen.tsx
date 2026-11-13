@@ -1,5 +1,3 @@
-'use client';
-
 import { Plus } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { activeDriveConnection, type Connection, type Session } from '../../lib/api';

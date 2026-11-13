@@ -1,5 +1,3 @@
-'use client';
-
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { apiJson } from '../../../lib/api';
 import { subscribeArchiveIndexUpdated } from '../../../lib/archive-index-events';

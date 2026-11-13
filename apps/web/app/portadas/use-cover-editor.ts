@@ -1,5 +1,3 @@
-'use client';
-
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { ApiError } from '../../lib/api';
 import { notifyArchiveIndexUpdated } from '../../lib/archive-index-events';

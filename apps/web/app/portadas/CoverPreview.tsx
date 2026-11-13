@@ -1,5 +1,3 @@
-'use client';
-
 import { useMemo } from 'react';
 import { api } from '../../lib/api';
 import { thumbnailVariantUrl } from '../../lib/media';
@@ -55,7 +53,6 @@ export function CoverPreview({
               zIndex: z,
             }}
           >
-            {/* eslint-disable-next-line @next/next/no-img-element -- private proxy URLs, sized by the API */}
             <img
               src={thumbnailVariantUrl(api, item.photo.thumbnailUrl, 640)}
               alt=""

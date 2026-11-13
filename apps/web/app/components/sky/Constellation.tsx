@@ -1,6 +1,4 @@
-'use client';
-
-import Link from 'next/link';
+import { Link } from '../../../lib/link';
 import {
   useEffect,
   useLayoutEffect,
@@ -375,7 +373,6 @@ export function Constellation({
             }}
           >
             {cell.photo && (
-              /* eslint-disable-next-line @next/next/no-img-element -- Private media URLs rely on the browser's session cookies. */
               <img
                 {...previewSources(api, cell.photo.thumbnailUrl, cell.w)}
                 ref={trackTileImage}

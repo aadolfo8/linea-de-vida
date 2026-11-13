@@ -1,7 +1,5 @@
-'use client';
-
 import { ArrowDownUp, ArrowLeftRight, ChevronLeft } from 'lucide-react';
-import Link from 'next/link';
+import { Link } from '../../../lib/link';
 import { useEffect, useState, type MouseEvent, type ReactNode, type Ref } from 'react';
 import type { SkyOrientation } from './orientation';
 import type { TravelTo } from './use-travel';

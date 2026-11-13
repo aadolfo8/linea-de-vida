@@ -1,5 +1,3 @@
-'use client';
-
 import { useRef } from 'react';
 import { api } from '../../lib/api';
 import { notifyArchiveIndexUpdated } from '../../lib/archive-index-events';

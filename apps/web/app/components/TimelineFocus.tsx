@@ -1,5 +1,3 @@
-'use client';
-
 import { createContext, useContext, useState, type ReactNode } from 'react';
 
 const TimelineFocusContext = createContext<{

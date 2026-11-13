@@ -1,5 +1,3 @@
-'use client';
-
 import { ProtectedSurface } from '../components/ProtectedSurface';
 import { OrdenarScreen } from './OrdenarScreen';
 

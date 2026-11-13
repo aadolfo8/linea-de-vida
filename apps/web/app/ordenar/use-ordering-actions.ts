@@ -1,5 +1,3 @@
-'use client';
-
 import { useToast } from '../../lib/use-toast';
 import { useCallback, useRef, useState } from 'react';
 import { signOutIfExpired } from '../../lib/api';

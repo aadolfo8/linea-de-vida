@@ -1,5 +1,3 @@
-'use client';
-
 import { ChevronRight, X } from 'lucide-react';
 import { useId, useRef, type KeyboardEvent } from 'react';
 import { api } from '../../lib/api';
@@ -32,7 +30,6 @@ export function SuggestionBanner({
       {examples.length > 0 && (
         <div className="ord-strip" aria-hidden="true">
           {examples.map((example) => (
-            // eslint-disable-next-line @next/next/no-img-element -- private proxy URLs
             <img
               key={example.id}
               src={thumbnailVariantUrl(api, `/v1/photos/${example.id}/thumbnail`, 640)}
@@ -246,7 +243,6 @@ export function Peek({
         >
           <X aria-hidden="true" />
         </button>
-        {/* eslint-disable-next-line @next/next/no-img-element -- private proxy URL */}
         <img
           key={photo.id}
           src={thumbnailVariantUrl(api, photo.thumbnailUrl, 1280)}

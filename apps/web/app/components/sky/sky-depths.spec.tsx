@@ -22,14 +22,14 @@ const cache = vi.hoisted(() => ({
 const router = vi.hoisted(() => ({ replace: vi.fn(), push: vi.fn() }));
 
 vi.mock('../timeline-cache', () => cache);
-vi.mock('next/navigation', () => ({
+vi.mock('../../../lib/navigation', () => ({
   usePathname: () => '/timeline',
   useRouter: () => router,
 }));
-vi.mock('next/link', async () => {
+vi.mock('../../../lib/link', async () => {
   const React = await import('react');
   return {
-    default: ({ href, children, ...props }: React.ComponentProps<'a'>) =>
+    Link: ({ href, children, ...props }: React.ComponentProps<'a'>) =>
       React.createElement('a', { href: String(href), ...props }, children),
   };
 });
@@ -487,7 +487,6 @@ describe('sky depths', () => {
 
       expect(router.replace).toHaveBeenCalledWith(
         `/timeline?returnTo=${encodeURIComponent(RETURN)}`,
-        { scroll: false },
       );
     });
 

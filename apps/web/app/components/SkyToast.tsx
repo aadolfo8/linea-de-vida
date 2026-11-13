@@ -1,6 +1,4 @@
-'use client';
-
-import Link from 'next/link';
+import { Link } from '../../lib/link';
 
 export type SkyToastProps = {
   message: string;

@@ -1,6 +1,4 @@
-'use client';
-
-import { useRouter } from 'next/navigation';
+import { useRouter } from '../../../lib/navigation';
 import { useEffect, useMemo, useState } from 'react';
 import { subscribeArchiveIndexUpdated } from '../../../lib/archive-index-events';
 import { getCachedMonthPreviews, loadMonthPreviews } from '../timeline-cache';
@@ -96,9 +94,7 @@ export function YearDepth({
   // A year without photos is not a destination: send people back to the years.
   useEffect(() => {
     if (!unavailable) return;
-    router.replace(timelineHrefWithReturn(timelineHref(), returnTo, returnLabel), {
-      scroll: false,
-    });
+    router.replace(timelineHrefWithReturn(timelineHref(), returnTo, returnLabel));
   }, [returnLabel, returnTo, router, unavailable]);
 
   useTravelEntry({

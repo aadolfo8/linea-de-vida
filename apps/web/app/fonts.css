@@ -1,0 +1,15 @@
+/* The night sky has its own type: an editorial display face, a mono for labels, a quiet UI sans. */
+@import '@fontsource-variable/bodoni-moda/wght.css';
+@import '@fontsource-variable/bodoni-moda/wght-italic.css';
+@import '@fontsource-variable/martian-mono/wght.css';
+@import '@fontsource-variable/figtree/wght.css';
+
+/*
+ * Only variables: nothing changes until a `.sky` / `.sky-scope` surface reads them, so the paper
+ * pages keep their look.
+ */
+:root {
+  --font-sky-display: 'Bodoni Moda Variable';
+  --font-sky-mono: 'Martian Mono Variable';
+  --font-sky-ui: 'Figtree Variable';
+}

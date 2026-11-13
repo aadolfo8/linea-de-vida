@@ -1,5 +1,3 @@
-'use client';
-
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ApiError, isUnauthenticated, signOutIfExpired } from '../../lib/api';

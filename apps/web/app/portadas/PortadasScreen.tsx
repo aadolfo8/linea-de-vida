@@ -1,6 +1,4 @@
-'use client';
-
-import Link from 'next/link';
+import { Link } from '../../lib/link';
 import { useEffect, useMemo, useState } from 'react';
 import { activeDriveConnection, type Session } from '../../lib/api';
 import {

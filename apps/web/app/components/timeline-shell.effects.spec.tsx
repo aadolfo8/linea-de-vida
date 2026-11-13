@@ -13,19 +13,19 @@ const navigation = vi.hoisted(() => ({
   router: { replace: vi.fn(), push: vi.fn() },
 }));
 
-vi.mock('next/navigation', () => ({
+vi.mock('../../lib/navigation', () => ({
   usePathname: () => navigation.pathname,
   useRouter: () => navigation.router,
 }));
 
-vi.mock('next/link', async () => {
+vi.mock('../../lib/link', async () => {
   const React = await import('react');
   type MockLinkProps = React.AnchorHTMLAttributes<HTMLAnchorElement> & {
     href: unknown;
     scroll?: boolean;
   };
   return {
-    default: ({ href, scroll, ...props }: MockLinkProps) => {
+    Link: ({ href, scroll, ...props }: MockLinkProps) => {
       void scroll;
       return React.createElement('a', { ...props, href: String(href) });
     },
@@ -203,14 +203,14 @@ describe('Timeline shell targets', () => {
       navigation.pathname = '/timeline/2018/5';
       await act(async () => renderRoute());
       await escape();
-      expect(navigation.router.push).toHaveBeenLastCalledWith('/timeline/2018', { scroll: false });
+      expect(navigation.router.push).toHaveBeenLastCalledWith('/timeline/2018');
       expect(peekPendingTravel()).toMatchObject({ mode: 'out', landKey: '5' });
 
       navigation.router.push.mockClear();
       navigation.pathname = '/timeline/2018';
       await act(async () => renderRoute());
       await escape();
-      expect(navigation.router.push).toHaveBeenLastCalledWith('/timeline', { scroll: false });
+      expect(navigation.router.push).toHaveBeenLastCalledWith('/timeline');
       expect(peekPendingTravel()).toMatchObject({ mode: 'out', landKey: '2018' });
     });
 
@@ -247,7 +247,7 @@ describe('Timeline shell targets', () => {
       expect(navigation.router.push).not.toHaveBeenCalled();
 
       await escape();
-      expect(navigation.router.push).toHaveBeenCalledWith('/timeline', { scroll: false });
+      expect(navigation.router.push).toHaveBeenCalledWith('/timeline');
     });
 
     it('keeps the way back to Organizar on every link that goes up', async () => {
@@ -265,7 +265,7 @@ describe('Timeline shell targets', () => {
       );
       expect(container.querySelector('aside[aria-label="Continuar organizando"]')).not.toBeNull();
       await escape();
-      expect(navigation.router.push).toHaveBeenLastCalledWith(expected, { scroll: false });
+      expect(navigation.router.push).toHaveBeenLastCalledWith(expected);
     });
 
     it('goes up on a trackpad pinch-out but leaves a ctrl+mouse-wheel to page zoom', async () => {
@@ -300,7 +300,7 @@ describe('Timeline shell targets', () => {
       });
       expect(pinches.some((pinch) => pinch.defaultPrevented)).toBe(true);
       expect(pinches[0]!.defaultPrevented).toBe(false);
-      expect(navigation.router.push).toHaveBeenCalledWith('/timeline', { scroll: false });
+      expect(navigation.router.push).toHaveBeenCalledWith('/timeline');
     });
   });
 

@@ -30,7 +30,10 @@ const viewer = vi.hoisted(() => ({
 }));
 
 vi.mock('../timeline-cache', () => cache);
-vi.mock('next/navigation', () => ({ usePathname: () => '/timeline', useRouter: () => router }));
+vi.mock('../../../lib/navigation', () => ({
+  usePathname: () => '/timeline',
+  useRouter: () => router,
+}));
 vi.mock('../TimelinePhotoViewer', () => ({
   TimelinePhotoViewer: (props: NonNullable<typeof viewer.props>) => {
     viewer.props = props;
@@ -365,7 +368,6 @@ describe('MonthDepth', () => {
 
     expect(router.replace).toHaveBeenCalledWith(
       `/timeline/2004?returnTo=${encodeURIComponent(RETURN)}`,
-      { scroll: false },
     );
     expect(tiles()).toHaveLength(0);
   });

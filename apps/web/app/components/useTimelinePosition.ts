@@ -1,5 +1,3 @@
-'use client';
-
 import { useEffect, useLayoutEffect, useRef } from 'react';
 
 const positions = new Map<string, number>();

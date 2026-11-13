@@ -1,5 +1,3 @@
-'use client';
-
 import { useId, useState } from 'react';
 import { pileCopy } from '../../lib/ordering/copy';
 import { toDateText } from '../../lib/ordering/tree';

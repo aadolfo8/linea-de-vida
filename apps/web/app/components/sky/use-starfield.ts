@@ -1,5 +1,3 @@
-'use client';
-
 import { useEffect, type RefObject } from 'react';
 import { seededRng } from './rng';
 import { createStars, drawStars, starCount } from './starfield';

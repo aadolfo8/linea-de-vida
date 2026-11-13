@@ -95,7 +95,6 @@ export function ViewerStrip({
           tabIndex={photoIndex === index ? 0 : -1}
           onClick={() => onSelect(photoIndex, photoIndex > index ? 1 : -1)}
         >
-          {/* eslint-disable-next-line @next/next/no-img-element -- Private media URLs rely on the browser's session cookies. */}
           <img
             src={thumbnailVariantUrl(api, photo.thumbnailUrl, 640)}
             alt=""

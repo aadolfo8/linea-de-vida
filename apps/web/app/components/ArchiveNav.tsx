@@ -1,8 +1,6 @@
-'use client';
-
 import { useEffect, useId, useRef, useState } from 'react';
-import Link from 'next/link';
-import { usePathname, useRouter } from 'next/navigation';
+import { Link } from '../../lib/link';
+import { usePathname, useRouter } from '../../lib/navigation';
 import { CalendarDays, FolderCog, Images, Menu, Settings2 } from 'lucide-react';
 import { Button } from '../../components/ui/button';
 import { apiJson } from '../../lib/api';
@@ -63,7 +61,6 @@ export function ArchiveNav({
     try {
       await apiJson<void>('/auth/logout', { method: 'POST' });
       router.replace('/');
-      router.refresh();
     } catch {
       setSignOutError(true);
       setSigningOut(false);
