@@ -18,6 +18,7 @@ import { ManualDateService } from '../src/manual-date.service';
 import { OrderingService } from '../src/ordering.service';
 import { PhotoVisibilityService } from '../src/photo-visibility.service';
 import { SyncService } from '../src/sync.service';
+import { SyncScheduler } from '../src/sync-scheduler';
 
 const url = process.env.TEST_DATABASE_URL;
 const FOLDER = 'application/vnd.google-apps.folder';
@@ -97,6 +98,66 @@ describe.skipIf(!url)('PostgreSQL integration', () => {
   afterAll(async () => {
     await prisma.user.deleteMany({ where: { email: 'it-postgres@example.test' } });
     await prisma.$disconnect();
+  });
+
+  it('scheduler claims one due run at a time, retries with backoff and recovers stale runs', async () => {
+    const scheduler = new SyncScheduler(prisma as any, sync, {} as any);
+    await prisma.syncRun.deleteMany({ where: { photoSourceId: sourceId } });
+    // Only one run per source may be active, so each run gets its own source.
+    const base = await prisma.photoSource.findUniqueOrThrow({ where: { id: sourceId } });
+    const extra = await Promise.all(
+      ['q2', 'q3'].map((folder) =>
+        prisma.photoSource.create({
+          data: {
+            userId,
+            oauthConnectionId: base.oauthConnectionId,
+            driveFolderId: folder,
+            name: folder,
+            type: 'GENERIC',
+          },
+        }),
+      ),
+    );
+    const sources = [sourceId, ...extra.map((source) => source.id)];
+    const [older, newer, later] = await Promise.all([
+      prisma.syncRun.create({ data: { photoSourceId: sources[0]!, createdAt: new Date(1_000) } }),
+      prisma.syncRun.create({ data: { photoSourceId: sources[1]!, createdAt: new Date(2_000) } }),
+      prisma.syncRun.create({
+        data: {
+          photoSourceId: sources[2]!,
+          createdAt: new Date(500),
+          nextAttemptAt: new Date(Date.now() + 60_000),
+        },
+      }),
+    ]);
+    // Concurrent claims never hand out the same run twice, and a run waiting for its backoff is skipped.
+    const claimed = await Promise.all([
+      scheduler.claimNext(),
+      scheduler.claimNext(),
+      scheduler.claimNext(),
+    ]);
+    expect(claimed.filter(Boolean).sort()).toEqual([older.id, newer.id].sort());
+    expect((await prisma.syncRun.findUniqueOrThrow({ where: { id: older.id } })).status).toBe(
+      'RUNNING',
+    );
+    expect((await prisma.syncRun.findUniqueOrThrow({ where: { id: later.id } })).status).toBe(
+      'QUEUED',
+    );
+
+    await scheduler.retryOrFail(older.id);
+    const retried = await prisma.syncRun.findUniqueOrThrow({ where: { id: older.id } });
+    expect(retried).toMatchObject({ status: 'QUEUED', attempts: 1 });
+    expect(retried.nextAttemptAt!.getTime()).toBeGreaterThan(Date.now());
+
+    await prisma.syncRun.update({ where: { id: newer.id }, data: { updatedAt: new Date(0) } });
+    expect(await scheduler.recoverStale()).toBeGreaterThanOrEqual(1);
+    expect((await prisma.syncRun.findUniqueOrThrow({ where: { id: newer.id } })).status).toBe(
+      'QUEUED',
+    );
+    await prisma.syncRun.deleteMany({ where: { photoSourceId: { in: sources } } });
+    await prisma.photoSource.deleteMany({
+      where: { id: { in: extra.map((source) => source.id) } },
+    });
   });
 
   it('re-importing an export adds only new photos; deleting the old export keeps them all', async () => {

@@ -63,7 +63,7 @@ export function loadRuntimeConfig(env: NodeJS.ProcessEnv = process.env): Runtime
     }
     if (placeholder.test(tokenKey) || decoded.length !== 32)
       throw new Error('TOKEN_ENCRYPTION_KEY must decode to exactly 32 bytes.');
-    for (const name of ['DATABASE_URL', 'REDIS_URL', 'GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET'])
+    for (const name of ['DATABASE_URL', 'GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET'])
       if (!env[name] || placeholder.test(env[name]!))
         throw new Error(`${name} is required in production.`);
     for (const name of ['GOOGLE_LOGIN_REDIRECT_URI', 'GOOGLE_DRIVE_REDIRECT_URI']) {
@@ -198,21 +198,6 @@ export function createMemoryRateLimitStore(maxBuckets = MAX_MEMORY_RATE_LIMIT_BU
   if (!Number.isInteger(maxBuckets) || maxBuckets < 1)
     throw new Error('maxBuckets must be a positive integer.');
   return new MemoryRateLimitStore(maxBuckets);
-}
-
-export function createResilientRateLimitStore(
-  primary: RateLimitStore,
-  fallback: RateLimitStore = createMemoryRateLimitStore(),
-): RateLimitStore {
-  return {
-    increment: async (key, windowMs) => {
-      try {
-        return await primary.increment(key, windowMs);
-      } catch {
-        return fallback.increment(key, windowMs);
-      }
-    },
-  };
 }
 
 export function createRateLimitMiddleware(

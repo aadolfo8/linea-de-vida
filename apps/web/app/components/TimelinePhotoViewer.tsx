@@ -1,7 +1,7 @@
 'use client';
 
 import { Minus, Plus, X } from 'lucide-react';
-import { useReducedMotion } from 'motion/react';
+import { useReducedMotion } from '../../lib/use-reduced-motion';
 import {
   useCallback,
   useEffect,
@@ -9,16 +9,19 @@ import {
   useRef,
   useState,
   type KeyboardEvent,
-  type MouseEvent as ReactMouseEvent,
-  type PointerEvent,
 } from 'react';
 import { api } from '../../lib/api';
 import { mediaUrl, thumbnailVariantUrl } from '../../lib/media';
 import './photo-viewer.css';
+import { ArrowIcon, freshShown, ViewerImage, type Shown } from './viewer-image';
+import { ViewerNotes, ViewerStrip } from './viewer-chrome';
+import { useIdleChrome } from './use-idle-chrome';
+import { EASE, useViewerZoom } from './use-viewer-zoom';
+import { useViewerGestures } from './use-viewer-gestures';
+import { focusableSelector, isEditable, readStage, trapTab } from './viewer-dom';
 import {
   photoDateLabel,
   photoPrecisionLabel,
-  wrappedFocusIndex,
   type TimelinePhoto,
   type TimelinePhotoPage,
 } from './timeline-model';
@@ -27,44 +30,17 @@ import {
   IDENTITY,
   KEY_PAN_STEP,
   KEY_ZOOM_STEP,
-  clampView,
-  doubleTapScale,
   fitSize,
   flipTransform,
   isRectVisible,
   isZoomed,
   stageBox,
-  wheelScale,
-  zoomAround,
-  type Size,
   type StageBox,
-  type View,
 } from './viewer-zoom';
 
-const focusableSelector =
-  'button:not(:disabled), a[href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"]), [contenteditable="true"]';
-
-const EASE = 'cubic-bezier(.22,1,.36,1)';
-/** Chrome fades away after this long without pointer or keyboard activity. */
-const IDLE_DELAY = 2600;
 const OPEN_DURATION = 520;
 const CLOSE_DURATION = 380;
-const SWIPE_DISTANCE = 70;
-const DISMISS_DISTANCE = 110;
-const TAP_SLOP = 8;
-const DOUBLE_TAP_WINDOW = 320;
 const ORIGINAL_MIME = /^image\/(jpeg|png|webp|gif)$/i;
-
-const isEditable = (target: EventTarget | null) =>
-  target instanceof HTMLInputElement ||
-  target instanceof HTMLTextAreaElement ||
-  target instanceof HTMLSelectElement ||
-  (target instanceof HTMLElement && target.isContentEditable);
-
-const readStage = (): Size =>
-  typeof window === 'undefined'
-    ? { width: 1280, height: 800 }
-    : { width: window.innerWidth, height: window.innerHeight };
 
 /** Where the viewer grows from and shrinks back to: the tile the photo was opened from. */
 export type ViewerSource = {
@@ -75,20 +51,6 @@ export type ViewerSource = {
   /** Gives focus back to that tile; false when it is gone. */
   focusTile?: (photoId: string) => boolean;
 };
-
-type Gesture = {
-  mode: 'pan' | 'swipe' | 'pinch';
-  startX: number;
-  startY: number;
-  view: View;
-  distance: number;
-  axis: 'x' | 'y' | null;
-  moved: boolean;
-  onStage: boolean;
-};
-
-const gap = (a: { x: number; y: number }, b: { x: number; y: number }) =>
-  Math.hypot(a.x - b.x, a.y - b.y);
 
 export function TimelinePhotoViewer({
   photos,
@@ -123,9 +85,6 @@ export function TimelinePhotoViewer({
   const [measured, setMeasured] = useState<{ id: string; width: number; height: number } | null>(
     null,
   );
-  const [zoomPercent, setZoomPercent] = useState(100);
-  const [dragging, setDragging] = useState(false);
-  const [idle, setIdle] = useState(false);
   const [closing, setClosing] = useState(false);
 
   const backdrop = useRef<HTMLDivElement>(null);
@@ -137,19 +96,8 @@ export function TimelinePhotoViewer({
   const toolsEl = useRef<HTMLDivElement>(null);
   const closeButton = useRef<HTMLButtonElement>(null);
   const loadingMoreRef = useRef(false);
-  const viewRef = useRef<View>(IDENTITY);
-  const stageRef = useRef<StageBox>(stage);
-  const fitRef = useRef<Size>({ width: 1, height: 1 });
-  const naturalRef = useRef<Size | null>(null);
   const direction = useRef<-1 | 0 | 1>(0);
-  const pointers = useRef(new Map<number, { x: number; y: number }>());
-  const gesture = useRef<Gesture | null>(null);
-  const lastTap = useRef<{ time: number; x: number; y: number } | null>(null);
-  const touchToggledAt = useRef(0);
   const closingRef = useRef(false);
-  const idleTimer = useRef(0);
-  const overChrome = useRef(false);
-  const keyboardInput = useRef(false);
   const preloaded = useRef(new Set<string>());
   const currentId = useRef<string | undefined>(undefined);
   const sourceRef = useRef(source);
@@ -160,6 +108,9 @@ export function TimelinePhotoViewer({
     onCloseRef.current = onClose;
     onPhotoChangeRef.current = onPhotoChange;
   });
+
+  const { zoomPercent, viewRef, stageRef, fitRef, naturalRef, writeView, zoomTo, panBy, pointOf } =
+    useViewerZoom(frame, reduceMotion, stage);
 
   const selected = loadedPhotos[index];
   const [shownState, setShownState] = useState<Shown | null>(null);
@@ -185,20 +136,6 @@ export function TimelinePhotoViewer({
   useEffect(() => {
     if (selected && selected.id !== openedOn.current) onPhotoChangeRef.current?.(selected.id);
   }, [selected]);
-
-  const writeView = useCallback(
-    (next: View, animate = false) => {
-      const clamped = clampView(next, fitRef.current, stageRef.current);
-      viewRef.current = clamped;
-      const element = frame.current;
-      if (element) {
-        element.style.transition = animate && !reduceMotion ? `transform .35s ${EASE}` : 'none';
-        element.style.transform = `translate3d(${clamped.x}px,${clamped.y}px,0) scale(${clamped.scale})`;
-      }
-      setZoomPercent(Math.round(clamped.scale * 100));
-    },
-    [reduceMotion],
-  );
 
   // A new fit (resize, or the real size of the photo arriving) re-clamps the current view.
   useLayoutEffect(() => {
@@ -239,25 +176,7 @@ export function TimelinePhotoViewer({
     };
   }, [measureStage]);
 
-  // Idle chrome: it fades after a still moment, but never from under a keyboard user.
-  const poke = useCallback((keyboard = false) => {
-    keyboardInput.current = keyboard;
-    setIdle(false);
-    window.clearTimeout(idleTimer.current);
-    idleTimer.current = window.setTimeout(() => {
-      const active = document.activeElement;
-      const focusInChrome =
-        active instanceof HTMLElement &&
-        active !== dialog.current &&
-        dialog.current?.contains(active);
-      if (overChrome.current || (keyboardInput.current && focusInChrome)) return;
-      setIdle(true);
-    }, IDLE_DELAY);
-  }, []);
-  useEffect(() => {
-    poke();
-    return () => window.clearTimeout(idleTimer.current);
-  }, [poke]);
+  const { idle, poke, overChrome } = useIdleChrome(dialog);
 
   useEffect(() => {
     const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
@@ -482,199 +401,19 @@ export function TimelinePhotoViewer({
     animation.finished.then(finish, finish);
   }, [reduceMotion]);
 
-  const pointOf = (clientX: number, clientY: number) => ({
-    x: clientX - stageRef.current.width / 2,
-    y: clientY - (stageRef.current.top + stageRef.current.height / 2),
+  const { dragging, onPointerDown, onPointerMove, onPointerUp, onDoubleClick } = useViewerGestures({
+    frame,
+    stageEl,
+    view: { viewRef, stageRef, fitRef, writeView, zoomTo, pointOf },
+    poke,
+    step,
+    requestClose,
   });
-
-  const zoomTo = useCallback(
-    (scale: number, point = { x: 0, y: 0 }, animate = true) => {
-      writeView(
-        zoomAround(viewRef.current, scale, point, fitRef.current, stageRef.current),
-        animate,
-      );
-    },
-    [writeView],
-  );
-  const panBy = useCallback(
-    (x: number, y: number) => {
-      const view = viewRef.current;
-      writeView({ ...view, x: view.x + x, y: view.y + y }, true);
-    },
-    [writeView],
-  );
-
-  // Wheel and trackpad pinch zoom around the pointer; React's wheel listener is passive.
-  useEffect(() => {
-    const element = stageEl.current;
-    if (!element) return;
-    const onWheel = (event: WheelEvent) => {
-      event.preventDefault();
-      poke();
-      const view = viewRef.current;
-      zoomTo(
-        wheelScale(view.scale, event.deltaY, event.ctrlKey, event.deltaMode),
-        pointOf(event.clientX, event.clientY),
-        false,
-      );
-    };
-    element.addEventListener('wheel', onWheel, { passive: false });
-    return () => element.removeEventListener('wheel', onWheel);
-  }, [poke, zoomTo]);
-
-  const beginGesture = (pointerId: number): Gesture | null => {
-    const first = pointers.current.get(pointerId);
-    if (!first) return null;
-    return {
-      mode: isZoomed(viewRef.current) ? 'pan' : 'swipe',
-      startX: first.x,
-      startY: first.y,
-      view: viewRef.current,
-      distance: 0,
-      axis: null,
-      moved: false,
-      onStage: false,
-    };
-  };
-
-  const onPointerDown = (event: PointerEvent<HTMLDivElement>) => {
-    if (event.pointerType === 'mouse' && event.button !== 0) return;
-    try {
-      event.currentTarget.setPointerCapture?.(event.pointerId);
-    } catch {
-      // Synthetic pointers cannot be captured; the gesture still works without it.
-    }
-    pointers.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
-    if (pointers.current.size === 1) {
-      const next = beginGesture(event.pointerId);
-      if (next) gesture.current = { ...next, onStage: event.target === event.currentTarget };
-    } else if (pointers.current.size === 2) {
-      const [a, b] = [...pointers.current.values()];
-      gesture.current = {
-        mode: 'pinch',
-        startX: 0,
-        startY: 0,
-        view: viewRef.current,
-        distance: Math.max(1, gap(a!, b!)),
-        axis: null,
-        moved: true,
-        onStage: false,
-      };
-    }
-    setDragging(gesture.current?.mode === 'pan');
-  };
-
-  const dragFrame = (x: number, y: number, fade: number) => {
-    const element = frame.current;
-    if (!element) return;
-    element.style.transition = 'none';
-    element.style.transform = `translate3d(${x}px,${y}px,0) scale(${1 - Math.min(0.2, y / 1200)})`;
-    element.style.opacity = String(fade);
-  };
-  const settleFrame = () => {
-    const element = frame.current;
-    if (!element) return;
-    element.style.opacity = '';
-    writeView(viewRef.current, true);
-  };
-
-  const onPointerMove = (event: PointerEvent<HTMLDivElement>) => {
-    poke();
-    const active = gesture.current;
-    if (!active || !pointers.current.has(event.pointerId)) return;
-    pointers.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
-    const dx = event.clientX - active.startX;
-    const dy = event.clientY - active.startY;
-    if (active.mode === 'pinch') {
-      if (pointers.current.size < 2) return;
-      const [a, b] = [...pointers.current.values()];
-      const middle = pointOf((a!.x + b!.x) / 2, (a!.y + b!.y) / 2);
-      writeView(
-        zoomAround(
-          active.view,
-          active.view.scale * (gap(a!, b!) / active.distance),
-          middle,
-          fitRef.current,
-          stageRef.current,
-        ),
-      );
-      return;
-    }
-    if (Math.hypot(dx, dy) > TAP_SLOP) active.moved = true;
-    if (active.mode === 'pan') {
-      writeView({ ...active.view, x: active.view.x + dx, y: active.view.y + dy });
-      return;
-    }
-    if (!active.axis && Math.hypot(dx, dy) > TAP_SLOP)
-      active.axis = Math.abs(dx) >= Math.abs(dy) ? 'x' : 'y';
-    if (active.axis === 'x') dragFrame(dx * 0.6, 0, 1 - Math.min(0.5, Math.abs(dx) / 600));
-    else if (active.axis === 'y')
-      dragFrame(dx * 0.2, Math.max(0, dy) * 0.6, 1 - Math.min(0.5, Math.max(0, dy) / 500));
-  };
-
-  const onPointerUp = (event: PointerEvent<HTMLDivElement>) => {
-    const active = gesture.current;
-    if (!pointers.current.has(event.pointerId)) return;
-    pointers.current.delete(event.pointerId);
-    setDragging(false);
-    if (active?.mode === 'swipe') {
-      const dx = event.clientX - active.startX;
-      const dy = event.clientY - active.startY;
-      if (active.axis === 'x' && Math.abs(dx) > SWIPE_DISTANCE && event.type === 'pointerup') {
-        settleFrame();
-        step(dx < 0 ? 1 : -1);
-      } else if (active.axis === 'y' && dy > DISMISS_DISTANCE && event.type === 'pointerup') {
-        settleFrame();
-        requestClose();
-      } else if (active.axis) {
-        settleFrame();
-      } else if (!active.moved && event.type === 'pointerup') {
-        const now = Date.now();
-        const previous = lastTap.current;
-        if (
-          event.pointerType !== 'mouse' &&
-          previous &&
-          now - previous.time < DOUBLE_TAP_WINDOW &&
-          Math.hypot(event.clientX - previous.x, event.clientY - previous.y) < 30
-        ) {
-          lastTap.current = null;
-          touchToggledAt.current = now;
-          zoomTo(doubleTapScale(viewRef.current), pointOf(event.clientX, event.clientY));
-        } else {
-          lastTap.current = { time: now, x: event.clientX, y: event.clientY };
-          if (active.onStage && event.pointerType === 'mouse') requestClose();
-        }
-      }
-    }
-    const [rest] = [...pointers.current.entries()];
-    if (rest) {
-      const next = beginGesture(rest[0]);
-      gesture.current = next ? { ...next, moved: true } : null;
-    } else gesture.current = null;
-  };
-
-  const onDoubleClick = (event: ReactMouseEvent<HTMLDivElement>) => {
-    // A double tap already toggled; browsers may still report it as a double click.
-    if (Date.now() - touchToggledAt.current < 500) return;
-    zoomTo(doubleTapScale(viewRef.current), pointOf(event.clientX, event.clientY));
-  };
 
   const keyDown = (event: KeyboardEvent<HTMLElement>) => {
     poke(true);
     if (event.key === 'Tab') {
-      const focusable = [
-        ...(dialog.current?.querySelectorAll<HTMLElement>(focusableSelector) ?? []),
-      ].filter((element) => element.tabIndex >= 0);
-      const currentIndex = focusable.indexOf(document.activeElement as HTMLElement);
-      const atBoundary = event.shiftKey
-        ? currentIndex <= 0
-        : currentIndex === -1 || currentIndex === focusable.length - 1;
-      if (atBoundary) {
-        event.preventDefault();
-        const nextIndex = wrappedFocusIndex(currentIndex, focusable.length, event.shiftKey);
-        if (nextIndex >= 0) focusable[nextIndex]!.focus();
-        else dialog.current?.focus();
-      }
+      trapTab(event, dialog.current);
       return;
     }
     if (isEditable(event.target) || event.ctrlKey || event.metaKey || event.altKey) return;
@@ -851,154 +590,25 @@ export function TimelinePhotoViewer({
           <ArrowIcon direction="right" />
         </button>
 
-        <div className="pv-notes">
-          {shown!.status === 'loading' && (
-            <p className="pv-note" role="status" aria-live="polite">
-              {shown!.variant === 'original'
-                ? 'Cargando fotografía en alta calidad…'
-                : 'Cargando fotografía…'}
-            </p>
-          )}
-          {shown!.status === 'ready' && shown!.fallback && (
-            <p className="pv-note" role="status" aria-live="polite">
-              El original no se pudo cargar; se muestra la miniatura.
-            </p>
-          )}
-          {shown!.status === 'error' && (
-            <div className="pv-note" role="alert">
-              <p>No se pudo cargar la fotografía.</p>
-              <button
-                type="button"
-                onClick={() => updateShown({ status: 'loading', retry: shown!.retry + 1 })}
-              >
-                Reintentar miniatura
-              </button>
-            </div>
-          )}
-          {isDownloadOnly && (
-            <p className="pv-note pv-ui" {...keepVisible}>
-              <span>Este formato se muestra con una vista previa.</span>
-              <a href={mediaUrl(api, `/v1/photos/${selected.id}/content`)}>Descargar original</a>
-            </p>
-          )}
-          {loadingMore && (
-            <p className="pv-note" role="status" aria-live="polite">
-              Cargando más fotografías…
-            </p>
-          )}
-          {loadMoreError && (
-            <p className="pv-note pv-ui" {...keepVisible}>
-              <button type="button" onClick={() => void fetchNextPage()}>
-                Reintentar carga
-              </button>
-            </p>
-          )}
-        </div>
+        <ViewerNotes
+          shown={shown!}
+          photo={selected}
+          isDownloadOnly={isDownloadOnly}
+          loadingMore={loadingMore}
+          loadMoreError={loadMoreError}
+          keepVisible={keepVisible}
+          onRetryImage={() => updateShown({ status: 'loading', retry: shown!.retry + 1 })}
+          onRetryMore={() => void fetchNextPage()}
+        />
 
-        <nav ref={strip} className="pv-strip pv-ui" aria-label="Fotos" {...keepVisible}>
-          {loadedPhotos.map((photo, photoIndex) => (
-            <button
-              key={photo.id}
-              type="button"
-              aria-label={`Foto ${photoIndex + 1}: ${photoDateLabel(photo)}`}
-              aria-current={photoIndex === index ? 'true' : undefined}
-              tabIndex={photoIndex === index ? 0 : -1}
-              onClick={() => select(photoIndex, photoIndex > index ? 1 : -1)}
-            >
-              {/* eslint-disable-next-line @next/next/no-img-element -- Private media URLs rely on the browser's session cookies. */}
-              <img
-                src={thumbnailVariantUrl(api, photo.thumbnailUrl, 640)}
-                alt=""
-                width={photo.dimensions?.width}
-                height={photo.dimensions?.height}
-                loading="lazy"
-                decoding="async"
-                draggable={false}
-              />
-            </button>
-          ))}
-        </nav>
+        <ViewerStrip
+          stripRef={strip}
+          photos={loadedPhotos}
+          index={index}
+          keepVisible={keepVisible}
+          onSelect={select}
+        />
       </section>
     </div>
-  );
-}
-
-function ArrowIcon({ direction }: { direction: 'left' | 'right' }) {
-  return (
-    <svg viewBox="0 0 24 24" aria-hidden="true">
-      <path d={direction === 'left' ? 'M15 5l-7 7 7 7' : 'M9 5l7 7-7 7'} />
-    </svg>
-  );
-}
-
-/** What the viewer is currently trying to show for the open photo. */
-type Shown = {
-  id: string;
-  variant: 'thumbnail' | 'original';
-  status: 'loading' | 'ready' | 'error';
-  /** Bumped to remount the image when the thumbnail is retried. */
-  retry: number;
-  /** The original failed and the thumbnail stands in for it. */
-  fallback: boolean;
-};
-
-const freshShown = (photo: TimelinePhoto): Shown => ({
-  id: photo.id,
-  variant: ORIGINAL_MIME.test(photo.mimeType) ? 'original' : 'thumbnail',
-  status: 'loading',
-  retry: 0,
-  fallback: false,
-});
-
-/**
- * The photo itself: the thumbnail first, then the original on top once it has loaded. The
- * parent owns the loading, fallback and retry state so its notices stay outside the zoomed frame.
- */
-function ViewerImage({
-  photo,
-  shown,
-  onLoad,
-  onError,
-}: {
-  photo: TimelinePhoto;
-  shown: Shown;
-  onLoad: (width: number, height: number) => void;
-  onError: () => void;
-}) {
-  const thumbnailSrc = thumbnailVariantUrl(api, photo.thumbnailUrl, 1280);
-  const src =
-    shown.variant === 'original' ? mediaUrl(api, `/v1/photos/${photo.id}/content`) : thumbnailSrc;
-
-  return (
-    <>
-      {shown.variant === 'original' && shown.status === 'loading' && (
-        <>
-          {/* Keep the small preview visible until the full image is ready. */}
-          {/* eslint-disable-next-line @next/next/no-img-element -- Private media URLs rely on the browser's session cookies. */}
-          <img
-            className="pv-under"
-            src={thumbnailSrc}
-            alt=""
-            aria-hidden="true"
-            loading="eager"
-            draggable={false}
-          />
-        </>
-      )}
-      {/* eslint-disable-next-line @next/next/no-img-element -- Private media URLs rely on the browser's session cookies. */}
-      <img
-        key={`${photo.id}-${shown.variant}-${shown.retry}`}
-        className="pv-img"
-        src={src}
-        alt={photo.fileName}
-        data-source={shown.variant}
-        data-ready={shown.status === 'ready'}
-        draggable={false}
-        onLoad={(event) =>
-          onLoad(event.currentTarget.naturalWidth, event.currentTarget.naturalHeight)
-        }
-        onError={onError}
-      />
-    </>
   );
 }

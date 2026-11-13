@@ -3,11 +3,20 @@ import { Readable, Writable } from 'node:stream';
 import { describe, expect, it, vi } from 'vitest';
 import sharp from 'sharp';
 import { DriveAdapter, DriveRequestError } from '../src/drive';
+import { mkdtemp, readdir, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { MediaProxyService, PrivateThumbnailCache } from '../src/media-proxy.service';
+import { ThumbnailStore } from '../src/thumbnail-store';
 
 class ResponseMock extends Writable {
   readonly headers = new Map<string, string>();
   readonly chunks: Buffer[] = [];
+  code = 200;
+  status(code: number) {
+    this.code = code;
+    return this;
+  }
   set(name: string | Record<string, string>, value?: string) {
     if (typeof name === 'string') this.headers.set(name, value!);
     else Object.entries(name).forEach(([key, header]) => this.headers.set(key, header));
@@ -52,8 +61,11 @@ class FakeDrive extends DriveAdapter {
   }
 }
 
-const request = (query: Record<string, string> = {}) =>
-  Object.assign(new EventEmitter(), { query }) as unknown as import('express').Request;
+const request = (query: Record<string, string> = {}, headers: Record<string, string> = {}) =>
+  Object.assign(new EventEmitter(), {
+    query,
+    get: (name: string) => headers[name],
+  }) as unknown as import('express').Request;
 const activeSource = () => ({
   status: 'ACTIVE',
   connection: { status: 'ACTIVE', refreshTokenCiphertext: null },
@@ -123,7 +135,9 @@ describe('media proxy', () => {
     const metadata = await sharp(output).metadata();
     expect(metadata).toMatchObject({ format: 'webp', width: 640, height: 427 });
     expect(response.headers.get('Content-Type')).toBe('image/webp');
-    expect(response.headers.get('Cache-Control')).toBe('private, max-age=86400, no-transform');
+    expect(response.headers.get('Cache-Control')).toBe(
+      'private, max-age=31536000, immutable, no-transform',
+    );
     expect(drive.contentCalls).toBe(1);
     // The fake preview is not an image: it was tried, rejected by the resize and replaced.
     expect(drive.thumbnailCalls).toBe(1);
@@ -151,7 +165,9 @@ describe('media proxy', () => {
       expect(drive.contentCalls).toBe(0);
       const metadata = await sharp(Buffer.concat(response.chunks)).metadata();
       expect(metadata).toMatchObject({ format: 'webp', width: 640, height: 427 });
-      expect(response.headers.get('Cache-Control')).toBe('private, max-age=86400, no-transform');
+      expect(response.headers.get('Cache-Control')).toBe(
+        'private, max-age=31536000, immutable, no-transform',
+      );
     });
 
     it('uses the original when the preview is refused or is not an image', async () => {
@@ -504,5 +520,114 @@ describe('media proxy', () => {
     if (previous === undefined) delete process.env.MEDIA_PROXY_TIMEOUT_MS;
     else process.env.MEDIA_PROXY_TIMEOUT_MS = previous;
     vi.useRealTimers();
+  });
+});
+
+describe('persistent thumbnails', () => {
+  const original = () =>
+    sharp({ create: { width: 1800, height: 1200, channels: 3, background: '#6b8e23' } })
+      .jpeg()
+      .toBuffer();
+  const setup = async (photoExtra: Record<string, unknown> = {}) => {
+    const dir = await mkdtemp(join(tmpdir(), 'thumbs-'));
+    const store = new ThumbnailStore({ THUMBNAIL_DIR: dir } as NodeJS.ProcessEnv);
+    const drive = new FakeDrive();
+    const image = await original();
+    drive.getContentStream = async () => {
+      drive.contentCalls++;
+      return { stream: Readable.from(image), contentType: 'image/jpeg' };
+    };
+    const photo = ownerPhoto({ contentKey: 'md5:abc:10', ...photoExtra });
+    const proxy = new MediaProxyService(
+      { photo: { findFirst: vi.fn(async () => photo) } } as any,
+      drive,
+      store,
+    );
+    return { dir, store, drive, proxy };
+  };
+
+  it('serves the second request from disk without touching Drive', async () => {
+    const { dir, drive, proxy } = await setup();
+    try {
+      const first = new ResponseMock();
+      await proxy.thumbnail('owner', 'photo-owner', request({ width: '1280' }), first as any);
+      await new Promise((resolve) => setTimeout(resolve, 50)); // the write is not awaited
+      const calls = drive.contentCalls + drive.thumbnailCalls;
+      expect(calls).toBeGreaterThan(0);
+
+      const second = new ResponseMock();
+      const fresh = new MediaProxyService(
+        {
+          photo: { findFirst: vi.fn(async () => ownerPhoto({ contentKey: 'md5:abc:10' })) },
+        } as any,
+        drive,
+        new ThumbnailStore({ THUMBNAIL_DIR: dir } as NodeJS.ProcessEnv),
+      );
+      await fresh.thumbnail('owner', 'photo-owner', request({ width: '1280' }), second as any);
+
+      expect(drive.contentCalls + drive.thumbnailCalls).toBe(calls);
+      expect(Buffer.concat(second.chunks).equals(Buffer.concat(first.chunks))).toBe(true);
+      expect(second.headers.get('ETag')).toBe(first.headers.get('ETag'));
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('answers 304 to a matching ETag without reading disk or Drive', async () => {
+    const { dir, store, drive, proxy } = await setup();
+    try {
+      const etag = store.etag('md5:abc:10', 640);
+      const response = new ResponseMock();
+      await proxy.thumbnail(
+        'owner',
+        'photo-owner',
+        request({ width: '640' }, { 'If-None-Match': etag }),
+        response as any,
+      );
+      expect(response.code).toBe(304);
+      expect(response.headers.get('ETag')).toBe(etag);
+      expect(drive.contentCalls + drive.thumbnailCalls).toBe(0);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('keys by contentKey: new bytes get a new ETag and replace the old file', async () => {
+    const { dir, store } = await setup();
+    try {
+      const body = await original();
+      await store.set('owner', 'photo-owner', 'md5:old:1', 640, body);
+      await store.set('owner', 'photo-owner', 'md5:new:2', 640, body);
+      expect(store.etag('md5:old:1', 640)).not.toBe(store.etag('md5:new:2', 640));
+      expect(await store.get('owner', 'photo-owner', 'md5:old:1', 640)).toBeNull();
+      expect(await store.get('owner', 'photo-owner', 'md5:new:2', 640)).not.toBeNull();
+      expect(await readdir(join(dir, 'owner', 'photo-owner'))).toHaveLength(1);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('evicts the least recently used files when over the limit', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'thumbs-'));
+    try {
+      const store = new ThumbnailStore({ THUMBNAIL_DIR: dir, THUMBNAIL_MAX_MB: '1' } as any);
+      const chunk = Buffer.alloc(400 * 1024, 1);
+      for (const id of ['a', 'b', 'c']) await store.set('owner', id, `md5:${id}:1`, 640, chunk);
+      await store.prune();
+      const left = (
+        await Promise.all(['a', 'b', 'c'].map((id) => store.get('owner', id, `md5:${id}:1`, 640)))
+      ).filter(Boolean);
+      expect(left.length).toBeLessThan(3);
+      expect(left.length).toBeGreaterThan(0);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('is off without a directory', async () => {
+    const store = new ThumbnailStore({} as NodeJS.ProcessEnv);
+    expect(store.enabled).toBe(false);
+    await store.set('owner', 'p', 'k', 640, Buffer.from('x'));
+    expect(await store.get('owner', 'p', 'k', 640)).toBeNull();
   });
 });

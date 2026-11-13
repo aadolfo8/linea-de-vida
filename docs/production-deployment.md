@@ -1,6 +1,6 @@
 # Production deployment
 
-Production runs five long-lived services: PostgreSQL, Redis, the NestJS API, the BullMQ worker, and the Next.js web application. The `migrate` service is a one-shot Prisma migration gate; API and worker start only after it completes successfully.
+Production runs three long-lived services: PostgreSQL, the NestJS API (which also runs the sync scheduler) and the Next.js web application. The `migrate` service is a one-shot Prisma migration gate; the API starts only after it completes successfully.
 
 The app is served at `https://linea-de-vida.hidan.es`. Public traffic and HTTPS are handled by a shared Caddy reverse proxy that lives in `/srv/proxy` on the VPS, outside this repository.
 
@@ -14,7 +14,7 @@ The app is served at `https://linea-de-vida.hidan.es`. Public traffic and HTTPS 
 
 ## Environment
 
-Copy `.env.production.example` to `.env` on the VPS and replace every placeholder. Never commit `.env` or copy it into an image. PostgreSQL and Redis use service DNS names (`postgres`, `redis`) and are intentionally not published to host ports.
+Copy `.env.production.example` to `.env` on the VPS and replace every placeholder. Never commit `.env` or copy it into an image. PostgreSQL uses the service DNS name `postgres` and are intentionally not published to host ports.
 
 The API rejects production configuration unless public origins and Google callbacks are HTTPS, secrets are non-placeholder values, the encryption key decodes to exactly 32 bytes, and `METRICS_TOKEN` is present.
 
@@ -29,7 +29,7 @@ The shared Caddy proxy reaches this stack through the external `proxy` network u
 | `linea-api` | `api`   | 3001 |
 | `linea-web` | `web`   | 3000 |
 
-Caddy routes `/v1/` to `linea-api:3001` and every other path to `linea-web:3000`, and obtains and renews TLS certificates automatically. Only `api` and `web` join the `proxy` network; PostgreSQL, Redis, worker, and migrate stay on the private `app` network. Do not give any other service these aliases, or the proxy could route traffic to the wrong container.
+Caddy routes `/v1/` to `linea-api:3001` and every other path to `linea-web:3000`, and obtains and renews TLS certificates automatically. Only `api` and `web` join the `proxy` network; PostgreSQL and migrate stay on the private `app` network. Do not give any other service these aliases, or the proxy could route traffic to the wrong container.
 
 The Caddy configuration is maintained in `/srv/proxy`, not in this repository.
 
@@ -41,7 +41,7 @@ The existing GitHub workflow copies its protected environment file to `$VPS_DEPL
 docker compose -f docker-compose.production.yml up --build --detach --remove-orphans
 ```
 
-Compose waits for database and Redis health, applies Prisma migrations, then starts API and worker. The workflow waits for health checks from PostgreSQL, Redis, API, worker, and web. The API health check uses `/v1/readiness`, which also verifies PostgreSQL connectivity.
+Compose waits for database health, applies Prisma migrations, then starts the API. The workflow waits for health checks from PostgreSQL, API, and web. The API health check uses `/v1/readiness`, which also verifies PostgreSQL connectivity.
 
 Before enabling the workflow, store the complete production `.env` content in the `VPS_ENV_FILE` GitHub environment secret and configure the other `VPS_*` secrets required by `.github/workflows/deploy-production.yml`. The workflow rewrites the VPS `.env` from that secret on every deploy, so it must carry the current domain (`https://linea-de-vida.hidan.es`). Keep the private SSH key and `VPS_KNOWN_HOSTS` secret outside the repository.
 
@@ -51,3 +51,7 @@ Verify from a machine outside the VPS:
 curl --fail --head "https://linea-de-vida.hidan.es"
 curl --fail --head "https://linea-de-vida.hidan.es/v1/health"
 ```
+
+## Thumbnail storage
+
+The API keeps resized thumbnails (`?width=640|1280`) on the `thumbnail-data` volume, mounted at `THUMBNAIL_DIR` (`/var/lib/linea/thumbs`). Files are named after the photo's `contentKey`, so a changed photo never serves a stale image, and responses carry an `ETag` with `Cache-Control: immutable`. `THUMBNAIL_MAX_MB` (default 2048) caps the volume; the least recently used files are evicted past it. Without `THUMBNAIL_DIR` the store is off and thumbnails are generated per request.

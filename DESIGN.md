@@ -151,3 +151,11 @@ Media is requested only through the session-guarded API proxy, with `width=640|1
 
 - Light theme for the timeline: the sky is always dark (`color-scheme: dark`).
 - No new data claims: no face, place or content recognition, and no dates inferred beyond what the archive stores.
+
+## Styling rule for new code
+
+Two systems coexist today: Tailwind utilities and per-screen CSS files (`sky.css`, `month.css`, `photo-viewer.css`…). The per-screen CSS is working and is not rewritten. For anything new:
+
+- Use Tailwind utilities with the existing `map-*` tokens for ordinary layout and controls.
+- Add or extend a per-screen CSS file only for what utilities cannot express (the sky engine's transforms, canvas overlays, keyframes) and keep its values on the shared CSS custom properties from `globals.css` rather than new literals.
+- Do not introduce a third approach (CSS-in-JS, CSS modules).

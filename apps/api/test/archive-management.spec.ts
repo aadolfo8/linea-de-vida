@@ -1,8 +1,7 @@
 import { ConflictException, NotFoundException } from '@nestjs/common';
 import { describe, expect, it, vi } from 'vitest';
-import { AppController } from '../src/app.controller';
-import { FolderDateRuleService } from '../src/folder-date-rule.service';
-import { PhotoVisibilityService } from '../src/photo-visibility.service';
+import { SourcesController } from '../src/sources.controller';
+import { TimelineController } from '../src/timeline.controller';
 
 function controllerFixture() {
   const photos = [
@@ -150,18 +149,9 @@ function controllerFixture() {
     $transaction: async (operation: any) =>
       Array.isArray(operation) ? Promise.all(operation) : operation(prisma),
   };
-  const controller = new AppController(
-    prisma,
-    {} as any,
-    {} as any,
-    {} as any,
-    {} as any,
-    {} as any,
-    {} as any,
-    new FolderDateRuleService(prisma),
-    new PhotoVisibilityService(prisma),
-  );
-  return { controller, prisma, photos, exclusions, updates };
+  const controller = new TimelineController(prisma, {} as any, {} as any);
+  const sources = new SourcesController(prisma, {} as any, {} as any, {} as any);
+  return { controller, sources, prisma, photos, exclusions, updates };
 }
 
 describe('indexed archive management', () => {
@@ -175,7 +165,7 @@ describe('indexed archive management', () => {
         sourceName: 'Family archive',
       },
     });
-    await expect(fixture.controller.removeSource('owner', 'source')).resolves.toBeUndefined();
+    await expect(fixture.sources.removeSource('owner', 'source')).resolves.toBeUndefined();
     expect(fixture.prisma.photoFile.deleteMany).toHaveBeenCalledWith({
       where: { userId: 'owner', sourceId: 'source' },
     });
@@ -196,7 +186,7 @@ describe('indexed archive management', () => {
   it('does not remove a source while a sync is queued or running', async () => {
     const fixture = controllerFixture();
     fixture.prisma.syncRun.findFirst.mockResolvedValueOnce({ id: 'active-run' });
-    await expect(fixture.controller.removeSource('owner', 'source')).rejects.toBeInstanceOf(
+    await expect(fixture.sources.removeSource('owner', 'source')).rejects.toBeInstanceOf(
       ConflictException,
     );
     expect(fixture.prisma.photo.deleteMany).not.toHaveBeenCalled();
@@ -206,218 +196,11 @@ describe('indexed archive management', () => {
 
   it('does not disclose or remove another user’s source', async () => {
     const fixture = controllerFixture();
-    await expect(fixture.controller.removeSource('other', 'source')).rejects.toBeInstanceOf(
+    await expect(fixture.sources.removeSource('other', 'source')).rejects.toBeInstanceOf(
       NotFoundException,
     );
     expect(fixture.prisma.photo.deleteMany).not.toHaveBeenCalled();
     expect(fixture.prisma.photoSource.delete).not.toHaveBeenCalled();
-  });
-
-  it('hides a batch through the legacy route, safely repeatable and without disclosing foreign IDs', async () => {
-    const f = controllerFixture();
-    expect(await f.controller.removePhotos('owner', { photoIds: ['photo-1', 'photo-1'] })).toEqual({
-      results: [{ id: 'photo-1', status: 'REMOVED' }],
-    });
-    expect(f.photos.find((photo) => photo.id === 'photo-1')!.hiddenAt).toBeInstanceOf(Date);
-    // The row stays and a repeat is a no-op.
-    expect(await f.controller.removePhotos('owner', { photoIds: ['photo-1'] })).toEqual({
-      results: [{ id: 'photo-1', status: 'REMOVED' }],
-    });
-    expect(await f.controller.removePhotos('other', { photoIds: ['photo-2', 'unknown'] })).toEqual({
-      results: [
-        { id: 'photo-2', status: 'ABSENT' },
-        { id: 'unknown', status: 'ABSENT' },
-      ],
-    });
-    expect(f.photos.find((photo) => photo.id === 'photo-2')!.hiddenAt).toBeNull();
-    expect(f.exclusions).toHaveLength(0);
-  });
-
-  it('reports a failed batch per item and succeeds on retry', async () => {
-    const f = controllerFixture();
-    f.prisma.photo.updateMany.mockRejectedValueOnce(new Error('temporary database failure'));
-    expect(await f.controller.removePhotos('owner', { photoIds: ['photo-1', 'photo-2'] })).toEqual({
-      results: [
-        { id: 'photo-1', status: 'FAILED' },
-        { id: 'photo-2', status: 'FAILED' },
-      ],
-    });
-    expect(f.photos.map((photo) => photo.hiddenAt)).toEqual([null, null]);
-    expect(await f.controller.removePhotos('owner', { photoIds: ['photo-1', 'photo-2'] })).toEqual({
-      results: [
-        { id: 'photo-1', status: 'REMOVED' },
-        { id: 'photo-2', status: 'REMOVED' },
-      ],
-    });
-  });
-
-  it.each([undefined, null, [], [''], [42], Array(51).fill('photo-1'), ['x'.repeat(201)]])(
-    'validates batch input before mutations: %j',
-    async (photoIds) => {
-      const f = controllerFixture();
-      await expect(f.controller.removePhotos('owner', { photoIds })).rejects.toMatchObject({
-        status: 400,
-      });
-      expect(f.prisma.photo.updateMany).not.toHaveBeenCalled();
-    },
-  );
-
-  it('applies a recursive MONTH override only to the owned folder and descendants', async () => {
-    const fixture = controllerFixture();
-    await expect(
-      fixture.controller.setFolderDate('owner', 'child', {
-        year: 2024,
-        month: 2,
-        precision: 'MONTH',
-      }),
-    ).resolves.toMatchObject({
-      rule: { folderId: 'child', precision: 'MONTH', scope: 'FALLBACK_DESCENDANTS' },
-      affectedCount: 0,
-    });
-    await expect(
-      fixture.controller.setFolderDate('other', 'child', {
-        year: 2024,
-        precision: 'YEAR',
-      }),
-    ).rejects.toBeInstanceOf(NotFoundException);
-  });
-
-  it('removes only a rule belonging to the current user', async () => {
-    const fixture = controllerFixture();
-    await expect(fixture.controller.removeFolderDate('owner', 'child')).resolves.toEqual({
-      affectedCount: 0,
-    });
-    expect(fixture.prisma.folderDateRule.deleteMany).toHaveBeenCalledWith({
-      where: { folderId: 'child' },
-    });
-    await expect(fixture.controller.removeFolderDate('other', 'child')).rejects.toBeInstanceOf(
-      NotFoundException,
-    );
-  });
-
-  it('hides an owned photo without deleting it and hides cross-user deletion', async () => {
-    const fixture = controllerFixture();
-    await fixture.controller.deletePhoto('owner', 'photo-1');
-    const photo = fixture.photos.find((candidate) => candidate.id === 'photo-1')!;
-    expect(photo.hiddenAt).toBeInstanceOf(Date);
-    expect(photo.override).not.toBeNull();
-    expect(fixture.prisma.photo.delete).not.toHaveBeenCalled();
-    expect(fixture.exclusions).toHaveLength(0);
-    await expect(fixture.controller.deletePhoto('other', 'photo-2')).rejects.toBeInstanceOf(
-      NotFoundException,
-    );
-  });
-
-  it('searches photos across one owned source and scopes the opaque cursor to filters', async () => {
-    const f = controllerFixture();
-    const result = await f.controller.searchSourcePhotos(
-      'owner',
-      'source',
-      'summer',
-      'child',
-      'UNCLASSIFIED',
-      undefined,
-      '1',
-    );
-    expect(result.items).toHaveLength(1);
-    expect(result.items[0]).toMatchObject({
-      fileName: 'Summer.jpg',
-      folderPath: ['Root', 'Child'],
-    });
-    expect(f.prisma.photo.findMany).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: expect.objectContaining({
-          userId: 'owner',
-          sourceId: 'source',
-          fileName: { contains: 'summer', mode: 'insensitive' },
-          folderId: 'child',
-          effectiveDateValue: null,
-        }),
-        take: 2,
-      }),
-    );
-    await expect(f.controller.searchSourcePhotos('other', 'source')).rejects.toBeInstanceOf(
-      NotFoundException,
-    );
-    await expect(
-      f.controller.searchSourcePhotos('owner', 'source', 'x'.repeat(121)),
-    ).rejects.toMatchObject({
-      status: 400,
-    });
-  });
-
-  it('lists only the current user’s exclusions and restores by owned tombstone ID', async () => {
-    const f = controllerFixture();
-    f.exclusions.push({
-      create: {
-        userId: 'owner',
-        driveFileId: 'drive-1',
-        sourceId: 'source',
-        sourceName: 'Family archive',
-        folderPath: ['Root', 'Child'],
-        fileName: 'Summer.jpg',
-        mimeType: 'image/jpeg',
-        restoredAt: null,
-      },
-    });
-    const page = await f.controller.photoExclusions('owner', undefined, '1');
-    expect(page.items).toMatchObject([
-      {
-        id: 'excluded-1',
-        fileName: 'Summer.jpg',
-        sourceName: 'Family archive',
-        folderPath: ['Root', 'Child'],
-      },
-    ]);
-    expect(page.items[0]).not.toHaveProperty('driveFileId');
-    await f.controller.restorePhotoExclusion('owner', 'excluded-1');
-    expect(f.prisma.photoExclusion.updateMany).toHaveBeenCalledWith({
-      where: { id: 'excluded-1', userId: 'owner', restoredAt: null },
-      data: { restoredAt: expect.any(Date) },
-    });
-    await expect(f.controller.restorePhotoExclusion('other', 'excluded-1')).rejects.toBeInstanceOf(
-      NotFoundException,
-    );
-  });
-
-  it('lists photos hidden through soft hide and restores them through the legacy endpoint', async () => {
-    const f = controllerFixture();
-    f.photos[0]!.hiddenAt = new Date('2026-05-01');
-    const page = await f.controller.photoExclusions('owner', undefined, '5');
-    expect(page.items).toMatchObject([{ id: f.photos[0]!.id, restoredAt: null }]);
-    await f.controller.restorePhotoExclusion('owner', f.photos[0]!.id);
-    expect(f.photos[0]!.hiddenAt).toBeNull();
-    await expect(
-      f.controller.restorePhotoExclusion('other', f.photos[0]!.id),
-    ).rejects.toBeInstanceOf(NotFoundException);
-  });
-
-  it('scopes cursor-paginated sync history to an owned source', async () => {
-    const fixture = controllerFixture();
-    const first = await fixture.controller.sourceRuns('owner', 'source', undefined, '1');
-    expect(first.items).toHaveLength(1);
-    expect(first.nextCursor).toBeTruthy();
-    expect(fixture.prisma.syncRun.findMany).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { photoSourceId: 'source' }, take: 2 }),
-    );
-    await expect(
-      fixture.controller.sourceRuns('other', 'source', undefined, '1'),
-    ).rejects.toBeInstanceOf(NotFoundException);
-  });
-
-  it('paginates folder photos with ownership derived server-side', async () => {
-    const fixture = controllerFixture();
-    const page = await fixture.controller.indexedFolderPhotos('owner', 'child', undefined, '1');
-    expect(page.items).toHaveLength(1);
-    expect(fixture.prisma.photo.findMany).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: { userId: 'owner', folderId: 'child', status: 'ACTIVE', hiddenAt: null },
-        take: 2,
-      }),
-    );
-    await expect(fixture.controller.indexedFolderPhotos('other', 'child')).rejects.toBeInstanceOf(
-      NotFoundException,
-    );
   });
 
   it('uses exact month and leap-day boundaries for photo queries', async () => {
@@ -456,28 +239,16 @@ describe('temporal timeline contracts', () => {
     };
     return {
       prisma,
-      controller: new AppController(
-        prisma,
-        {} as any,
-        {} as any,
-        {} as any,
-        {} as any,
-        {} as any,
-        {} as any,
-        {} as any,
-        {} as any,
-      ),
+      controller: new TimelineController(prisma, {} as any, {} as any),
     };
   }
 
   it('returns the complete year range, including empty years, without querying photos', async () => {
     const { controller, prisma } = timelineController();
-    prisma.$queryRawUnsafe
-      .mockResolvedValueOnce([{ firstYear: 2020, lastYear: 2022 }])
-      .mockResolvedValueOnce([
-        { year: 2020, photoCount: BigInt(2) },
-        { year: 2022, photoCount: BigInt(1) },
-      ]);
+    prisma.$queryRawUnsafe.mockResolvedValueOnce([
+      { year: 2020, photoCount: BigInt(2) },
+      { year: 2022, photoCount: BigInt(1) },
+    ]);
     await expect(controller.years('owner')).resolves.toEqual({
       firstYear: 2020,
       lastYear: 2022,

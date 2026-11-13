@@ -16,7 +16,7 @@ vi.mock('next/link', async () => {
       React.createElement('a', { href, ...props }, children),
   };
 });
-vi.mock('motion/react', () => ({ useReducedMotion: () => true }));
+vi.mock('../../lib/use-reduced-motion', () => ({ useReducedMotion: () => true }));
 vi.mock('../../lib/api', async (original) => ({
   ...(await original<typeof import('../../lib/api')>()),
   apiJson: vi.fn(),

@@ -1,42 +1,25 @@
 import { Module } from '@nestjs/common';
 import { AppController } from './app.controller';
-import { OrderingController } from './ordering.controller';
-import { CoversController } from './covers.controller';
-import { CoversService } from './covers.service';
-import { PrismaService } from './prisma.service';
-import { DriveAdapter, GoogleDriveProvider, MemoryDriveProvider } from './drive';
-import { PhotoDateResolver } from './date-resolver';
-import { SyncService } from './sync.service';
-import { GoogleOAuthClient, GoogleOAuthProvider, OAuthStateService } from './oauth';
-import { ManualDateService } from './manual-date.service';
-import { MediaProxyService } from './media-proxy.service';
-import { RetentionService } from './retention.service';
-import { TakeoutMatcher, TakeoutMetadataParser } from './takeout';
-import { FolderDateRuleService } from './folder-date-rule.service';
-import { OrderingService } from './ordering.service';
-import { PhotoVisibilityService } from './photo-visibility.service';
+import { AuthModule } from './auth.module';
+import { CoversModule } from './covers.module';
+import { DriveModule } from './drive.module';
+import { OrderingModule } from './ordering.module';
+import { PrismaModule } from './prisma.module';
+import { SourcesModule } from './sources.module';
+import { SyncModule } from './sync.module';
+import { TimelineModule } from './timeline.module';
+
 @Module({
-  controllers: [AppController, OrderingController, CoversController],
-  providers: [
-    PrismaService,
-    PhotoDateResolver,
-    TakeoutMetadataParser,
-    TakeoutMatcher,
-    ManualDateService,
-    FolderDateRuleService,
-    PhotoVisibilityService,
-    OrderingService,
-    CoversService,
-    MediaProxyService,
-    RetentionService,
-    SyncService,
-    OAuthStateService,
-    { provide: GoogleOAuthClient, useClass: GoogleOAuthProvider },
-    {
-      provide: DriveAdapter,
-      useFactory: () =>
-        process.env.GOOGLE_CLIENT_ID ? new GoogleDriveProvider() : new MemoryDriveProvider(),
-    },
+  imports: [
+    PrismaModule,
+    DriveModule,
+    AuthModule,
+    SyncModule,
+    SourcesModule,
+    TimelineModule,
+    OrderingModule,
+    CoversModule,
   ],
+  controllers: [AppController],
 })
 export class AppModule {}

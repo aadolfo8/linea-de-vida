@@ -9,25 +9,7 @@ import { fitSize } from './viewer-zoom';
 
 const env = vi.hoisted(() => ({ reduceMotion: false }));
 
-vi.mock('motion/react', async () => {
-  const React = await import('react');
-  const motionComponent = (tag: 'button' | 'span') =>
-    React.forwardRef<HTMLElement, Record<string, unknown>>(function MotionComponent(props, ref) {
-      const elementProps = { ...props };
-      delete elementProps.animate;
-      delete elementProps.layoutId;
-      delete elementProps.transition;
-      return React.createElement(tag, { ...elementProps, ref });
-    });
-  return {
-    LayoutGroup: ({ children }: { children: React.ReactNode }) => children,
-    motion: {
-      button: motionComponent('button'),
-      span: motionComponent('span'),
-    },
-    useReducedMotion: () => env.reduceMotion,
-  };
-});
+vi.mock('../../lib/use-reduced-motion', () => ({ useReducedMotion: () => env.reduceMotion }));
 
 const photo = (
   number: number,

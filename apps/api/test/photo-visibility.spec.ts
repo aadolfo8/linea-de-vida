@@ -1,32 +1,74 @@
-import { describe, expect, it, vi } from 'vitest';
-import { AppController } from '../src/app.controller';
+import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { TimelineController } from '../src/timeline.controller';
 import { PHOTO_BATCH_LIMIT } from '../src/photo-ids';
 import { PhotoVisibilityService } from '../src/photo-visibility.service';
-import { MemoryPrisma } from './support/memory-prisma';
+import { dropUsers, pgClient, pgUrl, photoRow, resetUsers } from './support/pg';
 
-function fixture(count = 3) {
-  const memory = new MemoryPrisma();
-  for (let index = 1; index <= count; index++)
-    memory.rows('photo').push({
-      id: `p${index}`,
-      userId: 'owner',
-      status: 'ACTIVE',
-      hiddenAt: null,
-      effectiveDateValue: new Date('2020-01-01'),
-      effectiveDatePrecision: 'YEAR',
+const P = 'pv';
+const OWNER = `${P}-owner`;
+
+describe.skipIf(!pgUrl)('PhotoVisibilityService (PostgreSQL)', () => {
+  const prisma = pgClient();
+  const service = new PhotoVisibilityService(prisma as any);
+  const ids = (count: number) => Array.from({ length: count }, (_, index) => `p${index + 1}`);
+  const row = (id: string) => prisma.photo.findUniqueOrThrow({ where: { id } });
+
+  const fixture = async (count = 3) => {
+    await prisma.photo.createMany({
+      data: ids(count).map((id) =>
+        photoRow(P, id, {
+          effectiveDateValue: new Date('2020-01-01'),
+          effectiveDatePrecision: 'YEAR',
+        }),
+      ),
     });
-  memory.rows('photo').push({ id: 'foreign', userId: 'other', status: 'ACTIVE', hiddenAt: null });
-  return { memory, service: new PhotoVisibilityService(memory as any) };
-}
-const row = (memory: MemoryPrisma, id: string) =>
-  memory.rows('photo').find((photo) => photo.id === id)!;
+    await prisma.photo.create({
+      data: photoRow(P, 'foreign', { userId: `${P}-other`, driveFileId: 'd-foreign' }),
+    });
+  };
 
-describe('PhotoVisibilityService', () => {
+  /** A service whose photo.updateMany can be made to fail without patching the client. */
+  const failingFirstUpdate = () => {
+    let calls = 0;
+    const wrapped = new Proxy(prisma, {
+      get: (target, key) =>
+        key === 'photo'
+          ? new Proxy(target.photo, {
+              get: (photo, method) =>
+                method === 'updateMany'
+                  ? (...args: unknown[]) =>
+                      ++calls === 1
+                        ? Promise.reject(new Error('temporary'))
+                        : (photo.updateMany as (...a: unknown[]) => unknown)(...args)
+                  : (photo as any)[method],
+            })
+          : (target as any)[key],
+    });
+    return new PhotoVisibilityService(wrapped as any);
+  };
+
+  beforeEach(async () => {
+    await resetUsers(prisma, P);
+  });
+  afterAll(async () => {
+    await dropUsers(prisma, P);
+    await prisma.$disconnect();
+  });
+
   it('hides and shows again immediately, keeping the row, its date and its copies', async () => {
-    const { memory, service } = fixture();
-    memory.rows('photoFile').push({ id: 'file', photoId: 'p1', userId: 'owner' });
+    await fixture();
+    await prisma.photoFile.create({
+      data: {
+        photoId: 'p1',
+        userId: OWNER,
+        driveFileId: 'd-p1',
+        sourceId: `${P}-source`,
+        fileName: 'p1.jpg',
+        mimeType: 'image/jpeg',
+      },
+    });
 
-    const hidden = await service.hide('owner', ['p1', 'p2']);
+    const hidden = await service.hide(OWNER, ['p1', 'p2']);
     expect(hidden).toEqual({
       results: [
         { id: 'p1', status: 'HIDDEN' },
@@ -34,32 +76,32 @@ describe('PhotoVisibilityService', () => {
       ],
       changedCount: 2,
     });
-    expect(row(memory, 'p1').hiddenAt).toBeInstanceOf(Date);
-    expect(row(memory, 'p1').effectiveDatePrecision).toBe('YEAR');
-    expect(memory.rows('photoFile')).toHaveLength(1);
+    expect((await row('p1')).hiddenAt).toBeInstanceOf(Date);
+    expect((await row('p1')).effectiveDatePrecision).toBe('YEAR');
+    expect(await prisma.photoFile.count({ where: { userId: OWNER } })).toBe(1);
 
-    const shown = await service.unhide('owner', ['p1']);
+    const shown = await service.unhide(OWNER, ['p1']);
     expect(shown.results).toEqual([{ id: 'p1', status: 'VISIBLE' }]);
-    expect(row(memory, 'p1').hiddenAt).toBeNull();
-    expect(row(memory, 'p2').hiddenAt).toBeInstanceOf(Date);
+    expect((await row('p1')).hiddenAt).toBeNull();
+    expect((await row('p2')).hiddenAt).toBeInstanceOf(Date);
   });
 
   it('reports repeats and foreign or unknown IDs without touching them', async () => {
-    const { memory, service } = fixture();
-    await service.hide('owner', ['p1']);
-    const hiddenAt = row(memory, 'p1').hiddenAt;
+    await fixture();
+    await service.hide(OWNER, ['p1']);
+    const hiddenAt = (await row('p1')).hiddenAt;
 
-    const again = await service.hide('owner', ['p1', 'foreign', 'unknown']);
+    const again = await service.hide(OWNER, ['p1', 'foreign', 'unknown']);
     expect(again.results).toEqual([
       { id: 'p1', status: 'ALREADY_HIDDEN' },
       { id: 'foreign', status: 'NOT_FOUND' },
       { id: 'unknown', status: 'NOT_FOUND' },
     ]);
     expect(again.changedCount).toBe(0);
-    expect(row(memory, 'p1').hiddenAt).toBe(hiddenAt);
-    expect(row(memory, 'foreign').hiddenAt).toBeNull();
+    expect((await row('p1')).hiddenAt).toEqual(hiddenAt);
+    expect((await row('foreign')).hiddenAt).toBeNull();
 
-    const none = await service.unhide('owner', ['p2', 'foreign']);
+    const none = await service.unhide(OWNER, ['p2', 'foreign']);
     expect(none.results).toEqual([
       { id: 'p2', status: 'ALREADY_VISIBLE' },
       { id: 'foreign', status: 'NOT_FOUND' },
@@ -67,31 +109,29 @@ describe('PhotoVisibilityService', () => {
   });
 
   it('never unhides another user photo', async () => {
-    const { memory, service } = fixture();
-    row(memory, 'foreign').hiddenAt = new Date('2026-01-01');
-    await service.unhide('owner', ['foreign']);
-    expect(row(memory, 'foreign').hiddenAt).toEqual(new Date('2026-01-01'));
+    await fixture();
+    await prisma.photo.update({
+      where: { id: 'foreign' },
+      data: { hiddenAt: new Date('2026-01-01') },
+    });
+    await service.unhide(OWNER, ['foreign']);
+    expect((await row('foreign')).hiddenAt).toEqual(new Date('2026-01-01'));
   });
 
   it('accepts large batches, counting duplicated IDs once', async () => {
-    const { memory, service } = fixture(1_300);
-    const ids = Array.from({ length: 1_300 }, (_, index) => `p${index + 1}`);
-    const result = await service.hide('owner', [...ids, 'p1', 'p2']);
+    await fixture(1_300);
+    const all = ids(1_300);
+    const result = await service.hide(OWNER, [...all, 'p1', 'p2']);
     expect(result.results).toHaveLength(1_300);
     expect(result.changedCount).toBe(1_300);
-    expect(memory.rows('photo').filter((photo) => photo.hiddenAt).length).toBe(1_300);
-  });
+    expect(await prisma.photo.count({ where: { userId: OWNER, hiddenAt: { not: null } } })).toBe(
+      1_300,
+    );
+  }, 60_000);
 
   it('isolates a failing chunk and still processes the others', async () => {
-    const { memory, service } = fixture(700);
-    const original = memory.photo.updateMany;
-    let calls = 0;
-    vi.spyOn(memory.photo, 'updateMany').mockImplementation(async (args: any) => {
-      if (++calls === 1) throw new Error('temporary');
-      return original(args);
-    });
-    const ids = Array.from({ length: 700 }, (_, index) => `p${index + 1}`);
-    const result = await service.hide('owner', ids);
+    await fixture(700);
+    const result = await failingFirstUpdate().hide(OWNER, ids(700));
     expect(result.results.filter((entry) => entry.status === 'FAILED')).toHaveLength(500);
     expect(result.results.filter((entry) => entry.status === 'HIDDEN')).toHaveLength(200);
     expect(result.changedCount).toBe(200);
@@ -99,17 +139,17 @@ describe('PhotoVisibilityService', () => {
 
   it.each([undefined, null, [], [''], [42], 'p1', ['x'.repeat(201)]])(
     'rejects invalid input before touching data: %j',
-    async (ids) => {
-      const { memory, service } = fixture();
-      await expect(service.hide('owner', ids)).rejects.toMatchObject({ status: 400 });
-      expect(memory.rows('photo').every((photo) => photo.hiddenAt === null)).toBe(true);
+    async (input) => {
+      await fixture();
+      await expect(service.hide(OWNER, input)).rejects.toMatchObject({ status: 400 });
+      expect(await prisma.photo.count({ where: { userId: OWNER, hiddenAt: { not: null } } })).toBe(
+        0,
+      );
     },
   );
 
   it(`rejects more than ${PHOTO_BATCH_LIMIT} IDs`, async () => {
-    const { service } = fixture();
-    const ids = Array.from({ length: PHOTO_BATCH_LIMIT + 1 }, (_, index) => `p${index}`);
-    await expect(service.hide('owner', ids)).rejects.toMatchObject({
+    await expect(service.hide(OWNER, ids(PHOTO_BATCH_LIMIT + 1))).rejects.toMatchObject({
       status: 400,
       response: { code: 'BATCH_LIMIT_EXCEEDED' },
     });
@@ -135,7 +175,7 @@ describe('hidden photos leave every visible listing', () => {
     const none = {} as any;
     return {
       prisma,
-      controller: new AppController(prisma, none, none, none, none, none, none, none, none) as any,
+      controller: new TimelineController(prisma, none, none) as any,
     };
   };
 
@@ -143,18 +183,10 @@ describe('hidden photos leave every visible listing', () => {
     const { prisma, controller: app } = makeController();
     await app.years('owner');
     await app.yearSummary('owner', '2020');
-    await app.months('owner', '2020');
     await app.monthPreviews('owner', '2020');
-    await app.days('owner', '2020', '3');
-    await app.undated('owner');
     await app.monthPhotos('owner', '2020', '3');
     await app.unknownMonthPhotos('owner', '2020');
     await app.photos('owner', '2020', undefined, undefined, 'YEAR');
-    await app.indexedFolders('owner', 'source');
-    await app.indexedFolderPhotos('owner', 'folder');
-    await app.classificationSummary('owner', 'source');
-    await app.pendingPhotos('owner', 'source');
-    await app.searchSourcePhotos('owner', 'source');
 
     expect(prisma.$queryRawUnsafe.mock.calls.length).toBeGreaterThan(0);
     for (const [sql] of prisma.$queryRawUnsafe.mock.calls)

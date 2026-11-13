@@ -1,6 +1,6 @@
 'use client';
 
-import { useReducedMotion } from 'motion/react';
+import { useReducedMotion } from '../../../lib/use-reduced-motion';
 import { createPortal } from 'react-dom';
 import {
   createContext,

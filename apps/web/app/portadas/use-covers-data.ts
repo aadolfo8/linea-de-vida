@@ -1,9 +1,11 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { apiJson, signOutIfExpired } from '../../lib/api';
+import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
+import { useMemo } from 'react';
+import { apiJson } from '../../lib/api';
 import { coversApi } from '../../lib/covers/client';
-import { sameScope, type CoverScope, type CoversResponse } from '../../lib/covers/model';
+import { type CoverScope, type CoversResponse } from '../../lib/covers/model';
+import { queryClient } from '../../lib/query-client';
 import {
   loadMonthPreviews,
   loadTimelineYears,
@@ -26,149 +28,93 @@ type Status = 'loading' | 'ready' | 'error';
 
 /** The years that have photos, newest first. */
 export function useYears() {
-  const [state, setState] = useState<{ status: Status; years: number[] }>({
-    status: 'loading',
-    years: [],
-  });
-  const [attempt, setAttempt] = useState(0);
-
-  useEffect(() => {
-    let current = true;
-    setState((previous) => ({ ...previous, status: 'loading' }));
-    loadTimelineYears((cursor) =>
-      apiJson<TimelineYearsPage>(
-        `/timeline/years?limit=100${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`,
-      ),
-    )
-      .then((page) => {
-        if (!current) return;
-        const years = page.items
+  const query = useQuery(
+    {
+      queryKey: ['cover-years'],
+      queryFn: async () => {
+        const page = await loadTimelineYears((cursor) =>
+          apiJson<TimelineYearsPage>(
+            `/timeline/years?limit=100${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`,
+          ),
+        );
+        return page.items
           .filter((item) => item.photoCount > 0)
           .map((item) => item.year)
           .sort((a, b) => b - a);
-        setState({ status: 'ready', years });
-      })
-      .catch((error) => {
-        if (!current) return;
-        signOutIfExpired(error);
-        setState({ status: 'error', years: [] });
-      });
-    return () => {
-      current = false;
-    };
-  }, [attempt]);
-
-  return { ...state, reload: () => setAttempt((value) => value + 1) };
+      },
+    },
+    queryClient,
+  );
+  const status: Status = query.isError ? 'error' : query.data ? 'ready' : 'loading';
+  return { status, years: query.data ?? [], reload: () => void query.refetch() };
 }
 
 /** What one year shows today (its automatic photos and its chosen covers), and a way to reload it. */
 export function useYearData(year: number | null) {
-  const [state, setState] = useState<{ status: Status; data: YearData | null }>({
-    status: 'loading',
-    data: null,
-  });
-  const generation = useRef(0);
-
-  const load = useCallback(async () => {
-    if (year === null) return null;
-    const mine = ++generation.current;
-    try {
-      const [summary, monthPreviews, covers] = await Promise.all([
-        loadYearSummary(year),
-        loadMonthPreviews(year),
-        coversApi.list(year),
-      ]);
-      if (mine !== generation.current) return null;
-      const data = { summary, monthPreviews, covers };
-      setState({ status: 'ready', data });
-      return data;
-    } catch (error) {
-      if (mine !== generation.current) return null;
-      signOutIfExpired(error);
-      setState((previous) => ({ status: 'error', data: previous.data }));
-      return null;
-    }
-  }, [year]);
-
-  useEffect(() => {
-    setState({ status: 'loading', data: null });
-    void load();
-  }, [load]);
-
-  return { ...state, reload: load };
+  const query = useQuery(
+    {
+      queryKey: ['cover-year', year],
+      enabled: year !== null,
+      // The covers are what people change here: always read them fresh when the year opens.
+      staleTime: 0,
+      gcTime: 0,
+      queryFn: async (): Promise<YearData> => {
+        const [summary, monthPreviews, covers] = await Promise.all([
+          loadYearSummary(year!),
+          loadMonthPreviews(year!),
+          coversApi.list(year!),
+        ]);
+        return { summary, monthPreviews, covers };
+      },
+    },
+    queryClient,
+  );
+  const status: Status = query.isError ? 'error' : query.data ? 'ready' : 'loading';
+  return {
+    status,
+    data: query.data ?? null,
+    reload: async () => (await query.refetch()).data ?? null,
+  };
 }
 
 /** The photos a cover can be made of, a page at a time. */
 export function useCandidates(year: number | null, scope: CoverScope | null) {
-  const [state, setState] = useState<{
-    status: Status;
-    items: TimelinePhoto[];
-    nextCursor: string | null;
-    loadingMore: boolean;
-    moreFailed: boolean;
-  }>({ status: 'loading', items: [], nextCursor: null, loadingMore: false, moreFailed: false });
-  const scopeRef = useRef<CoverScope | null>(null);
-  const generation = useRef(0);
-  const [attempt, setAttempt] = useState(0);
+  // `scope` is identified by its key; a new object for the same cover must not reload.
   const kindKey = scope ? `${scope.kind}:${scope.month}` : null;
-
-  useEffect(() => {
-    if (year === null || !scope) return;
-    scopeRef.current = scope;
-    const mine = ++generation.current;
-    setState({
-      status: 'loading',
-      items: [],
-      nextCursor: null,
-      loadingMore: false,
-      moreFailed: false,
-    });
-    coversApi
-      .candidates(year, scope, null)
-      .then((page) => {
-        if (mine !== generation.current) return;
-        setState({
-          status: 'ready',
-          items: page.items,
-          nextCursor: page.nextCursor,
-          loadingMore: false,
-          moreFailed: false,
-        });
-      })
-      .catch((error) => {
-        if (mine !== generation.current) return;
-        signOutIfExpired(error);
-        setState((previous) => ({ ...previous, status: 'error' }));
-      });
-    // `scope` is identified by its key; a new object for the same cover must not reload.
-  }, [year, kindKey, attempt]);
-
-  const loadMore = useCallback(() => {
-    const current = scopeRef.current;
-    const cursor = state.nextCursor;
-    if (year === null || !current || !cursor || state.loadingMore) return;
-    const mine = generation.current;
-    setState((previous) => ({ ...previous, loadingMore: true, moreFailed: false }));
-    coversApi
-      .candidates(year, current, cursor)
-      .then((page) => {
-        if (mine !== generation.current || !sameScope(current, scopeRef.current!)) return;
-        setState((previous) => {
-          const seen = new Set(previous.items.map((photo) => photo.id));
-          return {
-            ...previous,
-            items: [...previous.items, ...page.items.filter((photo) => !seen.has(photo.id))],
-            nextCursor: page.nextCursor,
-            loadingMore: false,
-          };
-        });
-      })
-      .catch((error) => {
-        if (mine !== generation.current) return;
-        signOutIfExpired(error);
-        setState((previous) => ({ ...previous, loadingMore: false, moreFailed: true }));
-      });
-  }, [year, state.nextCursor, state.loadingMore]);
-
-  return { ...state, loadMore, reload: () => setAttempt((value) => value + 1) };
+  const query = useInfiniteQuery(
+    {
+      queryKey: ['cover-candidates', year, kindKey],
+      enabled: year !== null && scope !== null,
+      staleTime: 0,
+      gcTime: 0,
+      initialPageParam: null as string | null,
+      queryFn: ({ pageParam }) => coversApi.candidates(year!, scope!, pageParam),
+      getNextPageParam: (page) => page.nextCursor ?? undefined,
+    },
+    queryClient,
+  );
+  const items = useMemo(() => {
+    const seen = new Set<string>();
+    const all: TimelinePhoto[] = [];
+    for (const page of query.data?.pages ?? [])
+      for (const photo of page.items)
+        if (!seen.has(photo.id)) {
+          seen.add(photo.id);
+          all.push(photo);
+        }
+    return all;
+  }, [query.data]);
+  const status: Status = query.data ? 'ready' : query.isError ? 'error' : 'loading';
+  const last = query.data?.pages.at(-1);
+  return {
+    status,
+    items,
+    nextCursor: last?.nextCursor ?? null,
+    loadingMore: query.isFetchingNextPage,
+    moreFailed: query.isFetchNextPageError,
+    loadMore: () => {
+      if (query.hasNextPage && !query.isFetchingNextPage) void query.fetchNextPage();
+    },
+    reload: () => void query.refetch(),
+  };
 }

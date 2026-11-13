@@ -2,13 +2,13 @@
 
 ## Objetivo
 
-Convertir archivos de fuentes Drive configuradas en registros de foto idempotentes, con fechas explicables y sin bloquear una petición HTTP. BullMQ y un worker local se incorporan desde la primera vertical slice; Redis es su infraestructura de cola.
+Convertir archivos de fuentes Drive configuradas en registros de foto idempotentes, con fechas explicables y sin bloquear una petición HTTP. La cola es la propia tabla `SyncRun` en PostgreSQL y un `SyncScheduler` dentro de la API la consume; no hay Redis ni worker aparte.
 
 ## Ciclo de sincronización
 
 1. La API autoriza la fuente y crea `SyncRun(QUEUED)`.
 2. Encola un trabajo con `syncRunId`, `photoSourceId` y clave idempotente.
-3. El worker cambia a `RUNNING`, recorre recursivamente solo la fuente y sus páginas hijas; persiste un checkpoint de carpeta/cursor después de cada página.
+3. El `SyncScheduler` toma el run (`QUEUED` → `RUNNING`, `FOR UPDATE SKIP LOCKED`), recorre recursivamente solo la fuente y sus páginas hijas; persiste un checkpoint de carpeta/cursor después de cada página.
 4. Filtra formatos de imagen permitidos y procesa cada página en lotes con concurrencia limitada (5 por defecto; configurable entre 5 y 10), sin límite normal de 100 fotos.
 5. Para cada fallo aislado crea `SyncIssue`; el lote continúa cuando sea seguro.
 6. Si termina con incidencias recuperables, queda `PARTIAL`; si completa, `SUCCEEDED`; si no puede continuar, `FAILED`.
@@ -18,15 +18,15 @@ El escaneo no impone un máximo artificial de fotos. Solo conserva una página y
 
 ## Paginación, reintento e idempotencia
 
-| Riesgo                  | Política                                                                                                                                       |
-| ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
-| Listas grandes          | Cursor y cola de carpetas persistidos por `SyncRun`; una reentrega continúa desde la última página confirmada.                                 |
-| Saturación              | `SYNC_ITEM_CONCURRENCY` (5 por defecto, 5–10) y páginas de `SYNC_PAGE_SIZE` (100 por defecto).                                                 |
-| 429/5xx                 | `Retry-After` tiene prioridad; si no existe, backoff exponencial con jitter. Drive se reintenta 3 veces y BullMQ reintenta el trabajo 3 veces. |
-| Autorización/validación | 401/403/4xx no transitorios no se reintentan; quedan `FAILED` con incidencia.                                                                  |
-| Reentrega de trabajo    | Un índice parcial único y `jobId=source:<sourceId>` permiten una sola ejecución activa por fuente.                                             |
-| Archivo desaparecido    | Solo un `SUCCEEDED` completo marca `MISSING` por `lastSeenSyncRunId`; no borra filas, Takeout ni overrides.                                    |
-| Permiso denegado        | Marca foto/fuente según alcance, registra incidencia y no intenta el resto de recursos fuera de la fuente.                                     |
+| Riesgo                  | Política                                                                                                                                                                                                                                                                                                              |
+| ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Listas grandes          | Cursor y cola de carpetas persistidos por `SyncRun`; una reentrega continúa desde la última página confirmada.                                                                                                                                                                                                        |
+| Saturación              | `SYNC_ITEM_CONCURRENCY` (5 por defecto, 5–10) y páginas de `SYNC_PAGE_SIZE` (100 por defecto).                                                                                                                                                                                                                        |
+| 429/5xx                 | `Retry-After` tiene prioridad; si no existe, backoff exponencial con jitter. Drive se reintenta 3 veces y el planificador reintenta el run hasta 3 veces (`attempts`, `nextAttemptAt`) antes de marcarlo `FAILED`. Un run `RUNNING` sin actividad durante 10 minutos vuelve a `QUEUED` y reanuda desde su checkpoint. |
+| Autorización/validación | 401/403/4xx no transitorios no se reintentan; quedan `FAILED` con incidencia.                                                                                                                                                                                                                                         |
+| Reentrega de trabajo    | Un índice parcial único y `jobId=source:<sourceId>` permiten una sola ejecución activa por fuente.                                                                                                                                                                                                                    |
+| Archivo desaparecido    | Solo un `SUCCEEDED` completo marca `MISSING` por `lastSeenSyncRunId`; no borra filas, Takeout ni overrides.                                                                                                                                                                                                           |
+| Permiso denegado        | Marca foto/fuente según alcance, registra incidencia y no intenta el resto de recursos fuera de la fuente.                                                                                                                                                                                                            |
 
 ## PhotoDateResolver
 
@@ -68,3 +68,7 @@ El backend calcula `effectiveDateValue` y `effectiveDatePrecision` a partir del 
 - Prueba de repetición del mismo trabajo sin duplicados.
 - Pruebas de checkpoint, reintentos transitorios, exclusión por fuente, reconciliación segura y movimiento por `driveFileId`.
 - Prueba de autorización: un usuario no obtiene ni media ni estado de otra persona.
+
+## Measured cost (RF-8)
+
+`apps/api/test/sync-benchmark.spec.ts` (opt-in, needs a real PostgreSQL) indexes 2000 photos in pages of 100 with the in-memory Drive. On a local PostgreSQL 16: the first scan took about 2.6 s (≈6 queries per photo) and a rescan of unchanged files about 3.1 s (≈8 per photo), i.e. roughly 1.5 ms per photo, so 50 000 photos is a matter of a couple of minutes, not hours. Batching the per-photo work (the original RF-8 idea) would remove queries but is unsafe while a page's items run concurrently and can share a content key, so it is not planned. Real scans are bounded by Drive's API latency, not by PostgreSQL.

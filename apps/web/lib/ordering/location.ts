@@ -43,30 +43,6 @@ export function orderLocationSearch(location: OrderLocation) {
   return text ? `?${text}` : '';
 }
 
-type RawParams = Record<string, string | string[] | undefined>;
-const first = (value: string | string[] | undefined) => (Array.isArray(value) ? value[0] : value);
-
-/** Where the old /organizar address goes: the same source and folder, and "undated" if it asked. */
-export function legacyOrganizarHref(params: RawParams) {
-  const location: OrderLocation = {
-    sourceId: first(params.source) || null,
-    folderId: first(params.folder) || null,
-    pile: first(params.filter) === 'undated' ? 'undated' : pileFrom(first(params.pile) ?? null),
-    includeSubfolders: true,
-  };
-  return `/ordenar${orderLocationSearch(location)}`;
-}
-
-/** /settings keeps every parameter (the Drive consent returns there with `?oauth=`). */
-export function legacySettingsHref(params: RawParams) {
-  const next = new URLSearchParams();
-  for (const [key, value] of Object.entries(params))
-    for (const item of Array.isArray(value) ? value : value === undefined ? [] : [value])
-      next.append(key, item);
-  const text = next.toString();
-  return `/ajustes${text ? `?${text}` : ''}`;
-}
-
 /** The pile to open first: the first one that still has work, so the screen never starts empty. */
 export function defaultPile(counts: Record<Pile, number> & { total?: number }): Pile {
   return PILES.find((pile) => pile !== 'hidden' && counts[pile] > 0) ?? 'dated';

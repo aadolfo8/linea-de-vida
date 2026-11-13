@@ -1,8 +1,10 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
-import { isUnauthenticated, type Source } from '../../lib/api';
+import { useQueries, useQuery } from '@tanstack/react-query';
+import { useCallback, useEffect } from 'react';
+import type { Source } from '../../lib/api';
 import { notifyArchiveIndexUpdated } from '../../lib/archive-index-events';
+import { queryClient } from '../../lib/query-client';
 import { sourcesApi } from '../../lib/sources/client';
 import { apiErrorCopy } from '../../lib/sources/errors';
 import {
@@ -18,123 +20,116 @@ export type SourceView = {
   counts: SourceCounts | null;
 };
 
+const SOURCES_KEY = ['sources'] as const;
+
+async function loadViews(): Promise<SourceView[]> {
+  const { items } = await sourcesApi.list();
+  return Promise.all(
+    items.map(async (source): Promise<SourceView> => {
+      const [run, counts] = await Promise.allSettled([
+        sourcesApi.latestRun(source.id),
+        sourcesApi.counts(source.id),
+      ]);
+      return {
+        source,
+        run: run.status === 'fulfilled' ? run.value : null,
+        counts: counts.status === 'fulfilled' ? countsFromPiles(counts.value) : null,
+      };
+    }),
+  );
+}
+
+/** Edits the cached list in place: every change to a card goes through here. */
+const editViews = (change: (views: SourceView[]) => SourceView[]) =>
+  queryClient.setQueryData<SourceView[]>(SOURCES_KEY, (current) =>
+    current ? change(current) : current,
+  );
+
+const patch = (sourceId: string, change: (view: SourceView) => SourceView) =>
+  editViews((views) => views.map((view) => (view.source.id === sourceId ? change(view) : view)));
+
 /**
  * The sources of the archive with their latest reading and their numbers. While a reading is
- * under way it asks for its progress every `pollMs`, and when it ends it refreshes the numbers
- * and tells the rest of the app that the archive changed.
+ * under way each one is polled every `pollMs`, and when it ends the numbers are refreshed and the
+ * rest of the app is told that the archive changed.
  */
 export function useSources({ pollMs = 2500 }: { pollMs?: number } = {}) {
-  const [state, setState] = useState<'loading' | 'ready' | 'error'>('loading');
-  const [views, setViews] = useState<SourceView[]>([]);
-  const [tick, setTick] = useState(0);
-
-  const patch = useCallback(
-    (sourceId: string, change: (view: SourceView) => SourceView) =>
-      setViews((current) =>
-        current.map((view) => (view.source.id === sourceId ? change(view) : view)),
-      ),
-    [],
+  const query = useQuery(
+    { queryKey: SOURCES_KEY, queryFn: loadViews, staleTime: 0, gcTime: 0 },
+    queryClient,
   );
+  const views = query.data ?? [];
+  const state: 'loading' | 'ready' | 'error' = query.isError
+    ? 'error'
+    : query.data
+      ? 'ready'
+      : 'loading';
 
-  const refreshCounts = useCallback(
-    async (sourceId: string) => {
-      try {
-        const counts = countsFromPiles(await sourcesApi.counts(sourceId));
-        patch(sourceId, (view) => ({ ...view, counts }));
-      } catch {
-        // The card keeps its last numbers; the next refresh tries again.
-      }
-    },
-    [patch],
-  );
-
-  const load = useCallback(async () => {
+  const refreshCounts = useCallback(async (sourceId: string) => {
     try {
-      const { items } = await sourcesApi.list();
-      const loaded = await Promise.all(
-        items.map(async (source): Promise<SourceView> => {
-          const [run, counts] = await Promise.allSettled([
-            sourcesApi.latestRun(source.id),
-            sourcesApi.counts(source.id),
-          ]);
-          return {
-            source,
-            run: run.status === 'fulfilled' ? run.value : null,
-            counts: counts.status === 'fulfilled' ? countsFromPiles(counts.value) : null,
-          };
-        }),
-      );
-      setViews(loaded);
-      setState('ready');
-    } catch (error) {
-      if (isUnauthenticated(error)) window.location.replace('/');
-      setState('error');
+      const counts = countsFromPiles(await sourcesApi.counts(sourceId));
+      patch(sourceId, (view) => ({ ...view, counts }));
+    } catch {
+      // The card keeps its last numbers; the next refresh tries again.
     }
   }, []);
 
+  // One polled query per reading under way; a missed poll is not an error, the next one reports.
+  const active = views.filter((view) => isSyncActive(view.run));
+  const polls = useQueries(
+    {
+      queries: active.map((view) => ({
+        queryKey: ['sync-run', view.run!.id],
+        queryFn: () => sourcesApi.run(view.run!.id),
+        refetchInterval: pollMs,
+        staleTime: 0,
+        gcTime: 0,
+      })),
+    },
+    queryClient,
+  );
+  const stamp = polls.map((poll) => poll.dataUpdatedAt).join(',');
   useEffect(() => {
-    void load();
-  }, [load]);
-
-  // Poll the readings that are under way; the effect restarts whenever the set of them changes.
-  const activeKey = views
-    .filter((view) => isSyncActive(view.run))
-    .map((view) => `${view.source.id}:${view.run!.id}`)
-    .join(',');
-  useEffect(() => {
-    if (!activeKey) return;
-    let cancelled = false;
-    const timer = window.setTimeout(async () => {
-      for (const entry of activeKey.split(',')) {
-        const [sourceId, runId] = entry.split(':') as [string, string];
-        try {
-          const run = await sourcesApi.run(runId);
-          if (cancelled) return;
-          patch(sourceId, (view) => ({ ...view, run }));
-          if (!isSyncActive(run)) {
-            notifyArchiveIndexUpdated();
-            void refreshCounts(sourceId);
-          }
-        } catch {
-          // A missed poll is not an error: the next one will report.
-        }
+    active.forEach((view, index) => {
+      const run = polls[index]?.data;
+      if (!run || run === view.run) return;
+      patch(view.source.id, (current) => ({ ...current, run }));
+      if (!isSyncActive(run)) {
+        notifyArchiveIndexUpdated();
+        void refreshCounts(view.source.id);
       }
-      if (!cancelled) setTick((value) => value + 1);
-    }, pollMs);
-    return () => {
-      cancelled = true;
-      window.clearTimeout(timer);
-    };
-    // `tick` re-arms the timer after every round, whether or not the poll changed anything.
-  }, [activeKey, tick, pollMs, patch, refreshCounts]);
+    });
+    // `stamp` changes exactly when a poll brings new data.
+  }, [stamp]);
 
   /** Starts a reading; resolves to an error message, or `null` when it was queued. */
-  const startSync = useCallback(
-    async (sourceId: string): Promise<string | null> => {
-      try {
-        const run = await sourcesApi.startSync(sourceId);
-        patch(sourceId, (view) => ({ ...view, run }));
-        return null;
-      } catch (error) {
-        return apiErrorCopy(
-          error,
-          'No pudimos empezar a buscar fotos nuevas. Comprueba la conexión e inténtalo de nuevo.',
-        );
-      }
-    },
-    [patch],
-  );
+  const startSync = useCallback(async (sourceId: string): Promise<string | null> => {
+    try {
+      const run = await sourcesApi.startSync(sourceId);
+      patch(sourceId, (view) => ({ ...view, run }));
+      return null;
+    } catch (error) {
+      return apiErrorCopy(
+        error,
+        'No pudimos empezar a buscar fotos nuevas. Comprueba la conexión e inténtalo de nuevo.',
+      );
+    }
+  }, []);
 
   const add = useCallback((source: Source, run: SyncRun | null) => {
-    setViews((current) => [
+    editViews((current) => [
       { source, run, counts: null },
       ...current.filter((view) => view.source.id !== source.id),
     ]);
   }, []);
 
   const remove = useCallback((sourceId: string) => {
-    setViews((current) => current.filter((view) => view.source.id !== sourceId));
+    editViews((current) => current.filter((view) => view.source.id !== sourceId));
   }, []);
+
+  const load = useCallback(async () => {
+    await query.refetch();
+  }, [query]);
 
   return { state, views, load, startSync, add, remove, refreshCounts };
 }

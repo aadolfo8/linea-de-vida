@@ -6,5 +6,6 @@ export default defineConfig({
   },
   test: {
     css: true,
+    setupFiles: ['./vitest.setup.ts'],
   },
 });

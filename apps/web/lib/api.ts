@@ -1,4 +1,5 @@
-export const api = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001/v1';
+/** Same origin by default: Next forwards `/v1` to the API in development and the proxy does in production. */
+export const api = process.env.NEXT_PUBLIC_API_URL ?? '/v1';
 
 export async function apiCall(path: string, init?: RequestInit) {
   return fetch(`${api}${path}`, { credentials: 'include', ...init });
@@ -82,38 +83,5 @@ export const settingsEndpoint = {
   removeSource: (sourceId: string) => `/photo-sources/${encodeURIComponent(sourceId)}`,
   sync: (sourceId: string) => `/photo-sources/${sourceId}/sync-runs`,
   run: (runId: string) => `/sync-runs/${runId}`,
-  issues: (runId: string, cursor?: string) =>
-    `/sync-runs/${runId}/issues?limit=30${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`,
-  history: (sourceId: string, cursor?: string) =>
-    `/photo-sources/${sourceId}/sync-runs?limit=20${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`,
-  indexedFolders: (sourceId: string, cursor?: string) =>
-    `/photo-sources/${sourceId}/indexed-folders?limit=100${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`,
-  classificationSummary: (sourceId: string) => `/photo-sources/${sourceId}/classification-summary`,
-  pendingPhotos: (sourceId: string, cursor?: string) =>
-    `/photo-sources/${sourceId}/pending-photos?limit=30${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`,
-  sourceIssues: (sourceId: string, cursor?: string) =>
-    `/photo-sources/${encodeURIComponent(sourceId)}/issues?limit=30${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`,
-  sourcePhotos: (
-    sourceId: string,
-    options: { query?: string; folderId?: string; classification?: string; cursor?: string } = {},
-  ) => {
-    const params = new URLSearchParams({ limit: '30' });
-    if (options.query?.trim()) params.set('q', options.query.trim());
-    if (options.folderId) params.set('folderId', options.folderId);
-    if (options.classification && options.classification !== 'ALL')
-      params.set('classification', options.classification);
-    if (options.cursor) params.set('cursor', options.cursor);
-    return `/photo-sources/${encodeURIComponent(sourceId)}/photos?${params}`;
-  },
-  photoExclusions: (cursor?: string) =>
-    `/photo-exclusions?limit=30${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`,
-  restorePhotoExclusion: (id: string) => `/photo-exclusions/${encodeURIComponent(id)}`,
-  manualDates: '/photos/manual-date-overrides',
-  manualDatePreview: '/photos/manual-date-overrides/preview',
-  folderPhotos: (folderId: string, cursor?: string, classification?: string) =>
-    `/indexed-folders/${folderId}/photos?limit=30${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}${classification ? `&classification=${encodeURIComponent(classification)}` : ''}`,
-  folderDate: (folderId: string) => `/indexed-folders/${folderId}/date-override`,
-  folderDatePreview: (folderId: string) => `/indexed-folders/${folderId}/date-override/preview`,
-  photo: (photoId: string) => `/photos/${photoId}`,
   disconnect: (connectionId: string) => `/oauth-connections/${connectionId}`,
 };

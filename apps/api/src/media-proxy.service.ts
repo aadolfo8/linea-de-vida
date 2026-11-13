@@ -1,6 +1,8 @@
 import {
   GoneException,
+  Inject,
   Injectable,
+  Optional,
   BadRequestException,
   NotFoundException,
   ServiceUnavailableException,
@@ -13,6 +15,7 @@ import sharp from 'sharp';
 import { Request, Response } from 'express';
 import { DriveAdapter, DriveRequestError } from './drive';
 import { PrismaService } from './prisma.service';
+import { ThumbnailStore } from './thumbnail-store';
 
 const BROWSER_IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif']);
 const CONTENT_TYPES = new Set([...BROWSER_IMAGE_TYPES, 'image/heic', 'image/heif']);
@@ -33,6 +36,10 @@ const DRIVE_THUMBNAIL_OVERSAMPLE = 1.5;
 const MAX_DRIVE_THUMBNAIL_BYTES = 8 * 1024 * 1024;
 /** Thumbnails never change for a given photo copy, so browsers may keep them for a day. */
 const THUMBNAIL_CACHE_CONTROL = 'private, max-age=86400, no-transform';
+/** A width variant is a pure function of the photo's content, so its URL can be cached for good. */
+const VARIANT_CACHE_CONTROL = 'private, max-age=31536000, immutable, no-transform';
+/** Resizing is CPU work: a handful at a time keeps the API responsive while a month loads. */
+const MAX_CONCURRENT_RESIZES = 3;
 const MAX_RESIZE_INPUT_BYTES = 24 * 1024 * 1024;
 const MAX_RESIZE_INPUT_PIXELS = 80_000_000;
 type ThumbnailCacheEntry = { expiresAt: number; body: Buffer; contentType: string };
@@ -124,10 +131,28 @@ export class MediaProxyService {
     60_000,
   );
 
+  private activeResizes = 0;
+  private readonly resizeQueue: (() => void)[] = [];
+
   constructor(
-    private readonly prisma: PrismaService,
-    private readonly drive: DriveAdapter,
+    @Inject(PrismaService) private readonly prisma: PrismaService,
+    @Inject(DriveAdapter) private readonly drive: DriveAdapter,
+    @Optional()
+    @Inject(ThumbnailStore)
+    private readonly store: ThumbnailStore = new ThumbnailStore(),
   ) {}
+
+  private async limitedResize<T>(work: () => Promise<T>): Promise<T> {
+    if (this.activeResizes >= MAX_CONCURRENT_RESIZES)
+      await new Promise<void>((resolve) => this.resizeQueue.push(resolve));
+    this.activeResizes++;
+    try {
+      return await work();
+    } finally {
+      this.activeResizes--;
+      this.resizeQueue.shift()?.();
+    }
+  }
 
   async thumbnail(userId: string, photoId: string, request: Request, response: Response) {
     const photo = await this.authorize(userId, photoId);
@@ -162,9 +187,16 @@ export class MediaProxyService {
     photo: any,
     width: number,
   ) {
-    const cached = this.thumbnailCache.get(photo.id, width);
+    const etag = this.store.etag(photo.contentKey, width);
+    if (request.get?.('If-None-Match') === etag) {
+      this.variantHeaders(response, 'image/webp', etag);
+      response.status(304).end();
+      return;
+    }
+    const stored = await this.store.get(photo.userId, photo.id, photo.contentKey, width);
+    const cached = stored ?? this.thumbnailCache.get(photo.id, width);
     if (cached) {
-      this.headers(response, cached.contentType, true);
+      this.variantHeaders(response, cached.contentType, etag);
       response.end(cached.body);
       return;
     }
@@ -180,11 +212,13 @@ export class MediaProxyService {
     response.once('close', abort);
     try {
       const resize = (input: Buffer) =>
-        sharp(input, { limitInputPixels: MAX_RESIZE_INPUT_PIXELS })
-          .rotate()
-          .resize({ width, withoutEnlargement: true, fit: 'inside' })
-          .webp({ quality: 86, effort: 4 })
-          .toBuffer();
+        this.limitedResize(() =>
+          sharp(input, { limitInputPixels: MAX_RESIZE_INPUT_PIXELS })
+            .rotate()
+            .resize({ width, withoutEnlargement: true, fit: 'inside' })
+            .webp({ quality: 86, effort: 4 })
+            .toBuffer(),
+        );
       let output: Buffer | undefined;
       if (width <= DRIVE_THUMBNAIL_MAX_WIDTH) {
         try {
@@ -214,7 +248,8 @@ export class MediaProxyService {
         return;
       }
       this.thumbnailCache.set(photo.id, output, 'image/webp', width);
-      this.headers(response, 'image/webp', true);
+      void this.store.set(photo.userId, photo.id, photo.contentKey, width, output);
+      this.variantHeaders(response, 'image/webp', etag);
       response.end(output);
     } catch (error) {
       if (response.headersSent || (controller.signal.aborted && !timedOut)) return;
@@ -411,6 +446,16 @@ export class MediaProxyService {
         if (cacheable && parts.length) onComplete?.(Buffer.concat(parts), contentType);
         callback();
       },
+    });
+  }
+
+  private variantHeaders(response: Response, contentType: string, etag: string) {
+    response.set({
+      'Content-Type': contentType,
+      'Cache-Control': VARIANT_CACHE_CONTROL,
+      ETag: etag,
+      'X-Content-Type-Options': 'nosniff',
+      Vary: 'Cookie',
     });
   }
 

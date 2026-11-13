@@ -1,11 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-  defaultPile,
-  legacyOrganizarHref,
-  legacySettingsHref,
-  orderLocationSearch,
-  parseOrderLocation,
-} from './location';
+import { defaultPile, orderLocationSearch, parseOrderLocation } from './location';
 
 describe('order location', () => {
   it('reads the source, folder, pile and subfolder switch', () => {
@@ -53,24 +47,5 @@ describe('order location', () => {
       'undated',
     );
     expect(defaultPile({ undated: 0, yearOnly: 0, dated: 9, hidden: 1, total: 10 })).toBe('dated');
-  });
-});
-
-describe('legacy redirects', () => {
-  it('sends /organizar to /ordenar keeping source and folder', () => {
-    expect(legacyOrganizarHref({ source: 's1', folder: 'f1', task: 'pending' })).toBe(
-      '/ordenar?source=s1&folder=f1',
-    );
-  });
-
-  it('turns the old undated filter into the undated pile', () => {
-    expect(legacyOrganizarHref({ filter: 'undated' })).toBe('/ordenar?pile=undated');
-    expect(legacyOrganizarHref({})).toBe('/ordenar');
-  });
-
-  it('keeps every parameter of /settings, such as the Drive consent notice', () => {
-    expect(legacySettingsHref({ oauth: 'drive-connected' })).toBe('/ajustes?oauth=drive-connected');
-    expect(legacySettingsHref({})).toBe('/ajustes');
-    expect(legacySettingsHref({ a: ['1', '2'], b: undefined })).toBe('/ajustes?a=1&a=2');
   });
 });

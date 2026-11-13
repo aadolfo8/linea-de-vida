@@ -1,23 +1,25 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { Button } from '../../components/ui/button';
 import { apiJson, isUnauthenticated, type Session } from '../../lib/api';
+import { queryClient, SESSION_KEY } from '../../lib/query-client';
 
+/** The signed-in session, shared by every page: `/me` is asked once per few minutes, not per page. */
 export function useSession() {
-  const [session, setSession] = useState<Session | null>(null);
-  const [state, setState] = useState<'loading' | 'ready' | 'signed-out' | 'error'>('loading');
-  const load = () => {
-    setState('loading');
-    apiJson<Session>('/me')
-      .then((data) => {
-        setSession(data);
-        setState('ready');
-      })
-      .catch((error) => setState(isUnauthenticated(error) ? 'signed-out' : 'error'));
-  };
-  useEffect(load, []);
-  return { session, state, retry: load };
+  const query = useQuery(
+    { queryKey: SESSION_KEY, queryFn: () => apiJson<Session>('/me') },
+    queryClient,
+  );
+  const state: 'loading' | 'ready' | 'signed-out' | 'error' = query.isError
+    ? isUnauthenticated(query.error)
+      ? 'signed-out'
+      : 'error'
+    : query.data
+      ? 'ready'
+      : 'loading';
+  return { session: query.data ?? null, state, retry: () => void query.refetch() };
 }
 
 export function ProtectedSurface({

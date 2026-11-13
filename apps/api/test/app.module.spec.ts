@@ -4,6 +4,8 @@ import { describe, expect, it } from 'vitest';
 import { AppModule } from '../src/app.module';
 import { PrismaService } from '../src/prisma.service';
 import { SyncService } from '../src/sync.service';
+import { MediaProxyService } from '../src/media-proxy.service';
+import { ThumbnailStore } from '../src/thumbnail-store';
 import { TakeoutMatcher, TakeoutMetadataParser } from '../src/takeout';
 
 describe('AppModule dependency graph', () => {
@@ -16,6 +18,10 @@ describe('AppModule dependency graph', () => {
     expect(module.get(SyncService)).toBeInstanceOf(SyncService);
     expect(module.get(TakeoutMetadataParser)).toBeInstanceOf(TakeoutMetadataParser);
     expect(module.get(TakeoutMatcher)).toBeInstanceOf(TakeoutMatcher);
+
+    // Providers with a defaulted constructor argument still need to be registered for Nest.
+    expect(module.get(MediaProxyService)).toBeInstanceOf(MediaProxyService);
+    expect(module.get(ThumbnailStore)).toBeInstanceOf(ThumbnailStore);
 
     await module.close();
   });
