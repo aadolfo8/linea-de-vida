@@ -1,5 +1,3 @@
-'use client';
-
 import './constellation.css';
 
 const SKELETON = {

@@ -1,5 +1,3 @@
-'use client';
-
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { getCachedGallery, loadGalleryPage } from '../timeline-cache';
 import type { TimelineMonth, TimelinePhoto, TimelinePhotoPage } from '../timeline-model';

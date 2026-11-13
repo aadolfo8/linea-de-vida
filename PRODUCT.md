@@ -20,7 +20,7 @@ It integrates Google Drive in read-only mode and works only with folders that ea
 
 ## Operating Context
 
-It is a web monorepo using Next.js, NestJS, and PostgreSQL. Each user authorizes and accesses their own photo archive.
+It is a web monorepo using React (Vite), NestJS, and PostgreSQL. Each user authorizes and accesses their own photo archive.
 
 ## Capabilities and Constraints
 

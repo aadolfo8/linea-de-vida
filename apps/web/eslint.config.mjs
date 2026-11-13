@@ -1,15 +1,16 @@
 import js from '@eslint/js';
 import { globalIgnores } from 'eslint/config';
-import nextPlugin from '@next/eslint-plugin-next';
+import reactHooks from 'eslint-plugin-react-hooks';
 import tseslint from 'typescript-eslint';
 
 export default [
-  globalIgnores(['.next/**', 'next-env.d.ts'], 'Ignore Next.js generated files'),
+  globalIgnores(['dist/**', 'dev-dist/**'], 'Ignore build output'),
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {
-    plugins: { '@next/next': nextPlugin },
-    settings: { next: { rootDir: ['.'] } },
-    rules: { ...nextPlugin.configs.recommended.rules },
+    plugins: { 'react-hooks': reactHooks },
+    rules: {
+      'react-hooks/rules-of-hooks': 'error',
+    },
   },
 ];

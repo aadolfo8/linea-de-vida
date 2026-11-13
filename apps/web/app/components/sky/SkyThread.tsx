@@ -1,5 +1,3 @@
-'use client';
-
 import { useCallback, useLayoutEffect, useRef, useState } from 'react';
 import { compactHeaderGeometry, periodHeaderGeometry } from './constellation-layout';
 import { clamp } from './rng';

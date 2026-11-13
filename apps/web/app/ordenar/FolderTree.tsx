@@ -1,5 +1,3 @@
-'use client';
-
 import { CalendarCheck, ChevronRight } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import { ruleShortLabel } from '../../lib/ordering/dates';

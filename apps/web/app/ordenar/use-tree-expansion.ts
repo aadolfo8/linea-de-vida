@@ -1,5 +1,3 @@
-'use client';
-
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { initialExpanded, pathToFolder } from '../../lib/ordering/tree';
 import type { FolderTree } from '../../lib/ordering/types';

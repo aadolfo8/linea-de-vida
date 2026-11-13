@@ -1,5 +1,3 @@
-'use client';
-
 import { useState } from 'react';
 import { apiErrorCopy } from '../../lib/sources/errors';
 import { startDriveConnection } from '../../lib/sources/connect';

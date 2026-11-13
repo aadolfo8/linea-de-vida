@@ -1,5 +1,3 @@
-'use client';
-
 import { Check, Maximize2 } from 'lucide-react';
 import { useEffect, useRef, type MouseEvent } from 'react';
 import { api } from '../../lib/api';
@@ -41,7 +39,6 @@ function PhotoTile({
         onClick={(event) => onToggle(photo.id, event)}
         onDoubleClick={() => onPeek(photo.id)}
       >
-        {/* eslint-disable-next-line @next/next/no-img-element -- private proxy URLs, sized by the API */}
         <img
           src={thumbnailVariantUrl(api, photo.thumbnailUrl, 640)}
           alt=""

@@ -1,5 +1,3 @@
-'use client';
-
 import { SkyToast, type SkyToastProps } from './SkyToast';
 
 export type ToastData = Pick<SkyToastProps, 'message' | 'tone' | 'link'> & {

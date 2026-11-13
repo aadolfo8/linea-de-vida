@@ -5,14 +5,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApiError, type Session } from '../../lib/api';
 import { createFakeCovers, fakeCoverPhoto, type FakePhoto } from './fake-covers';
 
-vi.mock('next/navigation', () => ({
+vi.mock('../../lib/navigation', () => ({
   usePathname: () => '/portadas',
-  useRouter: () => ({ replace: vi.fn(), refresh: vi.fn() }),
+  useRouter: () => ({ replace: vi.fn() }),
 }));
-vi.mock('next/link', async () => {
+vi.mock('../../lib/link', async () => {
   const React = await import('react');
   return {
-    default: ({ href, children, ...props }: React.ComponentProps<'a'>) =>
+    Link: ({ href, children, ...props }: React.ComponentProps<'a'>) =>
       React.createElement('a', { href, ...props }, children),
   };
 });

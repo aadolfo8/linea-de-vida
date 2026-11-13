@@ -1,5 +1,3 @@
-'use client';
-
 import { useQueries, useQuery } from '@tanstack/react-query';
 import { useCallback, useEffect } from 'react';
 import type { Source } from '../../lib/api';

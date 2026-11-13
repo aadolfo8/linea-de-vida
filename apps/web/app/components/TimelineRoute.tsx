@@ -1,7 +1,5 @@
-'use client';
-
 import { Focus, X } from 'lucide-react';
-import { usePathname, useRouter } from 'next/navigation';
+import { usePathname, useRouter } from '../../lib/navigation';
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { ArchiveNav } from './ArchiveNav';
 import { createPinchDetector } from './pinch';
@@ -56,7 +54,6 @@ export function TimelineRoute() {
     if (!route.invalid) return;
     router.replace(
       timelineHrefWithReturn(timelineHref({ year: route.year }), returnTo, returnLabel),
-      { scroll: false },
     );
   }, [returnLabel, returnTo, route.invalid, route.year, router]);
 

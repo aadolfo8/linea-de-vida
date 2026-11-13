@@ -11,7 +11,7 @@ const api = vi.hoisted(() => ({
   isUnauthenticated: vi.fn(),
 }));
 
-vi.mock('next/navigation', () => ({ useRouter: () => navigation }));
+vi.mock('../lib/navigation', () => ({ useRouter: () => navigation }));
 vi.mock('../lib/api', () => api);
 
 describe('Home', () => {

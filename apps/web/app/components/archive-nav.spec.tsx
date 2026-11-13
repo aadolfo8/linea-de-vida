@@ -6,17 +6,17 @@ import { ArchiveNav } from './ArchiveNav';
 import { apiJson } from '../../lib/api';
 
 const route = vi.hoisted(() => ({ pathname: '/ordenar' }));
-const navigation = vi.hoisted(() => ({ replace: vi.fn(), refresh: vi.fn() }));
+const navigation = vi.hoisted(() => ({ replace: vi.fn() }));
 
-vi.mock('next/navigation', () => ({
+vi.mock('../../lib/navigation', () => ({
   usePathname: () => route.pathname,
   useRouter: () => navigation,
 }));
 vi.mock('../../lib/api', () => ({ apiJson: vi.fn() }));
-vi.mock('next/link', async () => {
+vi.mock('../../lib/link', async () => {
   const React = await import('react');
   return {
-    default: ({ href, children, ...props }: React.ComponentProps<'a'>) =>
+    Link: ({ href, children, ...props }: React.ComponentProps<'a'>) =>
       React.createElement('a', { href, ...props }, children),
   };
 });
@@ -66,7 +66,6 @@ describe('ArchiveNav', () => {
 
     expect(apiJson).toHaveBeenCalledWith('/auth/logout', { method: 'POST' });
     expect(navigation.replace).toHaveBeenCalledWith('/');
-    expect(navigation.refresh).toHaveBeenCalledOnce();
   });
 
   it('keeps the session page open and explains when logout fails', async () => {

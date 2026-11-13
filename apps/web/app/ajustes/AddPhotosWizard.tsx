@@ -1,7 +1,5 @@
-'use client';
-
 import { FolderOpen, Images } from 'lucide-react';
-import Link from 'next/link';
+import { Link } from '../../lib/link';
 import { useId, useRef, useState } from 'react';
 import type { Source } from '../../lib/api';
 import { driveFolderIdFromInput } from '../../lib/drive-folder';

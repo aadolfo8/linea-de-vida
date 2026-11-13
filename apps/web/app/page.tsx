@@ -1,8 +1,6 @@
-'use client';
-
 import { useEffect, useRef, useState } from 'react';
 import { useReducedMotion } from '../lib/use-reduced-motion';
-import { useRouter } from 'next/navigation';
+import { useRouter } from '../lib/navigation';
 import { apiCall, apiJson, isUnauthenticated, type Session } from '../lib/api';
 import { useStarfield } from './components/sky/use-starfield';
 import './components/sky/sky.css';

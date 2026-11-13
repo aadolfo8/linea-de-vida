@@ -1,5 +1,3 @@
-'use client';
-
 /** "Select all loaded" and, when more of the pile is still on the server, "select the whole pile". */
 export function SelectionTools({
   loadedCount,

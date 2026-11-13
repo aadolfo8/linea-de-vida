@@ -1,6 +1,4 @@
-'use client';
-
-import { useRouter } from 'next/navigation';
+import { useRouter } from '../../../lib/navigation';
 import { useCallback, useEffect, useLayoutEffect, useRef } from 'react';
 import { hideOpening, showOpening, showOpeningFailed } from './opening-indicator';
 import { activeSkyStage } from './sky-registry';
@@ -90,7 +88,7 @@ export function useTravel(): TravelTo {
             const { keyframes, options } = travelAnimation('exit', mode);
             await world.animate(keyframes, options).finished.catch(() => undefined);
           }
-          router.push(href, { scroll: false });
+          router.push(href);
           pushed = true;
         } catch {
           restore();

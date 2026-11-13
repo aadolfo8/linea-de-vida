@@ -10,10 +10,10 @@ import { SkyEngine } from './sky-engine';
 import { SkyRail } from './SkyRail';
 import { SkyStage, useSky, useSkyItem } from './SkyStage';
 
-vi.mock('next/link', async () => {
+vi.mock('../../../lib/link', async () => {
   const React = await import('react');
   return {
-    default: ({ href, children, ...props }: React.ComponentProps<'a'>) =>
+    Link: ({ href, children, ...props }: React.ComponentProps<'a'>) =>
       React.createElement('a', { href: String(href), ...props }, children),
   };
 });
@@ -274,11 +274,11 @@ describe('sky chrome', () => {
 
   it('ignores the small height changes of a mobile URL bar but not width or big changes', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
-    const coarse = vi
-      .spyOn(window, 'matchMedia')
-      .mockImplementation(
-        (query: string) => ({ matches: query === '(pointer: coarse)' }) as MediaQueryList,
-      );
+    // jsdom has no `matchMedia`, so it is stubbed rather than spied on.
+    vi.stubGlobal(
+      'matchMedia',
+      (query: string) => ({ matches: query === '(pointer: coarse)' }) as MediaQueryList,
+    );
     vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(null);
     const configure = vi.spyOn(SkyEngine.prototype, 'configure');
     const resizeTo = async (width: number, height: number) => {
@@ -306,7 +306,7 @@ describe('sky chrome', () => {
     const rotated = configure.mock.calls.length;
     await resizeTo(800, 200);
     expect(configure.mock.calls.length).toBeGreaterThan(rotated);
-    coarse.mockRestore();
+    vi.unstubAllGlobals();
     vi.useRealTimers();
   });
 });

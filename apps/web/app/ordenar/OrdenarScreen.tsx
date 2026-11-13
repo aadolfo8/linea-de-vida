@@ -1,7 +1,5 @@
-'use client';
-
 import { useReducedMotion } from '../../lib/use-reduced-motion';
-import Link from 'next/link';
+import { Link } from '../../lib/link';
 import { useMemo, useState } from 'react';
 import { activeDriveConnection, type Session } from '../../lib/api';
 import { emptyCopy, headline, pileCopy } from '../../lib/ordering/copy';

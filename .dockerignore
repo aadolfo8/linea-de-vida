@@ -3,7 +3,6 @@
 .codegraph
 node_modules
 apps/*/node_modules
-apps/*/.next
 apps/*/dist
 .env
 .env.*

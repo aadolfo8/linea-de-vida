@@ -64,3 +64,9 @@ jobs:
 
       - name: Build
         run: pnpm build
+
+      - name: Verify the static web build is an installable PWA
+        run: |
+          for file in index.html sw.js manifest.webmanifest; do
+            test -s "apps/web/dist/$file" || { echo "::error::apps/web/dist/$file is missing"; exit 1; }
+          done

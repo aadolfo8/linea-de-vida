@@ -2,15 +2,15 @@ import { TimelineRoute } from '../components/TimelineRoute';
 import { TimelineFocusProvider } from '../components/TimelineFocus';
 
 /**
- * The timeline shell lives in the layout so it survives navigation between depths: the sky,
- * the session and the travel transition all continue while the pages below only pick the route.
+ * The one route for every depth of the timeline (`/timeline/*`), so the shell survives navigation
+ * between depths: the sky, the session and the travel transition all continue while
+ * `TimelineRoute` reads the pathname and picks what to show.
  */
-export default function TimelineLayout({ children }: { children: React.ReactNode }) {
+export default function TimelineLayout() {
   return (
     <div className="sky-scope">
       <TimelineFocusProvider>
         <TimelineRoute />
-        {children}
       </TimelineFocusProvider>
     </div>
   );

@@ -1,6 +1,4 @@
-'use client';
-
-import Link from 'next/link';
+import { Link } from '../../lib/link';
 import type { ReactNode } from 'react';
 import { ArchiveNav } from './ArchiveNav';
 import './sky/sky.css';

@@ -11,7 +11,7 @@ import { useTravel, useTravelEntry, type TravelTo } from './use-travel';
 const env = vi.hoisted(() => ({ reduced: false }));
 const navigation = vi.hoisted(() => ({ push: vi.fn() }));
 
-vi.mock('next/navigation', () => ({ useRouter: () => navigation }));
+vi.mock('../../../lib/navigation', () => ({ useRouter: () => navigation }));
 vi.mock('../../../lib/use-reduced-motion', () => ({ useReducedMotion: () => env.reduced }));
 
 const frame = () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
@@ -77,7 +77,7 @@ describe('useTravel', () => {
       origin: { x: 130, y: 50 },
       landKey: null,
     });
-    expect(navigation.push).toHaveBeenCalledExactlyOnceWith('/timeline/2004', { scroll: false });
+    expect(navigation.push).toHaveBeenCalledExactlyOnceWith('/timeline/2004');
   });
 
   it('remembers the group to land on when travelling out', async () => {
@@ -235,7 +235,7 @@ describe('useTravel', () => {
       expect(stage.engine.busy).toBe(false);
 
       await act(async () => travel('/timeline/2005', 'in', null, null));
-      expect(navigation.push).toHaveBeenCalledExactlyOnceWith('/timeline/2005', { scroll: false });
+      expect(navigation.push).toHaveBeenCalledExactlyOnceWith('/timeline/2005');
       stage.unregister();
     });
   });
@@ -253,7 +253,7 @@ describe('useTravel', () => {
     expect(navigation.push).not.toHaveBeenCalled();
 
     await act(async () => release());
-    expect(navigation.push).toHaveBeenCalledExactlyOnceWith('/timeline/2004', { scroll: false });
+    expect(navigation.push).toHaveBeenCalledExactlyOnceWith('/timeline/2004');
     stage.unregister();
   });
 });

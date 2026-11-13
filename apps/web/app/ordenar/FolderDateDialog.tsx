@@ -1,5 +1,3 @@
-'use client';
-
 import { orderingApi } from '../../lib/ordering/client';
 import { draftFromStored, draftToPayload } from '../../lib/ordering/dates';
 import type { DateDraft, FolderDateRule, FolderDetail } from '../../lib/ordering/types';

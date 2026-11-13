@@ -1,6 +1,4 @@
-'use client';
-
-import { useRouter } from 'next/navigation';
+import { useRouter } from '../../../lib/navigation';
 import {
   memo,
   useCallback,
@@ -117,9 +115,7 @@ export function MonthDepth({
   // A period without photos is not a destination: send people back up to the year.
   useEffect(() => {
     if (!empty) return;
-    router.replace(timelineHrefWithReturn(timelineHref({ year }), returnTo, returnLabel), {
-      scroll: false,
-    });
+    router.replace(timelineHrefWithReturn(timelineHref({ year }), returnTo, returnLabel));
   }, [empty, returnLabel, returnTo, router, year]);
 
   useTravelEntry({
@@ -443,7 +439,6 @@ const PhotoTile = memo(function PhotoTile({
       style={{ left, top, width, height }}
       onClick={() => onOpen(photo.id)}
     >
-      {/* eslint-disable-next-line @next/next/no-img-element -- Private media URLs rely on the browser's session cookies. */}
       <img
         src={small}
         srcSet={`${small} 640w, ${large} 1280w`}

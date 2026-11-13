@@ -5,7 +5,7 @@
 <br>
 
 [![CI](https://github.com/aadolfo8/linea-de-vida/actions/workflows/ci.yml/badge.svg)](https://github.com/aadolfo8/linea-de-vida/actions/workflows/ci.yml)
-![Next.js 15](https://img.shields.io/badge/Next.js-15-0b0f1a?style=flat-square&logo=nextdotjs&logoColor=cfe0ff)
+![Vite 8](https://img.shields.io/badge/Vite-8-0b0f1a?style=flat-square&logo=vite&logoColor=cfe0ff)
 ![React 19](https://img.shields.io/badge/React-19-0b0f1a?style=flat-square&logo=react&logoColor=cfe0ff)
 ![NestJS](https://img.shields.io/badge/NestJS-11-0b0f1a?style=flat-square&logo=nestjs&logoColor=cfe0ff)
 ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-Prisma-0b0f1a?style=flat-square&logo=postgresql&logoColor=cfe0ff)
@@ -138,7 +138,7 @@ duplica: **la identidad de una foto es su contenido**, no el archivo.
 
 ```mermaid
 flowchart LR
-    U([Navegador]) --> W["apps/web<br/>Next.js"]
+    U([Navegador]) --> W["apps/web<br/>React + Vite (PWA estática)"]
     W -- "REST + cookie de sesión" --> A["apps/api<br/>NestJS"]
     A --> P[("PostgreSQL<br/>Prisma")]
     A -- "proxy de medios" --> G[["Google Drive<br/>solo lectura"]]
@@ -157,7 +157,7 @@ flowchart LR
 
 | Decisión                         | Por qué                                                                                                                                                                                                      |
 | -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **NestJS separado de Next.js**   | Los secretos de Google, el cifrado y la autorización por recurso viven fuera del navegador y del servidor de la web. La web solo habla REST con una cookie.                                                  |
+| **NestJS separado de la web**    | Los secretos de Google, el cifrado y la autorización por recurso viven fuera del navegador y del servidor de la web. La web solo habla REST con una cookie.                                                  |
 | **PostgreSQL + Prisma**          | Fotos, copias, carpetas, correcciones y portadas son relacionales. La fecha efectiva es una proyección transaccional de detección o corrección, con índices para la cronología.                              |
 | **`SyncRun` como cola**          | Un escaneo de miles de fotos no cabe en una petición HTTP. La fila `SyncRun` es el trabajo (con checkpoint y reintentos) y un planificador en la API la toma con `SKIP LOCKED`. Sin Redis ni proceso aparte. |
 | **Identidad por contenido**      | `md5:<hash>:<tamaño>` único por usuario. La misma foto en dos carpetas o en dos exportaciones de Takeout es una foto con dos copias, no dos fotos.                                                           |
@@ -177,7 +177,7 @@ apps/
     src/media-proxy.service.ts   miniaturas y originales autorizados
     src/sync-scheduler.ts  toma los SyncRun en cola, reintenta y purga
     prisma/                esquema y migraciones
-  web/                   Next.js App Router · React 19 · Tailwind
+  web/                   React 19 · Vite · React Router · Tailwind · PWA
     app/timeline/          las tres profundidades del cielo
     app/ordenar/           el escritorio para fechar y ocultar
     app/portadas/          elegir las fotos de cada constelación
