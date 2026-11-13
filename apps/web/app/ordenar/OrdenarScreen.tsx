@@ -2,34 +2,27 @@
 
 import { useReducedMotion } from '../../lib/use-reduced-motion';
 import Link from 'next/link';
-import { useMemo, useRef, useState } from 'react';
-import { activeDriveConnection, api, type Session } from '../../lib/api';
-import { notifyArchiveIndexUpdated } from '../../lib/archive-index-events';
+import { useMemo, useState } from 'react';
+import { activeDriveConnection, type Session } from '../../lib/api';
 import { emptyCopy, headline, pileCopy } from '../../lib/ordering/copy';
-import { draftFromStored, draftToPayload } from '../../lib/ordering/dates';
 import { photoCountLabel } from '../components/timeline-model';
 import { withManualDate } from '../../lib/ordering/results';
 import { findFolder } from '../../lib/ordering/tree';
-import type { DateDraft, OrderingPhoto, Pile } from '../../lib/ordering/types';
-import { thumbnailVariantUrl } from '../../lib/media';
+import type { OrderingPhoto, Pile } from '../../lib/ordering/types';
 import { DriveBanner } from '../components/DriveBanner';
 import { SkyPage } from '../components/SkyPage';
 import { ToastHost } from '../components/ToastHost';
-import { DateSheet } from './DateSheet';
+import { OrderingDialogs, type Dialog } from './OrderingDialogs';
 import { GridSkeleton, LoadMore, PhotoGrid } from './PhotoGrid';
 import { ActionBar, FolderBar, Peek, SuggestionBanner } from './Panels';
-import { QuickMode, type QuickResult } from './QuickMode';
 import { Sidebar } from './Sidebar';
 import { usePhotoSelection } from './use-photo-selection';
 import { useTreeExpansion } from './use-tree-expansion';
-import { FolderDateDialog } from './FolderDateDialog';
 import { SelectionTools } from './SelectionTools';
 import { RetryAlert } from '../components/RetryAlert';
 import { useOrderingActions } from './use-ordering-actions';
 import { useOrderingData } from './use-ordering-data';
 import './ordenar.css';
-
-type Dialog = 'date' | 'folder' | 'quick' | null;
 
 /** Ordenar: put dates on photos in piles, by folder or in batches. */
 export function OrdenarScreen({ session }: { session: Session }) {
@@ -38,7 +31,6 @@ export function OrdenarScreen({ session }: { session: Session }) {
   const { location, list, piles, pile, tree, folder, source, suggestions } = data;
   const [dialog, setDialog] = useState<Dialog>(null);
   const [peekId, setPeekId] = useState<string | null>(null);
-  const lastYear = useRef<number | null>(null);
 
   const folderId = location?.folderId ?? null;
   const items = list.items;
@@ -55,16 +47,10 @@ export function OrdenarScreen({ session }: { session: Session }) {
         message: 'No se pudieron seleccionar todas las fotos del montón. Inténtalo de nuevo.',
       }),
   });
-  const { selected, clearSelection, selectingRest } = selection;
+  const { selected, clearSelection, selectingRest, everyLoadedSelected, selectAll } = selection;
   const actions = useOrderingActions(data, selection.removeSelected);
 
   const { expanded, toggleFolder } = useTreeExpansion(tree, folderId);
-
-  const onTile = selection.onTile;
-
-  const everyLoadedSelected = selection.everyLoadedSelected;
-  const selectAll = selection.selectAll;
-  const selectWholePile = selection.selectWholePile;
   const pileTotal = pile && piles ? piles[pile] : 0;
 
   const selectedPhotos = useMemo(
@@ -77,46 +63,13 @@ export function OrdenarScreen({ session }: { session: Session }) {
   );
   const canClear = withManualDate(selectedPhotos).length > 0;
 
-  const initialDraft = (): { year: number | null; month: number | null; day: number | null } => {
-    const only = selectedPhotos.length === 1 ? selectedPhotos[0]! : null;
-    const stored = only
-      ? draftFromStored(only.effectiveDate.value, only.effectiveDate.precision)
-      : null;
-    return stored ?? { year: lastYear.current, month: null, day: null };
-  };
-
-  const applyDate = (draft: DateDraft) => {
-    lastYear.current = draft.year;
-    setDialog(null);
-    void actions.applyDate([...selected], draft);
-  };
-
   const node = tree && folderId ? findFolder(tree.items, folderId) : null;
   const folderRule = node?.dateRule ?? folder?.dateRule ?? null;
-  const closeQuick = (summary: QuickResult) => {
-    setDialog(null);
-    if (summary.empty) {
-      actions.show({ tone: 'ok', message: 'No queda nada por fechar en esta vista.' });
-      return;
-    }
-    if (summary.dated || summary.hidden) {
-      notifyArchiveIndexUpdated();
-      data.reloadList();
-      void data.refreshCounts();
-      actions.show({
-        tone: 'ok',
-        message: `Hecho: ${photoCountLabel(summary.dated)} fechadas${summary.hidden ? ` y ${photoCountLabel(summary.hidden)} ocultas` : ''}.`,
-      });
-    }
-  };
-
   const peekIndex = peekId ? items.findIndex((item) => item.id === peekId) : -1;
   const hiddenPile = pile === 'hidden';
   const toDo = (piles?.undated ?? 0) + (piles?.yearOnly ?? 0);
   const title = folder && folderId ? folder.name : pile ? pileCopy[pile].title : '';
   const empty = pile ? emptyCopy[pile] : null;
-
-  const selectPile = (next: Pile) => data.patchLocation({ pile: next });
   const sourceName = source?.name ?? 'Tus fotos';
 
   const body = () => {
@@ -142,7 +95,7 @@ export function OrdenarScreen({ session }: { session: Session }) {
           piles={piles}
           pile={pile}
           folderSelected={Boolean(folderId)}
-          onPile={selectPile}
+          onPile={(next: Pile) => data.patchLocation({ pile: next })}
           sources={data.sources.items}
           sourceId={source.id}
           onSource={(id) => data.patchLocation({ sourceId: id, folderId: null, pile: null })}
@@ -168,7 +121,7 @@ export function OrdenarScreen({ session }: { session: Session }) {
               canSelectRest={Boolean(list.nextCursor) && pileTotal > ids.length}
               pileTotal={pileTotal}
               selectingRest={selectingRest}
-              onSelectRest={() => void selectWholePile()}
+              onSelectRest={() => void selection.selectWholePile()}
             />
           </div>
 
@@ -222,7 +175,7 @@ export function OrdenarScreen({ session }: { session: Session }) {
               photos={items}
               selected={selected}
               leaving={data.leaving}
-              onToggle={onTile}
+              onToggle={selection.onTile}
               onPeek={setPeekId}
             />
           )}
@@ -273,39 +226,16 @@ export function OrdenarScreen({ session }: { session: Session }) {
         {actions.announcement}
       </p>
 
-      {dialog === 'date' && (
-        <DateSheet
-          title={`Poner fecha a ${photoCountLabel(selected.size)}`}
-          subtitle="Basta con el año. Si sabes el mes o el día, mejor."
-          previewUrls={selectedPhotos
-            .slice(0, 12)
-            .map((photo) => thumbnailVariantUrl(api, photo.thumbnailUrl, 640))}
-          extraPhotos={Math.max(0, selected.size - 12)}
-          initial={initialDraft()}
-          applyText={`Poner a ${photoCountLabel(selected.size)}`}
-          onApply={applyDate}
-          onCancel={() => setDialog(null)}
-        />
-      )}
-      {dialog === 'folder' && folder && folderId && (
-        <FolderDateDialog
-          folder={folder}
-          folderRule={folderRule}
-          defaultIncludeSubfolders={location?.includeSubfolders ?? true}
-          fallbackYear={lastYear.current}
-          onApply={(draft, options) => {
-            lastYear.current = draft.year;
-            setDialog(null);
-            void actions.applyFolderDate(
-              { id: folder.id, name: folder.name },
-              { ...draftToPayload(draft), ...options },
-              folderRule,
-            );
-          }}
-          onCancel={() => setDialog(null)}
-        />
-      )}
-      {dialog === 'quick' && <QuickMode scope={data.scope} onClose={closeQuick} />}
+      <OrderingDialogs
+        dialog={dialog}
+        onClose={() => setDialog(null)}
+        data={data}
+        actions={actions}
+        selected={selected}
+        selectedPhotos={selectedPhotos}
+        folder={folder}
+        folderRule={folderRule}
+      />
       {peekId && peekIndex >= 0 && (
         <Peek
           photos={items}
